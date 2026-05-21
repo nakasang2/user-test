@@ -44,6 +44,9 @@ export default function InterviewRoom({
   const transcriptRef = useRef<TranscriptEntry[]>([])
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const recordedChunksRef = useRef<Blob[]>([])
+  // OpenAI TTS 用: 再生中の Audio と世代カウンタ（多重再生・キャンセル管理）
+  const currentAudioRef = useRef<HTMLAudioElement | null>(null)
+  const speakVersionRef = useRef(0)
 
   const currentQuestionIndexRef = useRef(0)
   const followUpCountRef = useRef(0)
@@ -87,19 +90,20 @@ export default function InterviewRoom({
     }
   }, [])
 
-  // ── TTS ──────────────────────────────────────────────
+  // ── TTS（OpenAI tts-1）────────────────────────────────
   const speak = useCallback((text: string, onEnd?: () => void) => {
     if (typeof window === 'undefined') return
-    window.speechSynthesis.cancel()
-    const utterance = new SpeechSynthesisUtterance(text)
-    utterance.lang = 'ja-JP'
-    utterance.rate = 0.9
-    setIsSpeaking(true)
-    utterance.onend = () => {
-      setIsSpeaking(false)
-      onEnd?.()
+
+    // 再生中の音声をキャンセル
+    if (currentAudioRef.current) {
+      currentAudioRef.current.pause()
+      currentAudioRef.current = null
     }
-    window.speechSynthesis.speak(utterance)
+    const version = ++speakVersionRef.current
+
+    setIsSpeaking(true)
+
+    // 文字起こしログへ即時追加（音声再生前に表示）
     const entry: TranscriptEntry = {
       speaker: 'Interviewer',
       text,
@@ -107,6 +111,46 @@ export default function InterviewRoom({
     }
     transcriptRef.current = [...transcriptRef.current, entry]
     setTranscript([...transcriptRef.current])
+
+    // OpenAI TTS API → mp3 再生
+    fetch('/api/tts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text }),
+    })
+      .then((res) => {
+        if (!res.ok) throw new Error(`TTS error: ${res.status}`)
+        return res.blob()
+      })
+      .then((blob) => {
+        if (version !== speakVersionRef.current) return // 後続の speak に上書きされた
+        const url = URL.createObjectURL(blob)
+        const audio = new Audio(url)
+        currentAudioRef.current = audio
+        audio.onended = () => {
+          URL.revokeObjectURL(url)
+          currentAudioRef.current = null
+          if (version !== speakVersionRef.current) return
+          setIsSpeaking(false)
+          onEnd?.()
+        }
+        audio.onerror = () => {
+          URL.revokeObjectURL(url)
+          currentAudioRef.current = null
+          if (version !== speakVersionRef.current) return
+          setIsSpeaking(false)
+          onEnd?.()
+        }
+        audio.play().catch(() => {
+          setIsSpeaking(false)
+          if (version === speakVersionRef.current) onEnd?.()
+        })
+      })
+      .catch(() => {
+        if (version !== speakVersionRef.current) return
+        setIsSpeaking(false)
+        onEnd?.() // TTS 失敗時もインタビューは続行
+      })
   }, [])
 
   // ── カメラ初期化 ─────────────────────────────────────
@@ -127,7 +171,9 @@ export default function InterviewRoom({
     initCamera()
     return () => {
       streamRef.current?.getTracks().forEach((t) => t.stop())
-      window.speechSynthesis?.cancel()
+      speakVersionRef.current++ // 再生中の speak を無効化
+      currentAudioRef.current?.pause()
+      currentAudioRef.current = null
       if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current)
       stopDetection()
       if (mediaRecorderRef.current?.state !== 'inactive') {
@@ -372,7 +418,11 @@ export default function InterviewRoom({
   // ── 手動で次へ ────────────────────────────────────────
   function manualNext() {
     if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current)
-    speechRef.current?.stop()
+    speechRef.current?.stop()    // 音声認識停止
+    speakVersionRef.current++    // 再生中の TTS をキャンセル
+    currentAudioRef.current?.pause()
+    currentAudioRef.current = null
+    setIsSpeaking(false)
     setLiveText('')
     moveToNextPlannedQuestion()
   }
