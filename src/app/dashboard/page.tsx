@@ -42,6 +42,8 @@ export default function Dashboard() {
   const [selectedInterviewId, setSelectedInterviewId] = useState<string | null>(null)
   const [activeTab, setActiveTab] = useState<'sessions' | 'interviews'>('sessions')
   const [copiedId, setCopiedId] = useState<string | null>(null)
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
+  const [deletingId, setDeletingId] = useState<string | null>(null)
 
   useEffect(() => { fetchData() }, [])
 
@@ -54,13 +56,26 @@ export default function Dashboard() {
     setSessions(sv)
   }
 
-  // Feature 2: URL再確認 — roomName からインタビューURLを生成してコピー
+  // URL コピー
   async function copyInterviewUrl(session: Session, e: React.MouseEvent) {
     e.preventDefault()
     const url = `${window.location.origin}/interview/${session.dailyRoomName}`
     await navigator.clipboard.writeText(url)
     setCopiedId(session.id)
     setTimeout(() => setCopiedId(null), 2000)
+  }
+
+  // セッション削除（Blob動画 + DB）
+  async function deleteSession(id: string, e: React.MouseEvent) {
+    e.preventDefault()
+    setDeletingId(id)
+    try {
+      await fetch(`/api/sessions/${id}`, { method: 'DELETE' })
+      setSessions((prev) => prev.filter((s) => s.id !== id))
+    } finally {
+      setDeletingId(null)
+      setConfirmDeleteId(null)
+    }
   }
 
   return (
@@ -126,7 +141,7 @@ export default function Dashboard() {
                         </div>
                       </Link>
 
-                      {/* Feature 2: URL コピーボタン（ホバーで表示 / 未完了時は常時表示） */}
+                      {/* URL コピーボタン（未完了セッションのみ） */}
                       {(s.status === 'pending' || s.status === 'active') && (
                         <button
                           onClick={(e) => copyInterviewUrl(s, e)}
@@ -134,6 +149,46 @@ export default function Dashboard() {
                         >
                           {copiedId === s.id ? '✓ コピー済み' : '🔗 URL コピー'}
                         </button>
+                      )}
+
+                      {/* 削除ボタン（完了済みセッション） */}
+                      {(s.status === 'done' || s.status === 'completed') && (
+                        confirmDeleteId === s.id ? (
+                          // 確認UI
+                          <div
+                            className="absolute top-3 right-3 flex items-center gap-1.5"
+                            onClick={(e) => e.preventDefault()}
+                          >
+                            <span className="text-xs text-gray-400">削除しますか？</span>
+                            <button
+                              onClick={(e) => deleteSession(s.id, e)}
+                              disabled={deletingId === s.id}
+                              className="bg-red-700 hover:bg-red-600 disabled:opacity-50 px-2.5 py-1 rounded-lg text-xs text-white transition-colors"
+                            >
+                              {deletingId === s.id ? '削除中...' : '削除'}
+                            </button>
+                            <button
+                              onClick={(e) => { e.preventDefault(); setConfirmDeleteId(null) }}
+                              className="bg-gray-700 hover:bg-gray-600 px-2.5 py-1 rounded-lg text-xs text-gray-300 transition-colors"
+                            >
+                              キャンセル
+                            </button>
+                          </div>
+                        ) : (
+                          // ゴミ箱アイコン
+                          <button
+                            onClick={(e) => { e.preventDefault(); setConfirmDeleteId(s.id) }}
+                            className="absolute top-3 right-3 opacity-0 group-hover:opacity-100 bg-gray-800 hover:bg-red-900 border border-gray-700 hover:border-red-700 p-1.5 rounded-lg text-gray-500 hover:text-red-400 transition-all"
+                            title="セッションを削除"
+                          >
+                            <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                              <polyline points="3 6 5 6 21 6" />
+                              <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+                              <path d="M10 11v6M14 11v6" />
+                              <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
+                            </svg>
+                          </button>
+                        )
                       )}
                     </div>
                   ))
