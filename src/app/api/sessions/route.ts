@@ -6,7 +6,7 @@ import { v4 as uuidv4 } from 'uuid'
 export async function GET() {
   const sessions = await prisma.session.findMany({
     include: {
-      interview: { select: { title: true } },
+      interview: { select: { id: true, title: true } },
       participant: true,
       transcript: { select: { id: true, summary: true } },
       _count: { select: { emotions: true } },
