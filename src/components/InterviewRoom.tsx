@@ -78,6 +78,7 @@ export default function InterviewRoom({
   const [speechSupported, setSpeechSupported] = useState<boolean | null>(null)
   const [textOnlyMode, setTextOnlyMode] = useState(false) // 非対応でも続行する場合
   const [isListening, setIsListening] = useState(false)
+  const [recordingDownloadUrl, setRecordingDownloadUrl] = useState<string | null>(null)
   // テキスト入力フォールバック用：listenForAnswer のコールバックを保持
   const onAnswerCallbackRef = useRef<((answer: string) => void) | null>(null)
 
@@ -456,14 +457,11 @@ export default function InterviewRoom({
   }
 
   async function submitResults() {
-    // 録画停止 → API 経由でサーバーにストリーミングアップロード（バックグラウンド）
+    // 録画停止 → ダウンロード用 URL を state に保存（サーバーアップロードは Vercel 4.5MB 制限のため断念）
     const recordingBlob = await stopMediaRecorder()
     if (recordingBlob.size > 0) {
-      fetch(`/api/sessions/${sessionId}/recording`, {
-        method: 'POST',
-        body: recordingBlob,
-        headers: { 'Content-Type': 'video/webm' },
-      }).catch(console.error)
+      const url = URL.createObjectURL(recordingBlob)
+      setRecordingDownloadUrl(url)
     }
 
     await fetch(`/api/sessions/${sessionId}`, {
@@ -670,7 +668,17 @@ export default function InterviewRoom({
                 <div className="text-6xl mb-6">✅</div>
                 <h2 className="text-2xl font-bold mb-3">インタビュー完了</h2>
                 <p className="text-gray-300 mb-2">ご回答いただきありがとうございました。</p>
-                <p className="text-gray-500 text-sm">このページを閉じていただいて構いません。</p>
+                {recordingDownloadUrl ? (
+                  <a
+                    href={recordingDownloadUrl}
+                    download={`interview-${sessionId.slice(0, 8)}.webm`}
+                    className="inline-block mt-4 bg-indigo-600 hover:bg-indigo-500 px-5 py-2 rounded-lg text-sm font-medium transition-colors"
+                  >
+                    📥 録画をダウンロード
+                  </a>
+                ) : (
+                  <p className="text-gray-500 text-sm mt-2">このページを閉じていただいて構いません。</p>
+                )}
               </div>
             </div>
           )}
