@@ -1,47 +1,47 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { writeFile, readFile, mkdir } from 'fs/promises'
-import { join } from 'path'
+import { handleUpload, type HandleUploadBody } from '@vercel/blob/client'
 
-const RECORDING_DIR = '/tmp/recordings'
-
-export async function POST(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+/**
+ * POST /api/sessions/[id]/recording
+ *
+ * @vercel/blob のクライアントアップロード用ハンドラ。
+ * 1. ブラウザが handleUploadUrl に clientPayload を POST → アップロード用トークンを返す
+ * 2. ブラウザが Vercel Blob へ直接アップロード
+ * 3. Vercel Blob が onUploadCompleted を呼び出す → DB に recordingUrl を保存
+ *
+ * この方式を採ることで Vercel サーバーレス関数の 4.5 MB ボディ制限を回避できる。
+ */
+export async function POST(
+  request: NextRequest,
+  props: { params: Promise<{ id: string }> },
+): Promise<NextResponse> {
   const { id } = await props.params
 
   const session = await prisma.session.findUnique({ where: { id } })
-  if (!session) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+  if (!session) return NextResponse.json({ error: 'Session not found' }, { status: 404 })
 
-  const formData = await req.formData()
-  const file = formData.get('recording') as File | null
-  if (!file) return NextResponse.json({ error: 'No recording' }, { status: 400 })
+  const body = (await request.json()) as HandleUploadBody
 
-  await mkdir(RECORDING_DIR, { recursive: true })
-  const filePath = join(RECORDING_DIR, `${id}.webm`)
-  const buffer = Buffer.from(await file.arrayBuffer())
-  await writeFile(filePath, buffer)
-
-  await prisma.session.update({
-    where: { id },
-    data: { recordingUrl: `/api/sessions/${id}/recording` },
-  })
-
-  return NextResponse.json({ ok: true, url: `/api/sessions/${id}/recording` })
-}
-
-export async function GET(req: NextRequest, props: { params: Promise<{ id: string }> }) {
-  const { id } = await props.params
-
-  const filePath = join(RECORDING_DIR, `${id}.webm`)
   try {
-    const buffer = await readFile(filePath)
-    return new Response(buffer, {
-      headers: {
-        'Content-Type': 'audio/webm',
-        'Content-Disposition': `attachment; filename="interview-${id.slice(0, 8)}.webm"`,
-        'Content-Length': String(buffer.byteLength),
+    const jsonResponse = await handleUpload({
+      body,
+      request,
+      onBeforeGenerateToken: async () => ({
+        // 全 webm 系 MIME タイプを許可（vp9/vp8 コーデック指定も含む）
+        allowedContentTypes: ['video/webm', 'audio/webm'],
+        tokenPayload: JSON.stringify({ sessionId: id }),
+      }),
+      onUploadCompleted: async ({ blob, tokenPayload }) => {
+        const { sessionId } = JSON.parse(tokenPayload ?? '{}') as { sessionId: string }
+        await prisma.session.update({
+          where: { id: sessionId },
+          data: { recordingUrl: blob.url },
+        })
       },
     })
-  } catch {
-    return NextResponse.json({ error: 'Recording not found' }, { status: 404 })
+    return NextResponse.json(jsonResponse)
+  } catch (error) {
+    return NextResponse.json({ error: (error as Error).message }, { status: 400 })
   }
 }
