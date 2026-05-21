@@ -1,0 +1,89 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Interview {
+  id          String     @id @default(cuid())
+  title       String
+  description String?
+  questions   Question[]
+  sessions    Session[]
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+}
+
+model Question {
+  id          String    @id @default(cuid())
+  text        String
+  order       Int
+  type        String    @default("open") // open | rating | nps
+  interviewId String
+  interview   Interview @relation(fields: [interviewId], references: [id], onDelete: Cascade)
+}
+
+model Participant {
+  id        String    @id @default(cuid())
+  name      String
+  email     String?
+  sessions  Session[]
+  createdAt DateTime  @default(now())
+}
+
+model Session {
+  id            String          @id @default(cuid())
+  interviewId   String
+  participantId String?
+  dailyRoomName String          @unique
+  dailyRoomUrl  String
+  status        String          @default("pending")
+  recordingId   String?
+  recordingUrl  String?
+  transcript    Transcript?
+  emotions      EmotionResult[]
+  interview     Interview       @relation(fields: [interviewId], references: [id])
+  participant   Participant?    @relation(fields: [participantId], references: [id])
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+}
+
+model Transcript {
+  id        String              @id @default(cuid())
+  sessionId String              @unique
+  session   Session             @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  fullText  String
+  segments  TranscriptSegment[]
+  summary   String?
+  themes    String?
+  createdAt DateTime            @default(now())
+}
+
+model TranscriptSegment {
+  id           String     @id @default(cuid())
+  transcriptId String
+  transcript   Transcript @relation(fields: [transcriptId], references: [id], onDelete: Cascade)
+  speaker      String
+  text         String
+  startTime    Float
+  endTime      Float
+  sentiment    String?
+}
+
+model EmotionResult {
+  id        String   @id @default(cuid())
+  sessionId String
+  session   Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  timestamp Float
+  happy     Float    @default(0)
+  sad       Float    @default(0)
+  angry     Float    @default(0)
+  fearful   Float    @default(0)
+  disgusted Float    @default(0)
+  surprised Float    @default(0)
+  neutral   Float    @default(0)
+  createdAt DateTime @default(now())
+}
