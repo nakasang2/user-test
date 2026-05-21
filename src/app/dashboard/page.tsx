@@ -3,7 +3,6 @@
 import { useState, useEffect, useMemo } from 'react'
 import Link from 'next/link'
 import CreateInterviewModal from '@/components/CreateInterviewModal'
-import CreateSessionModal from '@/components/CreateSessionModal'
 
 interface Question {
   id: string
@@ -55,8 +54,6 @@ export default function Dashboard() {
   const [interviews, setInterviews] = useState<Interview[]>([])
   const [sessions, setSessions] = useState<Session[]>([])
   const [showCreateInterview, setShowCreateInterview] = useState(false)
-  const [showCreateSession, setShowCreateSession] = useState(false)
-  const [selectedInterviewId, setSelectedInterviewId] = useState<string | null>(null)
   const [copiedId, setCopiedId] = useState<string | null>(null)
   // 招待リンクのコピー完了表示用（インタビューID）
   const [copiedInviteId, setCopiedInviteId] = useState<string | null>(null)
@@ -315,22 +312,14 @@ export default function Dashboard() {
                           </Link>
                         </div>
 
-                        {/* 右: 招待リンク ＋ セッション作成 */}
-                        <div className="flex items-center gap-2 flex-shrink-0">
-                          <button
-                            onClick={(e) => copyInviteLink(iv.id, e)}
-                            className="border border-gray-700 hover:border-indigo-500 px-3 py-1.5 rounded-lg text-xs text-gray-400 hover:text-indigo-300 transition-colors"
-                            title="この URL を参加者に共有すると、名前を入力するだけで自動的にセッションが作成されます"
-                          >
-                            {copiedInviteId === iv.id ? '✓ コピー済み' : '🔗 招待リンク'}
-                          </button>
-                          <button
-                            onClick={() => { setSelectedInterviewId(iv.id); setShowCreateSession(true) }}
-                            className="bg-indigo-600 hover:bg-indigo-500 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
-                          >
-                            + セッション
-                          </button>
-                        </div>
+                        {/* 右: 招待リンク */}
+                        <button
+                          onClick={(e) => copyInviteLink(iv.id, e)}
+                          className="border border-gray-700 hover:border-indigo-500 px-3 py-1.5 rounded-lg text-xs text-gray-400 hover:text-indigo-300 transition-colors flex-shrink-0"
+                          title="この URL を参加者に共有すると、名前を入力するだけで自動的にセッションが作成されます"
+                        >
+                          {copiedInviteId === iv.id ? '✓ コピー済み' : '🔗 招待リンク'}
+                        </button>
                       </div>
 
                       {iv.description && !isCollapsed && (
@@ -437,18 +426,6 @@ export default function Dashboard() {
         <CreateInterviewModal
           onClose={() => setShowCreateInterview(false)}
           onCreated={() => { fetchData(); setShowCreateInterview(false) }}
-        />
-      )}
-      {showCreateSession && selectedInterviewId && (
-        <CreateSessionModal
-          interviewId={selectedInterviewId}
-          onClose={() => setShowCreateSession(false)}
-          onCreated={async (session: { joinUrl?: string; dailyRoomUrl?: string }) => {
-            const url = session.joinUrl ?? session.dailyRoomUrl ?? ''
-            await navigator.clipboard.writeText(url)
-            fetchData()
-            setShowCreateSession(false)
-          }}
         />
       )}
     </div>
