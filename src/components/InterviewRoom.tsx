@@ -1,7 +1,6 @@
 'use client'
 
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { upload } from '@vercel/blob/client'
 import { useEmotionDetection, EmotionSnapshot } from '@/hooks/useEmotionDetection'
 import { AreaChart, Area, ResponsiveContainer, XAxis, YAxis } from 'recharts'
 
@@ -457,20 +456,14 @@ export default function InterviewRoom({
   }
 
   async function submitResults() {
-    // 録画停止 → Vercel Blob へバックグラウンドアップロード
+    // 録画停止 → API 経由でサーバーにストリーミングアップロード（バックグラウンド）
     const recordingBlob = await stopMediaRecorder()
     if (recordingBlob.size > 0) {
-      // ブラウザから Vercel Blob へ直接アップロード（サーバー経由なしでサイズ制限を回避）
-      upload(
-        `recordings/${sessionId}.webm`,
-        recordingBlob,
-        {
-          access: 'public',
-          handleUploadUrl: `/api/sessions/${sessionId}/recording`,
-          // MIME タイプを明示（vp9/vp8 コーデック指定を video/webm に正規化）
-          contentType: 'video/webm',
-        },
-      ).catch(console.error)
+      fetch(`/api/sessions/${sessionId}/recording`, {
+        method: 'POST',
+        body: recordingBlob,
+        headers: { 'Content-Type': 'video/webm' },
+      }).catch(console.error)
     }
 
     await fetch(`/api/sessions/${sessionId}`, {
