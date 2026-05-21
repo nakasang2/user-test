@@ -58,6 +58,8 @@ export default function Dashboard() {
   const [showCreateSession, setShowCreateSession] = useState(false)
   const [selectedInterviewId, setSelectedInterviewId] = useState<string | null>(null)
   const [copiedId, setCopiedId] = useState<string | null>(null)
+  // 招待リンクのコピー完了表示用（インタビューID）
+  const [copiedInviteId, setCopiedInviteId] = useState<string | null>(null)
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
@@ -84,6 +86,14 @@ export default function Dashboard() {
       next.has(id) ? next.delete(id) : next.add(id)
       return next
     })
+  }
+
+  async function copyInviteLink(interviewId: string, e: React.MouseEvent) {
+    e.preventDefault()
+    const url = `${window.location.origin}/join/${interviewId}`
+    await navigator.clipboard.writeText(url)
+    setCopiedInviteId(interviewId)
+    setTimeout(() => setCopiedInviteId(null), 2000)
   }
 
   async function copyInterviewUrl(session: Session, e: React.MouseEvent) {
@@ -305,13 +315,22 @@ export default function Dashboard() {
                           </Link>
                         </div>
 
-                        {/* 右: セッション作成ボタン */}
-                        <button
-                          onClick={() => { setSelectedInterviewId(iv.id); setShowCreateSession(true) }}
-                          className="bg-indigo-600 hover:bg-indigo-500 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors flex-shrink-0"
-                        >
-                          + セッション
-                        </button>
+                        {/* 右: 招待リンク ＋ セッション作成 */}
+                        <div className="flex items-center gap-2 flex-shrink-0">
+                          <button
+                            onClick={(e) => copyInviteLink(iv.id, e)}
+                            className="border border-gray-700 hover:border-indigo-500 px-3 py-1.5 rounded-lg text-xs text-gray-400 hover:text-indigo-300 transition-colors"
+                            title="この URL を参加者に共有すると、名前を入力するだけで自動的にセッションが作成されます"
+                          >
+                            {copiedInviteId === iv.id ? '✓ コピー済み' : '🔗 招待リンク'}
+                          </button>
+                          <button
+                            onClick={() => { setSelectedInterviewId(iv.id); setShowCreateSession(true) }}
+                            className="bg-indigo-600 hover:bg-indigo-500 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
+                          >
+                            + セッション
+                          </button>
+                        </div>
                       </div>
 
                       {iv.description && !isCollapsed && (
