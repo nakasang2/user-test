@@ -228,8 +228,8 @@ export default function SessionDetail(props: { params: Promise<{ id: string }> }
           </div>
         )}
 
-        {/* 録画ありの場合：感情タブへの誘導バナー */}
-        {session.recordingUrl && (
+        {/* 録画バナー：Blob CDN URL（https://）がある場合のみ表示 */}
+        {session.recordingUrl?.startsWith('https://') && (
           <div className="mb-6 flex items-center justify-between bg-gray-900 border border-gray-800 rounded-xl px-4 py-3">
             <span className="text-sm text-gray-400 flex items-center gap-2">
               <span className="w-2 h-2 rounded-full bg-red-500" />
@@ -290,19 +290,23 @@ export default function SessionDetail(props: { params: Promise<{ id: string }> }
           />
         )}
         {activeTab === 'emotions' && (() => {
-          // ローカルファイル優先、なければサーバー URL、どちらもなければ null
-          const videoSrc = localVideoUrl ?? session.recordingUrl ?? null
+          // Blob CDN URL（https://）のみ有効なサーバー録画とみなす
+          // 旧フォーマット（/api/...）はサーバー側にファイルが存在しないため無効扱い
+          const serverVideoUrl = session.recordingUrl?.startsWith('https://') ? session.recordingUrl : null
+          // ローカルファイル優先、なければBlobのCDN URL、どちらもなければ null
+          const videoSrc = localVideoUrl ?? serverVideoUrl ?? null
+          const showPicker = !videoSrc  // 有効な動画ソースがない場合にピッカーを表示
           return (
             <div>
-              {/* 動画なし → ファイルピッカー */}
-              {!videoSrc && (
+              {/* 動画なし or 旧フォーマット → ファイルピッカー */}
+              {showPicker && (
                 <div className="mb-6 bg-gray-900 border border-gray-800 border-dashed rounded-xl p-8 text-center">
                   <div className="text-3xl mb-3">🎬</div>
                   <p className="text-sm text-gray-300 font-medium mb-1">
                     録画ファイルを読み込むと感情グラフと同期できます
                   </p>
                   <p className="text-xs text-gray-600 mb-5">
-                    インタビュー終了時に自動ダウンロードされた{' '}
+                    インタビュー終了時にダウンロードされた{' '}
                     <span className="text-gray-500 font-mono">interview-XXXXXXXX.webm</span>{' '}
                     を選択してください
                   </p>
@@ -330,20 +334,25 @@ export default function SessionDetail(props: { params: Promise<{ id: string }> }
                       グラフをクリックするとその時刻にジャンプ ·
                       動画の再生位置がグラフ上の縦線で表示されます
                     </p>
-                    {localVideoUrl && (
-                      <button
-                        onClick={clearLocalVideo}
-                        className="text-xs text-gray-600 hover:text-gray-400 transition-colors ml-4 flex-shrink-0"
-                      >
-                        × ファイルを変更
-                      </button>
-                    )}
+                    <button
+                      onClick={() => {
+                        clearLocalVideo()
+                        // ローカルファイルを消してピッカーに戻す
+                      }}
+                      className="text-xs text-gray-600 hover:text-gray-400 transition-colors ml-4 flex-shrink-0"
+                    >
+                      × 別のファイルを読み込む
+                    </button>
                   </div>
                   <video
                     ref={videoRef}
                     controls
                     src={videoSrc}
                     onTimeUpdate={(e) => setVideoCurrentTime(e.currentTarget.currentTime)}
+                    onError={() => {
+                      // 読み込み失敗（旧URLが残っている場合など）→ピッカーにフォールバック
+                      clearLocalVideo()
+                    }}
                     className="w-full bg-black"
                     style={{ maxHeight: '400px' }}
                   />
