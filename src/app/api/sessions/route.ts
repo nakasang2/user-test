@@ -21,7 +21,8 @@ export async function POST(req: NextRequest) {
   const { interviewId, participantName, participantEmail } = body
 
   const roomName = `interview-${uuidv4().slice(0, 8)}`
-  let roomUrl = `${process.env.NEXT_PUBLIC_APP_URL}/interview/${roomName}`
+  const origin = process.env.NEXT_PUBLIC_APP_URL ?? new URL(req.url).origin
+  let roomUrl = `${origin}/interview/${roomName}`
   let dailyRoomUrl = roomUrl
 
   if (process.env.DAILY_API_KEY) {
@@ -57,6 +58,6 @@ export async function POST(req: NextRequest) {
 
   return NextResponse.json({
     ...session,
-    joinUrl: `${process.env.NEXT_PUBLIC_APP_URL}/interview/${roomName}`,
+    joinUrl: `${origin}/interview/${roomName}`,
   }, { status: 201 })
 }
