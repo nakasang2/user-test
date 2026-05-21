@@ -3,6 +3,7 @@
 import { useState, useEffect, use } from 'react'
 import Link from 'next/link'
 import { RadarChart, Radar, PolarGrid, PolarAngleAxis, ResponsiveContainer, Tooltip } from 'recharts'
+import FloatingAgentChat from '@/components/FloatingAgentChat'
 
 interface SessionStat {
   id: string
@@ -236,6 +237,9 @@ export default function InterviewComparePage(props: { params: Promise<{ id: stri
           </>
         )}
       </div>
+
+      {/* フローティング AI チャット（このインタビュー全体について質問） */}
+      <FloatingAgentChat interviewId={id} />
     </div>
   )
 }

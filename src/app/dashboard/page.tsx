@@ -4,7 +4,6 @@ import { useState, useEffect, useMemo } from 'react'
 import Link from 'next/link'
 import CreateInterviewModal from '@/components/CreateInterviewModal'
 import CreateSessionModal from '@/components/CreateSessionModal'
-import AgentChat from '@/components/AgentChat'
 
 interface Question {
   id: string
@@ -192,9 +191,9 @@ export default function Dashboard() {
           <StatCard value={doneCount} label="分析完了" />
         </div>
 
-        <div className="grid grid-cols-3 gap-8">
-          {/* 左: グループ一覧 */}
-          <div className="col-span-2">
+        <div>
+          {/* グループ一覧 */}
+          <div>
 
             {/* ── ツールバー ── */}
             <div className="flex flex-wrap items-center gap-2 mb-4">
@@ -279,38 +278,40 @@ export default function Dashboard() {
                     <div key={iv.id} className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
                       {/* インタビューヘッダー */}
                       <div className="px-4 py-3 flex items-center justify-between gap-2">
-                        <button
-                          onClick={() => toggleCollapse(iv.id)}
-                          className="flex items-center gap-2 flex-1 text-left min-w-0"
-                        >
-                          <span className={`text-gray-500 transition-transform duration-200 text-xs ${isCollapsed ? '-rotate-90' : ''}`}>
-                            ▼
-                          </span>
-                          <span className="font-semibold text-white truncate">{iv.title}</span>
-                          <span className="text-xs text-gray-500 flex-shrink-0">
-                            {isFiltering
-                              ? <>{iv.sessions.length} <span className="text-gray-700">/ {totalInGroup}</span></>
-                              : <>{iv.sessions.length} セッション</>
-                            }
-                          </span>
-                        </button>
-
-                        <div className="flex items-center gap-2 flex-shrink-0">
-                          {totalInGroup > 1 && (
-                            <Link
-                              href={`/dashboard/interviews/${iv.id}`}
-                              className="border border-gray-700 hover:border-indigo-500 px-3 py-1.5 rounded-lg text-xs text-gray-400 hover:text-indigo-400 transition-colors"
-                            >
-                              比較ビュー
-                            </Link>
-                          )}
+                        {/* 左: 折りたたみトグル ＋ タイトル（比較ビューへのリンク） */}
+                        <div className="flex items-center gap-2 flex-1 min-w-0">
                           <button
-                            onClick={() => { setSelectedInterviewId(iv.id); setShowCreateSession(true) }}
-                            className="bg-indigo-600 hover:bg-indigo-500 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
+                            onClick={() => toggleCollapse(iv.id)}
+                            className="text-gray-500 hover:text-gray-300 transition-colors text-xs flex-shrink-0 w-4"
+                            title={isCollapsed ? '展開' : '折りたたむ'}
                           >
-                            + セッション
+                            <span className={`inline-block transition-transform duration-200 ${isCollapsed ? '-rotate-90' : ''}`}>
+                              ▼
+                            </span>
                           </button>
+                          <Link
+                            href={`/dashboard/interviews/${iv.id}`}
+                            className="flex items-center gap-2 min-w-0 group"
+                          >
+                            <span className="font-semibold text-white group-hover:text-indigo-300 transition-colors truncate">
+                              {iv.title}
+                            </span>
+                            <span className="text-xs text-gray-500 flex-shrink-0">
+                              {isFiltering
+                                ? <>{iv.sessions.length} <span className="text-gray-700">/ {totalInGroup}</span></>
+                                : <>{iv.sessions.length} セッション</>
+                              }
+                            </span>
+                          </Link>
                         </div>
+
+                        {/* 右: セッション作成ボタン */}
+                        <button
+                          onClick={() => { setSelectedInterviewId(iv.id); setShowCreateSession(true) }}
+                          className="bg-indigo-600 hover:bg-indigo-500 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors flex-shrink-0"
+                        >
+                          + セッション
+                        </button>
                       </div>
 
                       {iv.description && !isCollapsed && (
@@ -410,11 +411,6 @@ export default function Dashboard() {
             </div>
           </div>
 
-          {/* 右: AI アシスタント */}
-          <div>
-            <h2 className="font-semibold mb-4 text-gray-300">AI アシスタント</h2>
-            <AgentChat />
-          </div>
         </div>
       </div>
 
