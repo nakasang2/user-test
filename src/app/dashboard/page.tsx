@@ -86,12 +86,24 @@ export default function Dashboard() {
           <span className="text-gray-500">/</span>
           <span className="text-gray-300">ダッシュボード</span>
         </div>
-        <button
-          onClick={() => setShowCreateInterview(true)}
-          className="bg-indigo-600 hover:bg-indigo-500 px-4 py-2 rounded-lg text-sm font-medium transition-colors"
-        >
-          + インタビュー作成
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShowCreateInterview(true)}
+            className="bg-indigo-600 hover:bg-indigo-500 px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+          >
+            + インタビュー作成
+          </button>
+          <button
+            onClick={async () => {
+              await fetch('/api/auth/logout', { method: 'POST' })
+              window.location.href = '/login'
+            }}
+            className="border border-gray-700 hover:border-gray-500 px-3 py-2 rounded-lg text-xs text-gray-500 hover:text-gray-300 transition-colors"
+            title="ログアウト"
+          >
+            ログアウト
+          </button>
+        </div>
       </nav>
 
       <div className="max-w-7xl mx-auto px-6 py-8">

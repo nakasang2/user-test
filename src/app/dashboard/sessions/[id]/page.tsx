@@ -2,9 +2,9 @@
 
 import { useState, useEffect, use, useRef } from 'react'
 import Link from 'next/link'
-import AgentChat from '@/components/AgentChat'
 import EmotionChart from '@/components/EmotionChart'
 import TranscriptView from '@/components/TranscriptView'
+import FloatingAgentChat from '@/components/FloatingAgentChat'
 
 interface Segment {
   id: string
@@ -36,7 +36,7 @@ interface EmotionResult {
 interface Session {
   id: string
   status: string
-  dailyRoomName: string   // Bug fix #2: URLではなくroomNameを使う
+  dailyRoomName: string
   dailyRoomUrl: string
   recordingUrl: string | null
   createdAt: string
@@ -53,14 +53,13 @@ interface Session {
 export default function SessionDetail(props: { params: Promise<{ id: string }> }) {
   const { id } = use(props.params)
   const [session, setSession] = useState<Session | null>(null)
-  const [activeTab, setActiveTab] = useState<'transcript' | 'emotions' | 'agent'>('transcript')
   const [processing, setProcessing] = useState(false)
   const videoRef = useRef<HTMLVideoElement>(null)
   const [videoCurrentTime, setVideoCurrentTime] = useState(0)
   const [localVideoUrl, setLocalVideoUrl] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
-  // アンマウント時に Object URL を解放
   const localVideoUrlRef = useRef<string | null>(null)
+
   useEffect(() => {
     return () => { if (localVideoUrlRef.current) URL.revokeObjectURL(localVideoUrlRef.current) }
   }, [])
@@ -89,7 +88,6 @@ export default function SessionDetail(props: { params: Promise<{ id: string }> }
       .then(setSession)
   }, [id])
 
-  // Feature 4: CSV エクスポート
   function exportCsv() {
     if (!session) return
     const rows: string[][] = [
@@ -107,8 +105,6 @@ export default function SessionDetail(props: { params: Promise<{ id: string }> }
     a.click()
   }
 
-  // Bug fix #3: モックデータを廃止。completed 状態のセッションに対して
-  // インタビューで収集した実データを再分析するだけに変更。
   async function reanalyze() {
     if (!session?.transcript) return
     setProcessing(true)
@@ -142,17 +138,16 @@ export default function SessionDetail(props: { params: Promise<{ id: string }> }
     )
   }
 
-  // インタビュールームへのリンク: roomName を直接使用（Bug fix #2）
   const roomLink = `/interview/${session.dailyRoomName}`
 
-  // ステータスに応じたアクションボタン
+  // Blob CDN URL のみ有効な録画とみなす
+  const serverVideoUrl = session.recordingUrl?.startsWith('https://') ? session.recordingUrl : null
+  const videoSrc = localVideoUrl ?? serverVideoUrl ?? null
+
   const actionButton = (() => {
     if (session.status === 'processing') {
-      return (
-        <span className="text-purple-400 text-sm animate-pulse">AI 分析中...</span>
-      )
+      return <span className="text-purple-400 text-sm animate-pulse">AI 分析中...</span>
     }
-    // 分析済みで transcript がある → 再分析ボタン
     if (session.status === 'done' && session.transcript) {
       return (
         <button
@@ -164,17 +159,12 @@ export default function SessionDetail(props: { params: Promise<{ id: string }> }
         </button>
       )
     }
-    // インタビュー未完了（pending / active）→ インタビュールームへ誘導
-    if (session.status === 'pending' || session.status === 'active') {
-      return (
-        <span className="text-yellow-400 text-sm">インタビュー未完了</span>
-      )
-    }
     return null
   })()
 
   return (
     <div className="min-h-screen bg-gray-950 text-white">
+      {/* ナビ */}
       <nav className="border-b border-gray-800 px-6 py-4 flex items-center justify-between">
         <div className="flex items-center gap-2 text-sm">
           <Link href="/" className="text-indigo-400 hover:text-indigo-300">UserVoice</Link>
@@ -185,7 +175,6 @@ export default function SessionDetail(props: { params: Promise<{ id: string }> }
         </div>
         <div className="flex items-center gap-3">
           <StatusBadge status={session.status} />
-          {/* Feature 4: CSV エクスポートボタン */}
           {session.transcript && (
             <button
               onClick={exportCsv}
@@ -195,7 +184,6 @@ export default function SessionDetail(props: { params: Promise<{ id: string }> }
             </button>
           )}
           {actionButton}
-          {/* Bug fix #2: dailyRoomName を直接使用 */}
           <Link
             href={roomLink}
             className="bg-green-600 hover:bg-green-500 px-4 py-2 rounded-lg text-sm font-medium transition-colors"
@@ -205,7 +193,8 @@ export default function SessionDetail(props: { params: Promise<{ id: string }> }
         </div>
       </nav>
 
-      <div className="max-w-7xl mx-auto px-6 py-8">
+      <div className="max-w-7xl mx-auto px-6 py-8 pb-24">
+        {/* ヒーロー */}
         <div className="mb-6">
           <h1 className="text-2xl font-bold mb-1">
             {session.participant?.name ?? 'Anonymous'}
@@ -215,34 +204,33 @@ export default function SessionDetail(props: { params: Promise<{ id: string }> }
           </p>
         </div>
 
-        {session.transcript && (
-          <div className="grid grid-cols-3 gap-4 mb-6">
-            <SummaryCard title="サマリー" content={session.transcript.summary ?? '分析中'} />
-            <SummaryCard title="主要テーマ" content={session.transcript.themes ?? 'N/A'} />
-            <SummaryCard
-              title="感情データ"
-              content={session.emotions.length > 0
-                ? `${session.emotions.length} サンプル取得済み`
-                : 'データなし'}
-            />
+        {/* インタビュー未完了の案内 */}
+        {(session.status === 'pending' || session.status === 'active') && (
+          <div className="mb-6 p-4 bg-yellow-900/20 border border-yellow-800 rounded-xl flex items-center justify-between">
+            <p className="text-yellow-300 text-sm">
+              インタビューがまだ完了していません。被験者に上のボタンの URL を共有してください。
+            </p>
+            <button
+              onClick={async () => {
+                await navigator.clipboard.writeText(`${window.location.origin}${roomLink}`)
+                alert('インタビュー URL をコピーしました')
+              }}
+              className="ml-4 flex-shrink-0 bg-yellow-600 hover:bg-yellow-500 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
+            >
+              URL をコピー
+            </button>
           </div>
         )}
 
-        {/* 録画バナー：Blob CDN URL（https://）がある場合のみ表示 */}
-        {session.recordingUrl?.startsWith('https://') && (
+        {/* 録画バナー */}
+        {serverVideoUrl && (
           <div className="mb-6 flex items-center justify-between bg-gray-900 border border-gray-800 rounded-xl px-4 py-3">
             <span className="text-sm text-gray-400 flex items-center gap-2">
               <span className="w-2 h-2 rounded-full bg-red-500" />
-              録画データあり —
-              <button
-                onClick={() => setActiveTab('emotions')}
-                className="text-indigo-400 hover:text-indigo-300 underline underline-offset-2"
-              >
-                感情タブで動画と同期して確認
-              </button>
+              録画データあり — 右カラムの感情グラフと同期して確認できます
             </span>
             <a
-              href={session.recordingUrl}
+              href={serverVideoUrl}
               download={`interview-${session.participant?.name ?? 'anonymous'}.webm`}
               className="text-xs text-gray-500 hover:text-gray-300 border border-gray-700 hover:border-gray-500 px-3 py-1.5 rounded-lg transition-colors"
             >
@@ -251,156 +239,98 @@ export default function SessionDetail(props: { params: Promise<{ id: string }> }
           </div>
         )}
 
-        {/* インタビュー未完了の案内 */}
-        {(session.status === 'pending' || session.status === 'active') && (
-          <div className="mb-6 p-4 bg-yellow-900/20 border border-yellow-800 rounded-xl flex items-center justify-between">
-            <p className="text-yellow-300 text-sm">
-              インタビューがまだ完了していません。被験者に上のボタンのURLを共有してください。
-            </p>
-            <button
-              onClick={async () => {
-                await navigator.clipboard.writeText(
-                  `${window.location.origin}${roomLink}`
-                )
-                alert('インタビューURLをコピーしました')
-              }}
-              className="ml-4 flex-shrink-0 bg-yellow-600 hover:bg-yellow-500 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
-            >
-              URLをコピー
-            </button>
+        {/* ── メインコンテンツ 2カラム ── */}
+        <div className="grid grid-cols-2 gap-6 items-start">
+
+          {/* 左: 文字起こし */}
+          <div>
+            <SectionLabel>文字起こし</SectionLabel>
+            <TranscriptView
+              transcript={session.transcript}
+              questions={session.interview.questions}
+            />
           </div>
-        )}
 
-        <div className="flex gap-2 mb-4">
-          <TabButton active={activeTab === 'transcript'} onClick={() => setActiveTab('transcript')}>
-            文字起こし
-          </TabButton>
-          <TabButton active={activeTab === 'emotions'} onClick={() => setActiveTab('emotions')}>
-            感情分析 {session.emotions.length > 0 && `(${session.emotions.length})`}
-          </TabButton>
-          <TabButton active={activeTab === 'agent'} onClick={() => setActiveTab('agent')}>
-            AI に質問
-          </TabButton>
-        </div>
+          {/* 右: 感情分析 + 動画 */}
+          <div>
+            <SectionLabel>感情分析</SectionLabel>
 
-        {activeTab === 'transcript' && (
-          <TranscriptView
-            transcript={session.transcript}
-            questions={session.interview.questions}
-          />
-        )}
-        {activeTab === 'emotions' && (() => {
-          // Blob CDN URL（https://）のみ有効なサーバー録画とみなす
-          // 旧フォーマット（/api/...）はサーバー側にファイルが存在しないため無効扱い
-          const serverVideoUrl = session.recordingUrl?.startsWith('https://') ? session.recordingUrl : null
-          // ローカルファイル優先、なければBlobのCDN URL、どちらもなければ null
-          const videoSrc = localVideoUrl ?? serverVideoUrl ?? null
-          const showPicker = !videoSrc  // 有効な動画ソースがない場合にピッカーを表示
-          return (
-            <div>
-              {/* 動画なし or 旧フォーマット → ファイルピッカー */}
-              {showPicker && (
-                <div className="mb-6 bg-gray-900 border border-gray-800 border-dashed rounded-xl p-8 text-center">
-                  <div className="text-3xl mb-3">🎬</div>
-                  <p className="text-sm text-gray-300 font-medium mb-1">
-                    録画ファイルを読み込むと感情グラフと同期できます
+            {/* 動画プレーヤー or ファイルピッカー */}
+            {videoSrc ? (
+              <div className="mb-4 bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
+                <div className="px-4 py-2.5 border-b border-gray-800 flex items-center justify-between">
+                  <p className="text-xs text-gray-500">
+                    グラフをクリック → その時刻にジャンプ · 再生位置がグラフに反映されます
                   </p>
-                  <p className="text-xs text-gray-600 mb-5">
-                    インタビュー終了時にダウンロードされた{' '}
-                    <span className="text-gray-500 font-mono">interview-XXXXXXXX.webm</span>{' '}
-                    を選択してください
-                  </p>
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept="video/webm,audio/webm,.webm"
-                    onChange={handleLocalFile}
-                    className="hidden"
-                  />
                   <button
-                    onClick={() => fileInputRef.current?.click()}
-                    className="bg-indigo-600 hover:bg-indigo-500 px-6 py-2.5 rounded-lg text-sm font-medium transition-colors"
+                    onClick={clearLocalVideo}
+                    className="text-xs text-gray-600 hover:text-gray-400 transition-colors ml-4 flex-shrink-0"
                   >
-                    📂 録画ファイルを選択
+                    × 別のファイル
                   </button>
                 </div>
-              )}
+                <video
+                  ref={videoRef}
+                  controls
+                  src={videoSrc}
+                  onTimeUpdate={(e) => setVideoCurrentTime(e.currentTarget.currentTime)}
+                  onError={clearLocalVideo}
+                  className="w-full bg-black"
+                  style={{ maxHeight: '320px' }}
+                />
+              </div>
+            ) : (
+              <div className="mb-4 bg-gray-900 border border-gray-800 border-dashed rounded-xl p-6 text-center">
+                <div className="text-2xl mb-2">🎬</div>
+                <p className="text-sm text-gray-300 font-medium mb-1">
+                  録画ファイルを読み込むと感情グラフと同期できます
+                </p>
+                <p className="text-xs text-gray-600 mb-4">
+                  インタビュー終了時にダウンロードした{' '}
+                  <span className="font-mono text-gray-500">interview-XXXXXXXX.webm</span>{' '}
+                  を選択
+                </p>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="video/webm,audio/webm,.webm"
+                  onChange={handleLocalFile}
+                  className="hidden"
+                />
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  className="bg-indigo-600 hover:bg-indigo-500 px-5 py-2 rounded-lg text-sm font-medium transition-colors"
+                >
+                  📂 録画ファイルを選択
+                </button>
+              </div>
+            )}
 
-              {/* 動画あり → プレーヤー */}
-              {videoSrc && (
-                <div className="mb-6 bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
-                  <div className="px-4 py-3 border-b border-gray-800 flex items-center justify-between">
-                    <p className="text-xs text-gray-500">
-                      グラフをクリックするとその時刻にジャンプ ·
-                      動画の再生位置がグラフ上の縦線で表示されます
-                    </p>
-                    <button
-                      onClick={() => {
-                        clearLocalVideo()
-                        // ローカルファイルを消してピッカーに戻す
-                      }}
-                      className="text-xs text-gray-600 hover:text-gray-400 transition-colors ml-4 flex-shrink-0"
-                    >
-                      × 別のファイルを読み込む
-                    </button>
-                  </div>
-                  <video
-                    ref={videoRef}
-                    controls
-                    src={videoSrc}
-                    onTimeUpdate={(e) => setVideoCurrentTime(e.currentTarget.currentTime)}
-                    onError={() => {
-                      // 読み込み失敗（旧URLが残っている場合など）→ピッカーにフォールバック
-                      clearLocalVideo()
-                    }}
-                    className="w-full bg-black"
-                    style={{ maxHeight: '400px' }}
-                  />
-                </div>
-              )}
-
-              <EmotionChart
-                emotions={session.emotions}
-                currentTime={videoSrc ? videoCurrentTime : undefined}
-                onSeek={videoSrc ? (ts) => {
-                  if (videoRef.current) {
-                    videoRef.current.currentTime = ts
-                    videoRef.current.play()
-                  }
-                } : undefined}
-              />
-            </div>
-          )
-        })()}
-        {activeTab === 'agent' && (
-          <div className="max-w-2xl">
-            <AgentChat sessionId={session.id} />
+            <EmotionChart
+              emotions={session.emotions}
+              currentTime={videoSrc ? videoCurrentTime : undefined}
+              onSeek={videoSrc ? (ts) => {
+                if (videoRef.current) {
+                  videoRef.current.currentTime = ts
+                  videoRef.current.play()
+                }
+              } : undefined}
+            />
           </div>
-        )}
+        </div>
       </div>
+
+      {/* フローティング AI チャット */}
+      <FloatingAgentChat sessionId={session.id} />
     </div>
   )
 }
 
-function SummaryCard({ title, content }: { title: string; content: string }) {
+function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
-    <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
-      <div className="text-xs text-gray-500 uppercase tracking-wide mb-2">{title}</div>
-      <p className="text-sm text-gray-300">{content}</p>
-    </div>
-  )
-}
-
-function TabButton({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
-  return (
-    <button
-      onClick={onClick}
-      className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-        active ? 'bg-indigo-600 text-white' : 'text-gray-400 hover:text-white hover:bg-gray-800'
-      }`}
-    >
+    <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">
       {children}
-    </button>
+    </div>
   )
 }
 
