@@ -72,6 +72,21 @@ export default function InterviewRoom({
   const [cameraError, setCameraError] = useState(false)
   const [aiThinking, setAiThinking] = useState(false)
   const [ratingValue, setRatingValue] = useState<number | null>(null) // Feature 5: 評価質問用
+  const [textInput, setTextInput] = useState('')
+  // null = チェック前（初回レンダリング）、true/false = チェック済み
+  const [speechSupported, setSpeechSupported] = useState<boolean | null>(null)
+  const [textOnlyMode, setTextOnlyMode] = useState(false) // 非対応でも続行する場合
+  const [isListening, setIsListening] = useState(false)
+  // テキスト入力フォールバック用：listenForAnswer のコールバックを保持
+  const onAnswerCallbackRef = useRef<((answer: string) => void) | null>(null)
+
+  // 音声認識サポート確認（マウント時）
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition // eslint-disable-line @typescript-eslint/no-explicit-any
+      setSpeechSupported(!!SR)
+    }
+  }, [])
 
   // ── TTS ──────────────────────────────────────────────
   const speak = useCallback((text: string, onEnd?: () => void) => {
@@ -126,12 +141,41 @@ export default function InterviewRoom({
   // 感情検出はインタビュー開始時に startInterview() 内で起動する。
   // こうすることで録画の t=0 と感情タイムスタンプの t=0 が一致する。
 
+  // ── テキスト入力で回答を送信 ──────────────────────────
+  function submitTextAnswer() {
+    const text = textInput.trim()
+    if (!text || !onAnswerCallbackRef.current) return
+
+    if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current)
+    speechRef.current?.stop()
+    setLiveText('')
+    setIsListening(false)
+
+    const entry: TranscriptEntry = {
+      speaker: 'Participant',
+      text,
+      start: (Date.now() - startTimeRef.current) / 1000,
+      end: (Date.now() - startTimeRef.current) / 1000,
+    }
+    transcriptRef.current = [...transcriptRef.current, entry]
+    setTranscript([...transcriptRef.current])
+    conversationBufferRef.current += `\n参加者: ${text}`
+
+    setTextInput('')
+    const callback = onAnswerCallbackRef.current
+    onAnswerCallbackRef.current = null
+    callback(text)
+  }
+
   // ── Feature 1: 沈黙タイムアウト付き音声認識 ──────────
   function listenForAnswer(onAnswer: (answer: string) => void, silenceRetry = false) {
+    // テキスト入力フォールバック用にコールバックを保存
+    onAnswerCallbackRef.current = onAnswer
+
     if (typeof window === 'undefined') return
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const SR = ((window as any).SpeechRecognition || (window as any).webkitSpeechRecognition) as (new () => any) | undefined
-    if (!SR) return // 非対応ブラウザは手動ボタンで進む
+    if (!SR) return // テキスト入力フォールバックで対応
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const recognition: any = new SR()
@@ -180,6 +224,7 @@ export default function InterviewRoom({
       if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current)
       recognition.stop()
       setLiveText('')
+      setIsListening(false)
       if (finalText.trim()) {
         const entry: TranscriptEntry = {
           speaker: 'Participant',
@@ -195,6 +240,7 @@ export default function InterviewRoom({
     }
 
     recognition.start()
+    setIsListening(true)
   }
 
   // ── Feature 5: 評価質問の回答送信 ────────────────────
@@ -401,6 +447,55 @@ export default function InterviewRoom({
   const progress = ((currentQuestionIndex + 1) / questions.length) * 100
   const currentQ = questions[currentQuestionIndex]
 
+  // ── ブラウザチェック画面 ──────────────────────────────
+  if (speechSupported === false && !textOnlyMode) {
+    return (
+      <div className="min-h-screen bg-gray-950 text-white flex flex-col items-center justify-center p-8">
+        <div className="max-w-md w-full bg-gray-900 border border-yellow-700/50 rounded-2xl p-8 text-center">
+          <div className="text-5xl mb-5">🌐</div>
+          <h1 className="text-xl font-bold text-yellow-300 mb-2">推奨ブラウザでアクセスしてください</h1>
+          <p className="text-gray-400 text-sm mb-6 leading-relaxed">
+            このインタビューは音声認識を使用します。<br />
+            現在のブラウザ（Brave など）では音声認識がブロックされているため、
+            <span className="text-white font-medium"> Google Chrome または Microsoft Edge </span>
+            で開いてください。
+          </p>
+
+          {/* URL コピーボタン */}
+          <div className="bg-gray-800 rounded-xl p-4 mb-6">
+            <p className="text-xs text-gray-500 mb-2">このページの URL を Chrome / Edge で開く</p>
+            <div className="flex gap-2">
+              <input
+                readOnly
+                value={typeof window !== 'undefined' ? window.location.href : ''}
+                className="flex-1 bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-xs text-gray-300 focus:outline-none"
+              />
+              <button
+                onClick={() => {
+                  navigator.clipboard.writeText(window.location.href)
+                  alert('URLをコピーしました')
+                }}
+                className="bg-indigo-600 hover:bg-indigo-500 px-4 py-2 rounded-lg text-xs font-medium transition-colors whitespace-nowrap"
+              >
+                URLをコピー
+              </button>
+            </div>
+          </div>
+
+          <div className="border-t border-gray-800 pt-5">
+            <p className="text-xs text-gray-600 mb-3">または、テキスト入力のみで続けることもできます</p>
+            <button
+              onClick={() => setTextOnlyMode(true)}
+              className="text-sm text-gray-400 hover:text-white border border-gray-700 hover:border-gray-500 px-5 py-2 rounded-lg transition-colors"
+            >
+              テキスト入力で続ける →
+            </button>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="min-h-screen bg-gray-950 text-white flex flex-col">
       {/* ヘッダー */}
@@ -572,9 +667,36 @@ export default function InterviewRoom({
           )}
 
           {phase === 'interview' && !isSpeaking && !aiThinking && currentQ?.type === 'open' && (
-            <div className="p-3 border-b border-gray-800">
+            <div className="p-3 border-b border-gray-800 space-y-2">
+              {/* マイク状態 */}
+              {isListening && (
+                <div className="flex items-center gap-2 text-[10px] text-green-400">
+                  <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
+                  音声認識中...
+                </div>
+              )}
+              {!speechSupported && (
+                <p className="text-[10px] text-yellow-500">音声認識不可 — テキストで入力してください</p>
+              )}
+              {/* テキスト入力フォールバック */}
+              <div className="flex gap-2">
+                <input
+                  value={textInput}
+                  onChange={(e) => setTextInput(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); submitTextAnswer() } }}
+                  placeholder={speechSupported ? 'テキストでも入力できます' : '回答を入力...'}
+                  className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-indigo-500"
+                />
+                <button
+                  onClick={submitTextAnswer}
+                  disabled={!textInput.trim()}
+                  className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-30 px-3 py-2 rounded-lg text-xs font-medium transition-colors"
+                >
+                  送信
+                </button>
+              </div>
               <button onClick={manualNext}
-                className="w-full border border-gray-700 hover:border-indigo-500 py-2 rounded-lg text-xs text-gray-400 hover:text-indigo-400 transition-colors">
+                className="w-full border border-gray-700 hover:border-indigo-500 py-1.5 rounded-lg text-xs text-gray-500 hover:text-indigo-400 transition-colors">
                 回答を終了して次へ →
               </button>
             </div>
