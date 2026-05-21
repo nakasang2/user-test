@@ -1,7 +1,6 @@
 'use client'
 
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { useRouter } from 'next/navigation'
 import { useEmotionDetection, EmotionSnapshot } from '@/hooks/useEmotionDetection'
 import { AreaChart, Area, ResponsiveContainer, XAxis, YAxis } from 'recharts'
 
@@ -35,7 +34,6 @@ export default function InterviewRoom({
   interviewTitle,
   participantName,
 }: Props) {
-  const router = useRouter()
   const videoRef = useRef<HTMLVideoElement>(null)
   const streamRef = useRef<MediaStream | null>(null)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -497,9 +495,9 @@ export default function InterviewRoom({
   }
 
   return (
-    <div className="min-h-screen bg-gray-950 text-white flex flex-col">
+    <div className="h-screen bg-gray-950 text-white flex flex-col overflow-hidden">
       {/* ヘッダー */}
-      <div className="border-b border-gray-800 px-6 py-3 flex items-center justify-between">
+      <div className="border-b border-gray-800 px-6 py-3 flex items-center justify-between flex-shrink-0">
         <div>
           <span className="text-lg font-bold text-indigo-400">UserVoice</span>
           <span className="text-gray-500 mx-2">/</span>
@@ -513,116 +511,135 @@ export default function InterviewRoom({
         )}
       </div>
 
-      <div className="flex-1 flex">
-        {/* 左：カメラ + メイン */}
-        <div className="flex-1 flex flex-col items-center justify-center p-8">
-          <div className="relative mb-6">
-            {cameraError ? (
-              <div className="w-72 h-48 bg-gray-900 border border-gray-700 rounded-2xl flex items-center justify-center">
-                <span className="text-gray-500 text-sm">カメラが利用できません</span>
-              </div>
-            ) : (
-              <video ref={videoRef} autoPlay muted playsInline
-                className="w-72 h-48 object-cover rounded-2xl bg-gray-900 border border-gray-700 scale-x-[-1]"
-              />
-            )}
-            {isSpeaking && (
-              <div className="absolute bottom-3 left-3 bg-indigo-600 text-xs px-2 py-1 rounded-full animate-pulse">AI 話中...</div>
-            )}
-            {aiThinking && (
-              <div className="absolute bottom-3 left-3 bg-amber-600 text-xs px-2 py-1 rounded-full animate-pulse">AI 考え中...</div>
-            )}
-            {/* リアルタイム感情表示 */}
-            {emotionStatus === 'loading' && (
-              <div className="absolute top-3 right-3 bg-black/60 text-gray-400 text-[10px] px-2 py-1 rounded-full">
-                感情検出準備中...
-              </div>
-            )}
-            {emotionStatus === 'ready' && lastEmotion && (
-              <div className="absolute top-3 right-3 bg-black/70 text-[10px] px-2 py-1 rounded-full text-green-300 font-medium">
-                {getDominantEmotionLabel(lastEmotion)}
-              </div>
-            )}
-            {emotionStatus === 'error' && (
-              <div className="absolute top-3 right-3 bg-black/60 text-red-400 text-[10px] px-2 py-1 rounded-full">
-                検出エラー
-              </div>
-            )}
-          </div>
+      <div className="flex-1 flex overflow-hidden">
+        {/* 左：カメラ（左カラムいっぱいに表示、絶対配置で高さ変動なし） */}
+        <div className="flex-1 relative overflow-hidden bg-gray-900">
 
-          {/* Feature 6: 案内画面 */}
-          {phase === 'guide' && (
-            <div className="text-center max-w-lg">
-              <div className="text-4xl mb-4">🎙️</div>
-              <h1 className="text-2xl font-bold mb-3">{interviewTitle}</h1>
-              <div className="bg-gray-900 border border-gray-800 rounded-xl p-5 text-left mb-6 space-y-3">
-                <p className="text-sm text-gray-300 font-medium">インタビューの流れ</p>
-                <ul className="space-y-2 text-sm text-gray-400">
-                  <li className="flex gap-2"><span className="text-indigo-400 flex-shrink-0">①</span>カメラ・マイクを許可してください</li>
-                  <li className="flex gap-2"><span className="text-indigo-400 flex-shrink-0">②</span>AI が質問を音声で読み上げます（{questions.length} 問 + 深掘り）</li>
-                  <li className="flex gap-2"><span className="text-indigo-400 flex-shrink-0">③</span>マイクに向かって自由に話してください</li>
-                  <li className="flex gap-2"><span className="text-indigo-400 flex-shrink-0">④</span>回答が終わったら AI が自動で次の質問に進みます</li>
-                </ul>
-                <div className="pt-1 border-t border-gray-800 text-xs text-gray-500 space-y-1">
-                  <p>・インタビューは約 10〜20 分です</p>
-                  <p>・静かな場所で、イヤホンなしで参加することをお勧めします</p>
-                  <p>・回答はすべて録音・分析されます</p>
-                </div>
-              </div>
-              <button
-                onClick={() => setPhase('waiting')}
-                className="bg-indigo-600 hover:bg-indigo-500 px-8 py-3 rounded-xl font-semibold text-lg transition-colors"
-              >
-                準備ができました
-              </button>
+          {/* カメラ映像：左カラム全体を覆う */}
+          {cameraError ? (
+            <div className="absolute inset-0 flex items-center justify-center">
+              <span className="text-gray-500 text-sm">カメラが利用できません</span>
             </div>
-          )}
-
-          {/* 待機画面（カメラ許可後） */}
-          {phase === 'waiting' && (
-            <div className="text-center max-w-md">
-              <p className="text-gray-400 mb-2 text-sm">カメラ・マイクが有効になったら開始してください</p>
-              <button
-                onClick={startInterview}
-                disabled={!cameraReady || emotionStatus === 'loading'}
-                className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-wait px-8 py-3 rounded-xl font-semibold text-lg transition-colors"
-              >
-                {emotionStatus === 'loading' ? '感情モデル準備中...' : 'インタビューを開始する'}
-              </button>
-            </div>
-          )}
-
-          {/* Feature 5: 評価質問 UI */}
-          {phase === 'interview' && !isSpeaking && currentQ?.type === 'rating' && (
-            <RatingQuestion
-              question={currentQ.text}
-              onSubmit={(v) => submitRating(v, `${v} / 5`)}
+          ) : (
+            <video
+              ref={videoRef}
+              autoPlay
+              muted
+              playsInline
+              className="absolute inset-0 w-full h-full object-cover scale-x-[-1]"
             />
+          )}
+
+          {/* 感情検出ステータス（右上オーバーレイ） */}
+          {emotionStatus === 'loading' && (
+            <div className="absolute top-4 right-4 bg-black/60 text-gray-400 text-[10px] px-2 py-1 rounded-full">
+              感情検出準備中...
+            </div>
+          )}
+          {emotionStatus === 'ready' && lastEmotion && (
+            <div className="absolute top-4 right-4 bg-black/70 text-[10px] px-2 py-1 rounded-full text-green-300 font-medium">
+              {getDominantEmotionLabel(lastEmotion)}
+            </div>
+          )}
+          {emotionStatus === 'error' && (
+            <div className="absolute top-4 right-4 bg-black/60 text-red-400 text-[10px] px-2 py-1 rounded-full">
+              検出エラー
+            </div>
+          )}
+
+          {/* AI ステータスバッジ（左下オーバーレイ） */}
+          {isSpeaking && (
+            <div className="absolute bottom-4 left-4 bg-indigo-600/90 text-xs px-3 py-1.5 rounded-full animate-pulse">
+              AI 話中...
+            </div>
+          )}
+          {aiThinking && (
+            <div className="absolute bottom-4 left-4 bg-amber-600/90 text-xs px-3 py-1.5 rounded-full animate-pulse">
+              AI 考え中...
+            </div>
+          )}
+
+          {/* 案内フェーズ（オーバーレイ） */}
+          {phase === 'guide' && (
+            <div className="absolute inset-0 bg-black/75 flex items-center justify-center p-8">
+              <div className="text-center max-w-lg w-full">
+                <div className="text-4xl mb-4">🎙️</div>
+                <h1 className="text-2xl font-bold mb-3">{interviewTitle}</h1>
+                <div className="bg-gray-900/80 border border-gray-700 rounded-xl p-5 text-left mb-6 space-y-3">
+                  <p className="text-sm text-gray-300 font-medium">インタビューの流れ</p>
+                  <ul className="space-y-2 text-sm text-gray-400">
+                    <li className="flex gap-2"><span className="text-indigo-400 flex-shrink-0">①</span>カメラ・マイクを許可してください</li>
+                    <li className="flex gap-2"><span className="text-indigo-400 flex-shrink-0">②</span>AI が質問を音声で読み上げます（{questions.length} 問 + 深掘り）</li>
+                    <li className="flex gap-2"><span className="text-indigo-400 flex-shrink-0">③</span>マイクに向かって自由に話してください</li>
+                    <li className="flex gap-2"><span className="text-indigo-400 flex-shrink-0">④</span>回答が終わったら AI が自動で次の質問に進みます</li>
+                  </ul>
+                  <div className="pt-1 border-t border-gray-700 text-xs text-gray-500 space-y-1">
+                    <p>・インタビューは約 10〜20 分です</p>
+                    <p>・静かな場所で、イヤホンなしで参加することをお勧めします</p>
+                    <p>・回答はすべて録音・分析されます</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setPhase('waiting')}
+                  className="bg-indigo-600 hover:bg-indigo-500 px-8 py-3 rounded-xl font-semibold text-lg transition-colors"
+                >
+                  準備ができました
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* 待機フェーズ（オーバーレイ） */}
+          {phase === 'waiting' && (
+            <div className="absolute inset-0 bg-black/50 flex items-center justify-center p-8">
+              <div className="text-center max-w-md">
+                <p className="text-gray-300 mb-4 text-sm">カメラ・マイクが有効になったら開始してください</p>
+                <button
+                  onClick={startInterview}
+                  disabled={!cameraReady || emotionStatus === 'loading'}
+                  className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-wait px-8 py-3 rounded-xl font-semibold text-lg transition-colors"
+                >
+                  {emotionStatus === 'loading' ? '感情モデル準備中...' : 'インタビューを開始する'}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* 評価質問（オーバーレイ） */}
+          {phase === 'interview' && !isSpeaking && currentQ?.type === 'rating' && (
+            <div className="absolute inset-0 bg-black/70 flex items-center justify-center p-8">
+              <RatingQuestion
+                question={currentQ.text}
+                onSubmit={(v) => submitRating(v, `${v} / 5`)}
+              />
+            </div>
           )}
           {phase === 'interview' && !isSpeaking && currentQ?.type === 'nps' && (
-            <NpsQuestion
-              question={currentQ.text}
-              onSubmit={(v) => submitRating(v, `${v} / 10`)}
-            />
+            <div className="absolute inset-0 bg-black/70 flex items-center justify-center p-8">
+              <NpsQuestion
+                question={currentQ.text}
+                onSubmit={(v) => submitRating(v, `${v} / 10`)}
+              />
+            </div>
           )}
 
+          {/* 完了画面（オーバーレイ）— ダッシュボードボタンなし */}
           {phase === 'done' && (
-            <div className="text-center max-w-md">
-              <div className="text-5xl mb-4">✓</div>
-              <h2 className="text-2xl font-bold mb-2">完了しました</h2>
-              <p className="text-gray-400 mb-6">ご参加ありがとうございました。</p>
-              <button onClick={() => router.push('/dashboard')}
-                className="bg-indigo-600 hover:bg-indigo-500 px-6 py-2 rounded-lg transition-colors">
-                ダッシュボードへ
-              </button>
+            <div className="absolute inset-0 bg-black/80 flex items-center justify-center">
+              <div className="text-center max-w-md px-8">
+                <div className="text-6xl mb-6">✅</div>
+                <h2 className="text-2xl font-bold mb-3">インタビュー完了</h2>
+                <p className="text-gray-300 mb-2">ご回答いただきありがとうございました。</p>
+                <p className="text-gray-500 text-sm">このページを閉じていただいて構いません。</p>
+              </div>
             </div>
           )}
         </div>
 
-        {/* 右：質問パネル + 会話ログ */}
-        <div className="w-96 border-l border-gray-800 flex flex-col">
+        {/* 右：質問パネル + 会話ログ（スクロール独立） */}
+        <div className="w-96 border-l border-gray-800 flex flex-col overflow-hidden">
           {(phase === 'interview' || phase === 'thinking') && (
-            <div className="p-4 border-b border-gray-800">
+            <div className="p-4 border-b border-gray-800 flex-shrink-0">
               <div className="flex items-center justify-between text-xs text-gray-500 mb-2">
                 <span>{isFollowUp ? `質問 ${currentQuestionIndex + 1}（深掘り中）` : `質問 ${currentQuestionIndex + 1} / ${questions.length}`}</span>
                 <span className="flex items-center gap-1.5">
@@ -653,22 +670,21 @@ export default function InterviewRoom({
 
           {/* リアルタイム感情モニター */}
           {(phase === 'interview' || phase === 'thinking' || phase === 'ending') && emotionStatus === 'ready' && (
-            <div className="border-b border-gray-800 p-3">
+            <div className="border-b border-gray-800 p-3 flex-shrink-0">
               <div className="text-[10px] text-gray-600 uppercase tracking-wide mb-2">感情モニター</div>
               <RealtimeEmotionGraph history={emotionHistory} />
             </div>
           )}
 
           {liveText && (
-            <div className="p-3 border-b border-gray-800 bg-gray-900/50">
+            <div className="p-3 border-b border-gray-800 bg-gray-900/50 flex-shrink-0">
               <div className="text-[10px] text-gray-500 mb-1">音声認識中...</div>
               <p className="text-sm text-gray-300">{liveText}</p>
             </div>
           )}
 
           {phase === 'interview' && !isSpeaking && !aiThinking && currentQ?.type === 'open' && (
-            <div className="p-3 border-b border-gray-800 space-y-2">
-              {/* マイク状態 */}
+            <div className="p-3 border-b border-gray-800 space-y-2 flex-shrink-0">
               {isListening && (
                 <div className="flex items-center gap-2 text-[10px] text-green-400">
                   <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
@@ -678,7 +694,6 @@ export default function InterviewRoom({
               {!speechSupported && (
                 <p className="text-[10px] text-yellow-500">音声認識不可 — テキストで入力してください</p>
               )}
-              {/* テキスト入力フォールバック */}
               <div className="flex gap-2">
                 <input
                   value={textInput}
@@ -702,6 +717,7 @@ export default function InterviewRoom({
             </div>
           )}
 
+          {/* 会話ログ（ここだけスクロール） */}
           <div className="flex-1 overflow-y-auto p-4">
             <div className="text-xs text-gray-600 uppercase tracking-wide mb-3">会話ログ</div>
             <div className="space-y-3">
