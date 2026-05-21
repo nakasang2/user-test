@@ -57,6 +57,31 @@ export default function SessionDetail(props: { params: Promise<{ id: string }> }
   const [processing, setProcessing] = useState(false)
   const videoRef = useRef<HTMLVideoElement>(null)
   const [videoCurrentTime, setVideoCurrentTime] = useState(0)
+  const [localVideoUrl, setLocalVideoUrl] = useState<string | null>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  // アンマウント時に Object URL を解放
+  const localVideoUrlRef = useRef<string | null>(null)
+  useEffect(() => {
+    return () => { if (localVideoUrlRef.current) URL.revokeObjectURL(localVideoUrlRef.current) }
+  }, [])
+
+  function handleLocalFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    if (localVideoUrlRef.current) URL.revokeObjectURL(localVideoUrlRef.current)
+    const url = URL.createObjectURL(file)
+    localVideoUrlRef.current = url
+    setLocalVideoUrl(url)
+    setVideoCurrentTime(0)
+  }
+
+  function clearLocalVideo() {
+    if (localVideoUrlRef.current) URL.revokeObjectURL(localVideoUrlRef.current)
+    localVideoUrlRef.current = null
+    setLocalVideoUrl(null)
+    setVideoCurrentTime(0)
+    if (fileInputRef.current) fileInputRef.current.value = ''
+  }
 
   useEffect(() => {
     fetch(`/api/sessions/${id}`)
@@ -264,38 +289,80 @@ export default function SessionDetail(props: { params: Promise<{ id: string }> }
             questions={session.interview.questions}
           />
         )}
-        {activeTab === 'emotions' && (
-          <div>
-            {/* 録画プレーヤー（感情グラフと同期） */}
-            {session.recordingUrl && (
-              <div className="mb-6 bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
-                <div className="px-4 py-3 border-b border-gray-800">
-                  <p className="text-xs text-gray-500">
-                    グラフをクリックすると、その時刻に自動でジャンプします
+        {activeTab === 'emotions' && (() => {
+          // ローカルファイル優先、なければサーバー URL、どちらもなければ null
+          const videoSrc = localVideoUrl ?? session.recordingUrl ?? null
+          return (
+            <div>
+              {/* 動画なし → ファイルピッカー */}
+              {!videoSrc && (
+                <div className="mb-6 bg-gray-900 border border-gray-800 border-dashed rounded-xl p-8 text-center">
+                  <div className="text-3xl mb-3">🎬</div>
+                  <p className="text-sm text-gray-300 font-medium mb-1">
+                    録画ファイルを読み込むと感情グラフと同期できます
                   </p>
+                  <p className="text-xs text-gray-600 mb-5">
+                    インタビュー終了時に自動ダウンロードされた{' '}
+                    <span className="text-gray-500 font-mono">interview-XXXXXXXX.webm</span>{' '}
+                    を選択してください
+                  </p>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="video/webm,audio/webm,.webm"
+                    onChange={handleLocalFile}
+                    className="hidden"
+                  />
+                  <button
+                    onClick={() => fileInputRef.current?.click()}
+                    className="bg-indigo-600 hover:bg-indigo-500 px-6 py-2.5 rounded-lg text-sm font-medium transition-colors"
+                  >
+                    📂 録画ファイルを選択
+                  </button>
                 </div>
-                <video
-                  ref={videoRef}
-                  controls
-                  src={session.recordingUrl}
-                  onTimeUpdate={(e) => setVideoCurrentTime(e.currentTarget.currentTime)}
-                  className="w-full bg-black"
-                  style={{ maxHeight: '360px' }}
-                />
-              </div>
-            )}
-            <EmotionChart
-              emotions={session.emotions}
-              currentTime={session.recordingUrl ? videoCurrentTime : undefined}
-              onSeek={session.recordingUrl ? (ts) => {
-                if (videoRef.current) {
-                  videoRef.current.currentTime = ts
-                  videoRef.current.play()
-                }
-              } : undefined}
-            />
-          </div>
-        )}
+              )}
+
+              {/* 動画あり → プレーヤー */}
+              {videoSrc && (
+                <div className="mb-6 bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
+                  <div className="px-4 py-3 border-b border-gray-800 flex items-center justify-between">
+                    <p className="text-xs text-gray-500">
+                      グラフをクリックするとその時刻にジャンプ ·
+                      動画の再生位置がグラフ上の縦線で表示されます
+                    </p>
+                    {localVideoUrl && (
+                      <button
+                        onClick={clearLocalVideo}
+                        className="text-xs text-gray-600 hover:text-gray-400 transition-colors ml-4 flex-shrink-0"
+                      >
+                        × ファイルを変更
+                      </button>
+                    )}
+                  </div>
+                  <video
+                    ref={videoRef}
+                    controls
+                    src={videoSrc}
+                    onTimeUpdate={(e) => setVideoCurrentTime(e.currentTarget.currentTime)}
+                    className="w-full bg-black"
+                    style={{ maxHeight: '400px' }}
+                  />
+                </div>
+              )}
+
+              <EmotionChart
+                emotions={session.emotions}
+                currentTime={videoSrc ? videoCurrentTime : undefined}
+                onSeek={videoSrc ? (ts) => {
+                  if (videoRef.current) {
+                    videoRef.current.currentTime = ts
+                    videoRef.current.play()
+                  }
+                } : undefined}
+              />
+            </div>
+          )
+        })()}
         {activeTab === 'agent' && (
           <div className="max-w-2xl">
             <AgentChat sessionId={session.id} />
