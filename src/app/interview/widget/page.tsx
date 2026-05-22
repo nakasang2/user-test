@@ -28,6 +28,7 @@ function WidgetContent() {
   const screenMediaRecorderRef = useRef<MediaRecorder | null>(null)
   const screenChunksRef        = useRef<Blob[]>([])
   const screenStreamRef        = useRef<MediaStream | null>(null)
+  const animFrameRef           = useRef<number>(0)
 
   /* ── 初期化 ─────────────────────────────────────────────── */
   useEffect(() => {
@@ -64,22 +65,75 @@ function WidgetContent() {
       channelRef.current = null
       webcamStreamRef.current?.getTracks().forEach((t) => t.stop())
       screenStreamRef.current?.getTracks().forEach((t) => t.stop())
+      cancelAnimationFrame(animFrameRef.current)
       if (screenMediaRecorderRef.current?.state !== 'inactive') {
         screenMediaRecorderRef.current?.stop()
       }
     }
   }, [sessionId, tasksRaw])
 
-  /* ── 画面録画開始 ─────────────────────────────────────────── */
+  /* ── 画面録画開始（Canvas合成: スクリーン + ウェブカメラPiP） ── */
   async function startScreenRecording() {
     try {
-      const stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false })
-      screenStreamRef.current = stream
+      const screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false })
+      screenStreamRef.current = screenStream
       screenChunksRef.current = []
 
+      // スクリーン用 offscreen video を作成・再生
+      const screenVid = document.createElement('video')
+      screenVid.srcObject = screenStream
+      screenVid.muted = true
+      await new Promise<void>((resolve) => {
+        screenVid.onloadedmetadata = () => {
+          screenVid.play().then(resolve).catch(resolve)
+        }
+      })
+
+      // Canvas サイズはスクリーン解像度（上限 1920×1080）
+      const W = Math.min(screenVid.videoWidth  || 1280, 1920)
+      const H = Math.min(screenVid.videoHeight || 720,  1080)
+      const canvas = document.createElement('canvas')
+      canvas.width  = W
+      canvas.height = H
+      const ctx = canvas.getContext('2d')!
+
+      // ウェブカメラ PiP サイズ（右下に配置）
+      const pipW = Math.round(W * 0.22)
+      const pipH = Math.round(pipW * 0.75) // 4:3
+      const pipX = W - pipW - 16
+      const pipY = H - pipH - 16
+
+      const webcamVid = webcamVideoRef.current
+
+      // 合成描画ループ
+      function draw() {
+        ctx.drawImage(screenVid, 0, 0, W, H)
+
+        if (webcamVid && webcamVid.readyState >= 2) {
+          // クリップしてから左右反転（鏡映し）で描画
+          ctx.save()
+          ctx.beginPath()
+          ctx.rect(pipX, pipY, pipW, pipH)
+          ctx.clip()
+          ctx.translate(pipX + pipW, pipY)
+          ctx.scale(-1, 1)
+          ctx.drawImage(webcamVid, 0, 0, pipW, pipH)
+          ctx.restore()
+          // 白枠
+          ctx.strokeStyle = 'rgba(255,255,255,0.85)'
+          ctx.lineWidth = 2
+          ctx.strokeRect(pipX, pipY, pipW, pipH)
+        }
+
+        animFrameRef.current = requestAnimationFrame(draw)
+      }
+      draw()
+
+      // Canvas ストリームを録画
+      const canvasStream = canvas.captureStream(25)
       const mimeType = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm']
         .find((t) => MediaRecorder.isTypeSupported(t)) ?? ''
-      const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : {})
+      const recorder = new MediaRecorder(canvasStream, mimeType ? { mimeType } : {})
       recorder.ondataavailable = (e) => { if (e.data.size > 0) screenChunksRef.current.push(e.data) }
       recorder.start(1000)
       screenMediaRecorderRef.current = recorder
@@ -88,7 +142,9 @@ function WidgetContent() {
       // メインページへ録画開始を通知
       channelRef.current?.postMessage({ type: 'recording_started' })
 
-      stream.getVideoTracks()[0].onended = () => {
+      // 画面共有が終了されたら描画ループも止める
+      screenStream.getVideoTracks()[0].onended = () => {
+        cancelAnimationFrame(animFrameRef.current)
         setIsScreenRecording(false)
         screenStreamRef.current = null
       }
@@ -100,6 +156,8 @@ function WidgetContent() {
   /* ── 録画停止 → blob をメインページへ送信 ─────────────────── */
   function stopAndSendRecording(): Promise<void> {
     return new Promise((resolve) => {
+      // 合成描画ループを停止
+      cancelAnimationFrame(animFrameRef.current)
       const recorder = screenMediaRecorderRef.current
       if (!recorder || recorder.state === 'inactive') { resolve(); return }
       recorder.onstop = () => {

@@ -1054,7 +1054,7 @@ export default function InterviewRoom({
                     download={`screen-${sessionId.slice(0, 8)}.webm`}
                     className="inline-block mt-2 bg-gray-700 hover:bg-gray-600 px-5 py-2 rounded-lg text-sm font-medium transition-colors"
                   >
-                    🖥️ 操作録画をダウンロード
+                    🖥️ 操作録画（顔合成）をダウンロード
                   </a>
                 )}
               </div>
