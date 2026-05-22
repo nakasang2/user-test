@@ -30,8 +30,7 @@ interface TranscriptEntry {
   end?: number
 }
 
-// Feature 6: 案内フェーズを追加
-type Phase = 'guide' | 'waiting' | 'stimulus' | 'intro' | 'interview' | 'thinking' | 'ending' | 'done'
+type Phase = 'guide' | 'waiting' | 'stimulus' | 'task' | 'intro' | 'interview' | 'thinking' | 'ending' | 'done'
 
 export default function InterviewRoom({
   sessionId,
@@ -412,9 +411,36 @@ export default function InterviewRoom({
     mediaRecorderRef.current = recorder
   }
 
+  // ── ユーザビリティ: サービスをポップアップで開く ────────
+  function openServicePopup() {
+    if (!stimulusUrl) return
+    window.open(stimulusUrl, 'usability-service', 'popup,width=1280,height=820,left=80,top=40')
+  }
+
+  // ── タスク完了 → 事後インタビュー開始 ─────────────────
+  function completeTasksAndStartInterview() {
+    if (questions.length === 0) {
+      endInterview()
+      return
+    }
+    setPhase('intro')
+    const intro = `お疲れ様でした。続いて、操作を通じて感じたことをいくつかお聞きします。`
+    speak(intro, () => {
+      setPhase('interview')
+      currentQuestionIndexRef.current = 0
+      setCurrentQuestionIndex(0)
+      setIsFollowUp(false)
+      const q = questions[0]
+      setDisplayedQuestion(q.text)
+      conversationBufferRef.current = `AI: ${q.text}`
+      speak(q.text, () => {
+        if (q.type === 'open') listenForAnswer(decideNext)
+      })
+    })
+  }
+
   // ── インタビュー開始 ──────────────────────────────────
   async function startInterview() {
-    setPhase('intro')
     setIsRecording(true)
     // 録画と感情検出を同時に開始 → タイムスタンプが一致する
     startMediaRecorder()
@@ -424,9 +450,18 @@ export default function InterviewRoom({
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ status: 'active' }),
     })
-    // ユーザビリティテスト: 画面共有を開始
+
+    // ユーザビリティテスト → タスクフェーズへ（TTS なし）
     if (interviewType === 'usability') {
-      await startScreenShare()
+      if (usabilityMode === 'service') {
+        // 画面共有を開始（サービスモードのみ）
+        await startScreenShare()
+      } else if (usabilityMode === 'prototype' && stimulusUrl) {
+        // プロトタイプ: 画面録画（タブ共有）をバックグラウンドで開始
+        startScreenShare().catch(() => {/* 録画失敗は無視して続行 */})
+      }
+      setPhase('task')
+      return
     }
 
     // 印象テストの場合: stimulus フェーズを挿入
@@ -436,10 +471,7 @@ export default function InterviewRoom({
       setStimulusCountdown(duration)
       const countdownInterval = setInterval(() => {
         setStimulusCountdown((prev) => {
-          if (prev <= 1) {
-            clearInterval(countdownInterval)
-            return 0
-          }
+          if (prev <= 1) { clearInterval(countdownInterval); return 0 }
           return prev - 1
         })
       }, 1000)
@@ -458,6 +490,8 @@ export default function InterviewRoom({
       return
     }
 
+    // 通常インタビュー
+    setPhase('intro')
     const intro = `こんにちは${participantName ? `、${participantName}さん` : ''}。本日はインタビューにご参加いただきありがとうございます。「${interviewTitle}」についてお聞きします。`
     speak(intro, () => {
       setPhase('interview')
@@ -672,7 +706,7 @@ export default function InterviewRoom({
               muted
               playsInline
               className={
-                interviewType === 'usability' && (phase === 'interview' || phase === 'thinking' || phase === 'intro' || phase === 'waiting')
+                interviewType === 'usability' && (phase === 'task' || phase === 'interview' || phase === 'thinking' || phase === 'intro' || phase === 'waiting')
                   ? 'absolute bottom-4 right-4 w-44 h-28 object-cover scale-x-[-1] rounded-xl border-2 border-gray-700 z-20 shadow-lg'
                   : 'absolute inset-0 w-full h-full object-cover scale-x-[-1]'
               }
@@ -680,7 +714,7 @@ export default function InterviewRoom({
           )}
 
           {/* プロトタイプテスト: iframe */}
-          {interviewType === 'usability' && usabilityMode === 'prototype' && stimulusUrl && (phase === 'interview' || phase === 'thinking' || phase === 'intro' || phase === 'waiting') && (
+          {interviewType === 'usability' && usabilityMode === 'prototype' && stimulusUrl && (phase === 'task' || phase === 'interview' || phase === 'thinking' || phase === 'intro' || phase === 'waiting') && (
             <div className="absolute inset-0">
               <iframe
                 src={stimulusUrl.includes('figma.com') ? `https://www.figma.com/embed?embed_host=share&url=${encodeURIComponent(stimulusUrl)}` : stimulusUrl}
@@ -691,7 +725,7 @@ export default function InterviewRoom({
           )}
 
           {/* ユーザビリティテスト(service): 画面共有映像 */}
-          {interviewType === 'usability' && usabilityMode === 'service' && (phase === 'interview' || phase === 'thinking' || phase === 'intro' || phase === 'waiting') && (
+          {interviewType === 'usability' && usabilityMode === 'service' && (phase === 'task' || phase === 'interview' || phase === 'thinking' || phase === 'intro' || phase === 'waiting') && (
             <div className="absolute inset-0 flex items-center justify-center bg-gray-900">
               {screenSharing ? (
                 <video
@@ -744,25 +778,42 @@ export default function InterviewRoom({
           {phase === 'guide' && (
             <div className="absolute inset-0 bg-black/75 flex items-center justify-center p-8">
               <div className="text-center max-w-lg w-full">
-                <div className="text-4xl mb-4">🎙️</div>
-                {interviewType && interviewType !== 'interview' && (
-                  <span className="inline-block mb-3 text-xs px-3 py-1 rounded-full border border-indigo-700 text-indigo-300 bg-indigo-900/40">
-                    {interviewType === 'impression' ? '🖼️ 印象テスト' : interviewType === 'usability' && usabilityMode === 'prototype' ? '🎨 プロトタイプテスト' : interviewType === 'usability' ? '🖥️ ユーザビリティテスト' : '🖼️ 印象テスト'}
-                  </span>
-                )}
+                <div className="text-4xl mb-4">
+                  {interviewType === 'impression' ? '🖼️' : interviewType === 'usability' ? (usabilityMode === 'prototype' ? '🎨' : '🖥️') : '🎙️'}
+                </div>
+                <span className="inline-block mb-3 text-xs px-3 py-1 rounded-full border border-indigo-700 text-indigo-300 bg-indigo-900/40">
+                  {interviewType === 'impression' ? '印象テスト'
+                    : interviewType === 'usability' && usabilityMode === 'prototype' ? 'プロトタイプテスト'
+                    : interviewType === 'usability' ? 'ユーザビリティテスト'
+                    : 'インタビュー'}
+                </span>
                 <h1 className="text-2xl font-bold mb-3">{interviewTitle}</h1>
                 <div className="bg-gray-900/80 border border-gray-700 rounded-xl p-5 text-left mb-6 space-y-3">
-                  <p className="text-sm text-gray-300 font-medium">インタビューの流れ</p>
-                  <ul className="space-y-2 text-sm text-gray-400">
-                    <li className="flex gap-2"><span className="text-indigo-400 flex-shrink-0">①</span>カメラ・マイクを許可してください</li>
-                    <li className="flex gap-2"><span className="text-indigo-400 flex-shrink-0">②</span>AI が質問を音声で読み上げます（{questions.length} 問 + 深掘り）</li>
-                    <li className="flex gap-2"><span className="text-indigo-400 flex-shrink-0">③</span>マイクに向かって自由に話してください</li>
-                    <li className="flex gap-2"><span className="text-indigo-400 flex-shrink-0">④</span>回答が終わったら AI が自動で次の質問に進みます</li>
-                  </ul>
+                  <p className="text-sm text-gray-300 font-medium">
+                    {interviewType === 'usability' ? 'テストの流れ' : 'インタビューの流れ'}
+                  </p>
+                  {interviewType === 'usability' ? (
+                    <ul className="space-y-2 text-sm text-gray-400">
+                      <li className="flex gap-2"><span className="text-indigo-400 flex-shrink-0">①</span>カメラ・マイクを許可してください</li>
+                      {usabilityMode === 'prototype' ? (
+                        <li className="flex gap-2"><span className="text-indigo-400 flex-shrink-0">②</span>画面にプロトタイプが表示されます。タスクに沿って操作してください</li>
+                      ) : (
+                        <li className="flex gap-2"><span className="text-indigo-400 flex-shrink-0">②</span>別ウィンドウでサービスが開きます。タスクに沿って操作してください</li>
+                      )}
+                      <li className="flex gap-2"><span className="text-indigo-400 flex-shrink-0">③</span>気づいたこと・感じたことを声に出しながら操作してください（シンクアラウド）</li>
+                      <li className="flex gap-2"><span className="text-indigo-400 flex-shrink-0">④</span>操作が終わったら「タスク完了」を押してください。その後、簡単な質問があります</li>
+                    </ul>
+                  ) : (
+                    <ul className="space-y-2 text-sm text-gray-400">
+                      <li className="flex gap-2"><span className="text-indigo-400 flex-shrink-0">①</span>カメラ・マイクを許可してください</li>
+                      <li className="flex gap-2"><span className="text-indigo-400 flex-shrink-0">②</span>AI が質問を音声で読み上げます（{questions.length} 問 + 深掘り）</li>
+                      <li className="flex gap-2"><span className="text-indigo-400 flex-shrink-0">③</span>マイクに向かって自由に話してください</li>
+                      <li className="flex gap-2"><span className="text-indigo-400 flex-shrink-0">④</span>回答が終わったら AI が自動で次の質問に進みます</li>
+                    </ul>
+                  )}
                   <div className="pt-1 border-t border-gray-700 text-xs text-gray-500 space-y-1">
-                    <p>・インタビューは約 10〜20 分です</p>
                     <p>・静かな場所で、イヤホンなしで参加することをお勧めします</p>
-                    <p>・回答はすべて録音・分析されます</p>
+                    <p>・表情・音声・操作内容が録画・分析されます</p>
                   </div>
                 </div>
                 <button
@@ -804,6 +855,49 @@ export default function InterviewRoom({
                   {stimulusCountdown}
                 </div>
               )}
+            </div>
+          )}
+
+          {/* ユーザビリティテスト: タスクフェーズオーバーレイ */}
+          {phase === 'task' && interviewType === 'usability' && (
+            <div className="absolute inset-0 bg-black/60 flex items-end justify-center pb-8 z-10">
+              <div className="bg-gray-900 border border-gray-700 rounded-2xl p-5 max-w-md w-full mx-4 space-y-4">
+                {/* 現在のタスク表示 */}
+                {tasks && tasks.length > 0 && (
+                  <div>
+                    <p className="text-xs text-gray-500 mb-1">
+                      タスク {currentTaskIndex + 1} / {tasks.length}
+                    </p>
+                    <p className="text-sm text-white font-medium leading-relaxed">
+                      {tasks[currentTaskIndex]?.text}
+                    </p>
+                  </div>
+                )}
+                {/* サービスをポップアップで開く（service モードのみ） */}
+                {usabilityMode === 'service' && stimulusUrl && (
+                  <button
+                    onClick={openServicePopup}
+                    className="w-full border border-indigo-600 text-indigo-400 hover:bg-indigo-900/30 px-4 py-2.5 rounded-xl text-sm font-medium transition-colors"
+                  >
+                    🌐 サービスを別ウィンドウで開く
+                  </button>
+                )}
+                {/* タスク完了 / 終了 ボタン */}
+                <div className="flex gap-2">
+                  <button
+                    onClick={completeTasksAndStartInterview}
+                    className="flex-1 bg-indigo-600 hover:bg-indigo-500 px-4 py-2.5 rounded-xl text-sm font-semibold transition-colors"
+                  >
+                    ✅ タスク完了 → 質問へ
+                  </button>
+                  <button
+                    onClick={endInterview}
+                    className="border border-gray-700 hover:border-gray-500 text-gray-400 hover:text-white px-4 py-2.5 rounded-xl text-sm font-medium transition-colors"
+                  >
+                    終了
+                  </button>
+                </div>
+              </div>
             </div>
           )}
 
@@ -860,7 +954,7 @@ export default function InterviewRoom({
         {/* 右：質問パネル + 会話ログ（スクロール独立） */}
         <div className="w-96 border-l border-gray-800 flex flex-col overflow-hidden">
           {/* タスクリスト (usability) */}
-          {interviewType === 'usability' && tasks && tasks.length > 0 && (phase === 'waiting' || phase === 'interview' || phase === 'thinking' || phase === 'intro') && (
+          {interviewType === 'usability' && tasks && tasks.length > 0 && (phase === 'waiting' || phase === 'task' || phase === 'interview' || phase === 'thinking' || phase === 'intro') && (
             <div className="p-4 border-b border-gray-800 flex-shrink-0">
               <div className="text-xs text-gray-500 uppercase tracking-wide mb-2">タスクリスト</div>
               <div className="space-y-1.5">
@@ -883,7 +977,7 @@ export default function InterviewRoom({
           )}
 
           {/* 画面共有ボタン (usability) */}
-          {interviewType === 'usability' && (phase === 'waiting' || phase === 'interview' || phase === 'thinking' || phase === 'intro') && (
+          {interviewType === 'usability' && (phase === 'waiting' || phase === 'task' || phase === 'interview' || phase === 'thinking' || phase === 'intro') && (
             <div className="p-3 border-b border-gray-800 flex-shrink-0">
               {!screenSharing ? (
                 <button
