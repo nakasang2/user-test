@@ -206,39 +206,12 @@ export default function InterviewRoom({
       if (mediaRecorderRef.current?.state !== 'inactive') {
         mediaRecorderRef.current?.stop()
       }
+      // service モード BroadcastChannel cleanup
+      widgetChannelRef.current?.close()
+      widgetChannelRef.current = null
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
-
-  // ── task フェーズ(service モード)に入ったらウィジェット + サービスを自動オープン ──
-  useEffect(() => {
-    if (phase !== 'task' || interviewType !== 'usability' || usabilityMode !== 'service') return
-
-    // サービスをポップアップで開く
-    if (stimulusUrl) {
-      window.open(stimulusUrl, 'usability-service', 'popup,width=1280,height=820,left=80,top=40')
-    }
-
-    // タスクウィジェットを開く（日本語対応: encodeURIComponent → btoa）
-    const tasksEncoded = btoa(encodeURIComponent(JSON.stringify(tasks ?? [])))
-    const widgetUrl = `/interview/widget?session=${encodeURIComponent(sessionId)}&tasks=${tasksEncoded}&current=0`
-    const popup = window.open(widgetUrl, 'uservoice-widget', 'popup,width=380,height=280,top=40,left=40')
-    setWidgetBlocked(!popup)
-
-    // BroadcastChannel でウィジェットからのメッセージを受信
-    const channel = new BroadcastChannel(`uservoice-widget-${sessionId}`)
-    widgetChannelRef.current = channel
-    channel.onmessage = (e) => {
-      if (e.data.type === 'task_complete') completeTasksAndStartInterview()
-      else if (e.data.type === 'end_session') endInterview()
-    }
-
-    return () => {
-      channel.close()
-      widgetChannelRef.current = null
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [phase])
 
   // 感情検出はインタビュー開始時に startInterview() 内で起動する。
   // こうすることで録画の t=0 と感情タイムスタンプの t=0 が一致する。
@@ -445,17 +418,37 @@ export default function InterviewRoom({
     mediaRecorderRef.current = recorder
   }
 
-  // ── ユーザビリティ: サービスをポップアップで開く ────────
+  // ── ユーザビリティ: サービスを新しいタブで開く ────────────
   function openServicePopup() {
     if (!stimulusUrl) return
-    window.open(stimulusUrl, 'usability-service', 'popup,width=1280,height=820,left=80,top=40')
+    // 同じ名前のタブが既に開いていれば再利用（フォーカスする）
+    window.open(stimulusUrl, 'uservoice-service')
   }
 
-  // ── フローティングタスクウィジェットを開く ──────────────
-  function openWidget() {
+  // ── タスクウィジェットを開く（Document PiP 優先 → ポップアップ fallback） ──
+  async function openWidget() {
     const tasksEncoded = btoa(encodeURIComponent(JSON.stringify(tasks ?? [])))
     const url = `/interview/widget?session=${encodeURIComponent(sessionId)}&tasks=${tasksEncoded}&current=${currentTaskIndex}`
-    const popup = window.open(url, 'uservoice-widget', 'popup,width=380,height=280,top=40,left=40')
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const docPiP = (window as any).documentPictureInPicture
+    if (docPiP) {
+      try {
+        // Document PiP: どのタブ・ウィンドウの上にも常時浮く小窓（Chrome 116+）
+        const pipWindow: Window = await docPiP.requestWindow({ width: 400, height: 340 })
+        pipWindow.document.body.style.cssText = 'margin:0;padding:0;overflow:hidden;background:#030712;'
+        const iframe = pipWindow.document.createElement('iframe')
+        iframe.src = url
+        iframe.style.cssText = 'width:100%;height:100%;border:none;'
+        pipWindow.document.body.appendChild(iframe)
+        setWidgetBlocked(false)
+        return
+      } catch {
+        // ユーザーが PiP を拒否した場合などはポップアップへ fallback
+      }
+    }
+    // ポップアップ fallback（Chrome 116 未満 / Firefox / Safari など）
+    const popup = window.open(url, 'uservoice-widget', 'popup,width=400,height=340,top=40,left=40')
     setWidgetBlocked(!popup)
   }
 
@@ -486,9 +479,22 @@ export default function InterviewRoom({
   // ── インタビュー開始 ──────────────────────────────────
   async function startInterview() {
     setIsRecording(true)
-    // 録画と感情検出を同時に開始 → タイムスタンプが一致する
     startMediaRecorder()
     if (videoRef.current) startDetection(videoRef.current)
+
+    // service モード: ウィンドウ系は await より前に呼ぶ（ユーザージェスチャー文脈を維持）
+    if (interviewType === 'usability' && usabilityMode === 'service') {
+      if (stimulusUrl) window.open(stimulusUrl, 'uservoice-service')
+      void openWidget() // Document PiP or popup（async だが await しない）
+      // BroadcastChannel でウィジェットからのボタン操作を受信
+      const channel = new BroadcastChannel(`uservoice-widget-${sessionId}`)
+      widgetChannelRef.current = channel
+      channel.onmessage = (e) => {
+        if (e.data.type === 'task_complete') completeTasksAndStartInterview()
+        else if (e.data.type === 'end_session') endInterview()
+      }
+    }
+
     await fetch(`/api/sessions/${sessionId}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
@@ -501,7 +507,6 @@ export default function InterviewRoom({
       if (usabilityMode === 'prototype' && stimulusUrl) {
         startScreenShare().catch(() => {/* 録画失敗は無視して続行 */})
       }
-      // service モードは画面共有不要 — ポップアップ + ウィジェットで対応
       setPhase('task')
       return
     }
