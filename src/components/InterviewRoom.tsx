@@ -484,15 +484,17 @@ export default function InterviewRoom({
 
     // service モード: ウィンドウ系は await より前に呼ぶ（ユーザージェスチャー文脈を維持）
     if (interviewType === 'usability' && usabilityMode === 'service') {
-      if (stimulusUrl) window.open(stimulusUrl, 'uservoice-service')
-      void openWidget() // Document PiP or popup（async だが await しない）
-      // BroadcastChannel でウィジェットからのボタン操作を受信
+      // BroadcastChannel を先にセットアップ
       const channel = new BroadcastChannel(`uservoice-widget-${sessionId}`)
       widgetChannelRef.current = channel
       channel.onmessage = (e) => {
         if (e.data.type === 'task_complete') completeTasksAndStartInterview()
         else if (e.data.type === 'end_session') endInterview()
       }
+      // PiP リクエストを window.open より先に（ジェスチャー消費前）
+      void openWidget()
+      // サービスタブを開く（PiP の後）
+      if (stimulusUrl) window.open(stimulusUrl, 'uservoice-service')
     }
 
     await fetch(`/api/sessions/${sessionId}`, {
