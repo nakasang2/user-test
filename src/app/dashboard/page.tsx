@@ -173,11 +173,17 @@ export default function Dashboard() {
           <span className="text-gray-300">ダッシュボード</span>
         </div>
         <div className="flex items-center gap-2">
-          <button
-            onClick={() => setShowCreateInterview(true)}
+          <Link
+            href="/dashboard/design"
             className="bg-indigo-600 hover:bg-indigo-500 px-4 py-2 rounded-lg text-sm font-medium transition-colors"
           >
-            + インタビュー作成
+            ✨ AIで質問設計
+          </Link>
+          <button
+            onClick={() => setShowCreateInterview(true)}
+            className="border border-gray-700 hover:border-gray-500 px-4 py-2 rounded-lg text-sm font-medium text-gray-400 hover:text-white transition-colors"
+          >
+            + 手動で作成
           </button>
           <Link
             href="/dashboard/settings/members"
