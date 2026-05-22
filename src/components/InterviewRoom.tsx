@@ -436,7 +436,7 @@ export default function InterviewRoom({
     if (docPiP) {
       try {
         // Document PiP: どのタブ・ウィンドウの上にも常時浮く小窓（Chrome 116+）
-        const pipWindow: Window = await docPiP.requestWindow({ width: 400, height: 360 })
+        const pipWindow: Window = await docPiP.requestWindow({ width: 400, height: 500 })
         pipWindow.document.body.style.cssText = 'margin:0;padding:0;overflow:hidden;background:#030712;'
         const iframe = pipWindow.document.createElement('iframe')
         iframe.src = url
@@ -449,7 +449,7 @@ export default function InterviewRoom({
       }
     }
     // ポップアップ fallback
-    const popup = window.open(url, 'uservoice-widget', 'popup,width=400,height=360,top=40,left=40')
+    const popup = window.open(url, 'uservoice-widget', 'popup,width=400,height=500,top=40,left=40')
     setWidgetBlocked(!popup)
   }
 
@@ -491,17 +491,23 @@ export default function InterviewRoom({
       channel.onmessage = (e) => {
         if (e.data.type === 'task_complete') completeTasksAndStartInterview()
         else if (e.data.type === 'end_session') endInterview()
+        else if (e.data.type === 'recording_started') setScreenSharing(true)
+        else if (e.data.type === 'screen_recording_blob') {
+          const blob: Blob = e.data.blob
+          if (blob.size > 0) {
+            const url = URL.createObjectURL(blob)
+            setScreenRecordingDownloadUrl(url)
+          }
+        }
       }
-      // ① サービスタブをバックグラウンドで開く → 画面共有ダイアログの選択肢に現れる
+      // ① サービスタブを開く
       if (stimulusUrl) {
         const win = window.open(stimulusUrl, 'uservoice-service')
         if (win) serviceWinRef.current = win
       }
-      // ② 画面共有ダイアログ（サービスタブを選択してもらう）
-      await startScreenShare()
-      // ③ 承諾後: サービスタブへ自動遷移
+      // ② サービスタブへ自動遷移
       serviceWinRef.current?.focus()
-      // ④ ウィジェット（PiP or ポップアップ）を自動で表示
+      // ③ ウィジェット（PiP or ポップアップ）を自動で表示（録画はウィジェット内で行う）
       void openWidget()
     }
 
@@ -928,19 +934,17 @@ export default function InterviewRoom({
                 {usabilityMode === 'service' ? (
                   /* ── サービスモード: ウィジェットが主役 ── */
                   <div className="space-y-3">
-                    {/* 録画ステータス */}
+                    {/* 録画ステータス（録画操作はウィジェット内で行う） */}
                     {screenSharing ? (
                       <div className="flex items-center gap-2 text-xs px-3 py-1.5 rounded-lg bg-red-900/40 border border-red-700/50 text-red-300">
                         <span className="w-1.5 h-1.5 rounded-full bg-red-400 animate-pulse flex-shrink-0" />
                         🔴 画面録画中
                       </div>
                     ) : (
-                      <button
-                        onClick={() => void startScreenShare()}
-                        className="w-full flex items-center justify-center gap-2 bg-red-700/80 hover:bg-red-600 border border-red-600 px-4 py-2.5 rounded-xl text-sm font-semibold transition-colors"
-                      >
-                        🖥️ 画面録画を開始する
-                      </button>
+                      <div className="flex items-center gap-2 text-xs px-3 py-1.5 rounded-lg bg-gray-800 border border-gray-700 text-gray-500">
+                        <span className="w-1.5 h-1.5 rounded-full bg-gray-600 flex-shrink-0" />
+                        ウィジェットから画面録画を開始してください
+                      </div>
                     )}
                     {widgetBlocked ? (
                       <div className="bg-yellow-900/30 border border-yellow-700/50 rounded-xl p-3 text-xs text-yellow-300 leading-relaxed">
