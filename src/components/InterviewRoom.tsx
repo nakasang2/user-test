@@ -491,9 +491,11 @@ export default function InterviewRoom({
         if (e.data.type === 'task_complete') completeTasksAndStartInterview()
         else if (e.data.type === 'end_session') endInterview()
       }
-      // PiP リクエストを window.open より先に（ジェスチャー消費前）
+      // ① 画面録画を開始（ダイアログで「画面全体」を選んでもらう）
+      await startScreenShare()
+      // ② 録画確認後にウィジェット（PiP）を開く — getDisplayMedia 後もジェスチャー継続
       void openWidget()
-      // サービスタブを開く（PiP の後）
+      // ③ サービスタブを開く
       if (stimulusUrl) window.open(stimulusUrl, 'uservoice-service')
     }
 
@@ -828,12 +830,23 @@ export default function InterviewRoom({
                     <ul className="space-y-2 text-sm text-gray-400">
                       <li className="flex gap-2"><span className="text-indigo-400 flex-shrink-0">①</span>カメラ・マイクを許可してください</li>
                       {usabilityMode === 'prototype' ? (
-                        <li className="flex gap-2"><span className="text-indigo-400 flex-shrink-0">②</span>画面にプロトタイプが表示されます。タスクに沿って操作してください</li>
+                        <>
+                          <li className="flex gap-2"><span className="text-indigo-400 flex-shrink-0">②</span>画面にプロトタイプが表示されます。タスクに沿って操作してください</li>
+                          <li className="flex gap-2"><span className="text-indigo-400 flex-shrink-0">③</span>気づいたこと・感じたことを声に出しながら操作してください（シンクアラウド）</li>
+                          <li className="flex gap-2"><span className="text-indigo-400 flex-shrink-0">④</span>操作が終わったら「タスク完了」を押してください。その後、簡単な質問があります</li>
+                        </>
                       ) : (
-                        <li className="flex gap-2"><span className="text-indigo-400 flex-shrink-0">②</span>別ウィンドウでサービスが開きます。タスクに沿って操作してください</li>
+                        <>
+                          <li className="flex gap-2"><span className="text-indigo-400 flex-shrink-0">②</span>
+                            <span>「開始する」を押すと<strong className="text-white">画面共有のダイアログ</strong>が出ます。<br />
+                            <span className="text-yellow-400 font-medium">「画面全体」または「デスクトップ」</span>を選んで共有してください。<br />
+                            これにより操作画面が録画されます。</span>
+                          </li>
+                          <li className="flex gap-2"><span className="text-indigo-400 flex-shrink-0">③</span>サービスが新しいタブで開きます。タスクに沿って自由に操作してください</li>
+                          <li className="flex gap-2"><span className="text-indigo-400 flex-shrink-0">④</span>操作しながら気づいたこと・感じたことを声に出してください（シンクアラウド）</li>
+                          <li className="flex gap-2"><span className="text-indigo-400 flex-shrink-0">⑤</span>操作が終わったら浮かんでいる小窓の「タスク完了」を押してください</li>
+                        </>
                       )}
-                      <li className="flex gap-2"><span className="text-indigo-400 flex-shrink-0">③</span>気づいたこと・感じたことを声に出しながら操作してください（シンクアラウド）</li>
-                      <li className="flex gap-2"><span className="text-indigo-400 flex-shrink-0">④</span>操作が終わったら「タスク完了」を押してください。その後、簡単な質問があります</li>
                     </ul>
                   ) : (
                     <ul className="space-y-2 text-sm text-gray-400">
@@ -909,6 +922,15 @@ export default function InterviewRoom({
                 {usabilityMode === 'service' ? (
                   /* ── サービスモード: ウィジェットが主役 ── */
                   <div className="space-y-3">
+                    {/* 録画ステータス */}
+                    <div className={`flex items-center gap-2 text-xs px-3 py-1.5 rounded-lg ${
+                      screenSharing
+                        ? 'bg-red-900/40 border border-red-700/50 text-red-300'
+                        : 'bg-yellow-900/30 border border-yellow-700/50 text-yellow-300'
+                    }`}>
+                      <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${screenSharing ? 'bg-red-400 animate-pulse' : 'bg-yellow-400'}`} />
+                      {screenSharing ? '🔴 画面録画中' : '⚠️ 画面録画が開始されていません'}
+                    </div>
                     {widgetBlocked ? (
                       <div className="bg-yellow-900/30 border border-yellow-700/50 rounded-xl p-3 text-xs text-yellow-300 leading-relaxed">
                         ポップアップがブロックされました。ブラウザのアドレスバー右端でポップアップを許可するか、下のボタンで操作してください。
