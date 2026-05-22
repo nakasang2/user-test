@@ -219,8 +219,8 @@ export default function InterviewRoom({
       window.open(stimulusUrl, 'usability-service', 'popup,width=1280,height=820,left=80,top=40')
     }
 
-    // タスクウィジェットを開く
-    const tasksEncoded = btoa(JSON.stringify(tasks ?? []))
+    // タスクウィジェットを開く（日本語対応: encodeURIComponent → btoa）
+    const tasksEncoded = btoa(encodeURIComponent(JSON.stringify(tasks ?? [])))
     const widgetUrl = `/interview/widget?session=${encodeURIComponent(sessionId)}&tasks=${tasksEncoded}&current=0`
     const popup = window.open(widgetUrl, 'uservoice-widget', 'popup,width=380,height=280,top=40,left=40')
     setWidgetBlocked(!popup)
@@ -453,7 +453,7 @@ export default function InterviewRoom({
 
   // ── フローティングタスクウィジェットを開く ──────────────
   function openWidget() {
-    const tasksEncoded = btoa(JSON.stringify(tasks ?? []))
+    const tasksEncoded = btoa(encodeURIComponent(JSON.stringify(tasks ?? [])))
     const url = `/interview/widget?session=${encodeURIComponent(sessionId)}&tasks=${tasksEncoded}&current=${currentTaskIndex}`
     const popup = window.open(url, 'uservoice-widget', 'popup,width=380,height=280,top=40,left=40')
     setWidgetBlocked(!popup)
@@ -497,13 +497,11 @@ export default function InterviewRoom({
 
     // ユーザビリティテスト → タスクフェーズへ（TTS なし）
     if (interviewType === 'usability') {
-      if (usabilityMode === 'service') {
-        // 画面共有を開始（サービスモードのみ）
-        await startScreenShare()
-      } else if (usabilityMode === 'prototype' && stimulusUrl) {
-        // プロトタイプ: 画面録画（タブ共有）をバックグラウンドで開始
+      // prototype のみ: iframe 上の操作をバックグラウンドで画面録画
+      if (usabilityMode === 'prototype' && stimulusUrl) {
         startScreenShare().catch(() => {/* 録画失敗は無視して続行 */})
       }
+      // service モードは画面共有不要 — ポップアップ + ウィジェットで対応
       setPhase('task')
       return
     }
@@ -770,26 +768,7 @@ export default function InterviewRoom({
             </div>
           )}
 
-          {/* ユーザビリティテスト(service): 画面共有映像 */}
-          {interviewType === 'usability' && usabilityMode === 'service' && (phase === 'task' || phase === 'interview' || phase === 'thinking' || phase === 'intro' || phase === 'waiting') && (
-            <div className="absolute inset-0 flex items-center justify-center bg-gray-900">
-              {screenSharing ? (
-                <video
-                  ref={screenVideoRef}
-                  autoPlay
-                  muted
-                  playsInline
-                  className="w-full h-full object-contain bg-black"
-                />
-              ) : (
-                <div className="text-center space-y-4 px-8">
-                  <div className="text-4xl">🖥️</div>
-                  <p className="text-gray-300 text-sm font-medium">画面共有を開始してください</p>
-                  <p className="text-gray-500 text-xs">「インタビューを開始する」を押すと画面共有が求められます</p>
-                </div>
-              )}
-            </div>
-          )}
+          {/* ユーザビリティテスト(service): ウェブカメラが全画面表示（サービスは別ウィンドウで操作） */}
 
           {/* 感情検出ステータス（右上オーバーレイ） */}
           {emotionStatus === 'loading' && (
@@ -1064,20 +1043,20 @@ export default function InterviewRoom({
             </div>
           )}
 
-          {/* 画面共有ボタン (usability) */}
-          {interviewType === 'usability' && (phase === 'waiting' || phase === 'task' || phase === 'interview' || phase === 'thinking' || phase === 'intro') && (
+          {/* 画面共有ボタン (prototype モードのみ) */}
+          {interviewType === 'usability' && usabilityMode === 'prototype' && (phase === 'waiting' || phase === 'task' || phase === 'interview' || phase === 'thinking' || phase === 'intro') && (
             <div className="p-3 border-b border-gray-800 flex-shrink-0">
               {!screenSharing ? (
                 <button
                   onClick={startScreenShare}
                   className="w-full bg-gray-800 hover:bg-gray-700 border border-gray-700 hover:border-indigo-500 px-3 py-2 rounded-lg text-xs font-medium transition-colors flex items-center justify-center gap-2"
                 >
-                  {usabilityMode === 'prototype' ? '🎙️ 録画を開始（このタブを共有）' : '🖥️ 画面共有を開始'}
+                  🎙️ 録画を開始（このタブを共有）
                 </button>
               ) : (
                 <div className="flex items-center gap-2 text-xs text-green-400">
                   <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
-                  {usabilityMode === 'prototype' ? '録画中' : '画面共有中'}
+                  録画中
                 </div>
               )}
               {screenShareError && <p className="text-xs text-red-400 mt-1">{screenShareError}</p>}

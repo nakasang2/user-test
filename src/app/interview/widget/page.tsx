@@ -23,7 +23,7 @@ function WidgetContent() {
   const channelRef = useRef<BroadcastChannel | null>(null)
 
   useEffect(() => {
-    try { setTasks(JSON.parse(atob(tasksRaw))) } catch { setTasks([]) }
+    try { setTasks(JSON.parse(decodeURIComponent(atob(tasksRaw)))) } catch { setTasks([]) }
 
     if (!sessionId) return
     const channel = new BroadcastChannel(`uservoice-widget-${sessionId}`)
