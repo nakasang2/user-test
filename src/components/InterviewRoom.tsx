@@ -105,6 +105,7 @@ export default function InterviewRoom({
   // フローティングウィジェット (service モード)
   const widgetChannelRef = useRef<BroadcastChannel | null>(null)
   const [widgetBlocked, setWidgetBlocked] = useState(false)
+  const serviceWinRef = useRef<Window | null>(null) // サービスタブの window 参照
 
   // 音声認識サポート確認（マウント時）
   useEffect(() => {
@@ -421,8 +422,8 @@ export default function InterviewRoom({
   // ── ユーザビリティ: サービスを新しいタブで開く ────────────
   function openServicePopup() {
     if (!stimulusUrl) return
-    // 同じ名前のタブが既に開いていれば再利用（フォーカスする）
-    window.open(stimulusUrl, 'uservoice-service')
+    const win = window.open(stimulusUrl, 'uservoice-service')
+    if (win) serviceWinRef.current = win
   }
 
   // ── タスクウィジェットを開く（Document PiP 優先 → ポップアップ fallback） ──
@@ -435,7 +436,7 @@ export default function InterviewRoom({
     if (docPiP) {
       try {
         // Document PiP: どのタブ・ウィンドウの上にも常時浮く小窓（Chrome 116+）
-        const pipWindow: Window = await docPiP.requestWindow({ width: 400, height: 340 })
+        const pipWindow: Window = await docPiP.requestWindow({ width: 400, height: 360 })
         pipWindow.document.body.style.cssText = 'margin:0;padding:0;overflow:hidden;background:#030712;'
         const iframe = pipWindow.document.createElement('iframe')
         iframe.src = url
@@ -444,11 +445,11 @@ export default function InterviewRoom({
         setWidgetBlocked(false)
         return
       } catch {
-        // ユーザーが PiP を拒否した場合などはポップアップへ fallback
+        // PiP 拒否・未対応 → ポップアップへ fallback
       }
     }
-    // ポップアップ fallback（Chrome 116 未満 / Firefox / Safari など）
-    const popup = window.open(url, 'uservoice-widget', 'popup,width=400,height=340,top=40,left=40')
+    // ポップアップ fallback
+    const popup = window.open(url, 'uservoice-widget', 'popup,width=400,height=360,top=40,left=40')
     setWidgetBlocked(!popup)
   }
 
@@ -491,11 +492,16 @@ export default function InterviewRoom({
         if (e.data.type === 'task_complete') completeTasksAndStartInterview()
         else if (e.data.type === 'end_session') endInterview()
       }
-      // ① サービスタブを先に開く（バックグラウンド）→ 画面共有ダイアログの選択肢に現れる
-      if (stimulusUrl) window.open(stimulusUrl, 'uservoice-service')
-      // ② 画面録画開始（ダイアログにサービスタブが選択肢として出るので指定可能）
+      // ① サービスタブをバックグラウンドで開く → 画面共有ダイアログの選択肢に現れる
+      if (stimulusUrl) {
+        const win = window.open(stimulusUrl, 'uservoice-service')
+        if (win) serviceWinRef.current = win
+      }
+      // ② 画面共有ダイアログ（サービスタブを選択してもらう）
       await startScreenShare()
-      // ③ 録画確認後にウィジェット（PiP）を開く
+      // ③ 承諾後: サービスタブへ自動遷移
+      serviceWinRef.current?.focus()
+      // ④ ウィジェット（PiP or ポップアップ）を自動で表示
       void openWidget()
     }
 

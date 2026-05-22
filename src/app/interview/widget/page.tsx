@@ -13,13 +13,13 @@ type WidgetPhase = 'task' | 'done'
 function WidgetContent() {
   const searchParams = useSearchParams()
   const sessionId  = searchParams.get('session') ?? ''
-  const tasksRaw   = searchParams.get('tasks')   ?? 'W10=' // base64 '[]'
+  const tasksRaw   = searchParams.get('tasks')   ?? 'W10='
   const initialIdx = parseInt(searchParams.get('current') ?? '0', 10)
 
-  const [tasks, setTasks]                   = useState<Task[]>([])
+  const [tasks, setTasks]                       = useState<Task[]>([])
   const [currentTaskIndex, setCurrentTaskIndex] = useState(initialIdx)
-  const [widgetPhase, setWidgetPhase]       = useState<WidgetPhase>('task')
-  const [doneMessage, setDoneMessage]       = useState('')
+  const [widgetPhase, setWidgetPhase]           = useState<WidgetPhase>('task')
+  const [doneMessage, setDoneMessage]           = useState('')
   const channelRef = useRef<BroadcastChannel | null>(null)
 
   useEffect(() => {
@@ -34,22 +34,43 @@ function WidgetContent() {
       if (type === 'task_update' && typeof e.data.currentTaskIndex === 'number') {
         setCurrentTaskIndex(e.data.currentTaskIndex)
       } else if (type === 'session_ended') {
-        setDoneMessage('インタビューに戻ります...')
         setWidgetPhase('done')
-        setTimeout(() => window.close(), 1500)
+        setDoneMessage('ウィンドウを閉じています...')
+        setTimeout(() => window.close(), 1200)
       }
     }
 
     return () => { channel.close(); channelRef.current = null }
   }, [sessionId, tasksRaw])
 
+  // インタビューページにフォーカスを戻す（ユーザークリック起点なので許可される）
+  function focusInterviewPage() {
+    // ポップアップ case: window.opener = インタビューページ
+    if (window.opener && !window.opener.closed) {
+      window.opener.focus()
+      return
+    }
+    // PiP (iframe) case: window.parent = PiP ウィンドウ, そのopener = インタビューページ
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const pipOpener = (window.parent as any)?.opener
+      if (pipOpener && !pipOpener.closed) {
+        pipOpener.focus()
+      }
+    } catch { /* cross-origin guard */ }
+  }
+
   function taskComplete() {
+    // ① インタビューページへフォーカス（ユーザークリック = ジェスチャー有効）
+    focusInterviewPage()
+    // ② メインページへ完了を通知
     channelRef.current?.postMessage({ type: 'task_complete' })
-    setDoneMessage('質問フェーズへ移行します...')
+    setDoneMessage('インタビューページに戻ります...')
     setWidgetPhase('done')
   }
 
   function endSession() {
+    focusInterviewPage()
     channelRef.current?.postMessage({ type: 'end_session' })
     setDoneMessage('セッションを終了します...')
     setWidgetPhase('done')
