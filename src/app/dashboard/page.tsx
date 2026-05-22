@@ -179,6 +179,12 @@ export default function Dashboard() {
           >
             + インタビュー作成
           </button>
+          <Link
+            href="/dashboard/settings/members"
+            className="border border-gray-700 hover:border-gray-500 px-3 py-2 rounded-lg text-xs text-gray-400 hover:text-gray-200 transition-colors"
+          >
+            👥 メンバー管理
+          </Link>
           <button
             onClick={async () => {
               await fetch('/api/auth/logout', { method: 'POST' })

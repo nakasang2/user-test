@@ -18,6 +18,8 @@ model Organization {
   updatedAt  DateTime    @updatedAt
   users      User[]
   interviews Interview[]
+  members    Member[]
+  invites    Invite[]
 }
 
 model User {
@@ -25,11 +27,41 @@ model User {
   email          String       @unique
   name           String
   passwordHash   String
-  role           String       @default("owner") // owner | member
+  role           String       @default("owner") // legacy – 実際の権限は Member.role を参照
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  memberships    Member[]
+  createdInvites Invite[]     @relation("InviteCreatedBy")
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
+}
+
+// 組織×ユーザーの多対多（将来の複数組織対応も見据えた junction table）
+model Member {
+  id             String       @id @default(cuid())
+  userId         String
+  organizationId String
+  role           String       @default("viewer") // owner | admin | editor | viewer
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdAt      DateTime     @default(now())
+
+  @@unique([userId, organizationId])
+}
+
+// 招待トークン（メール or リンク共有）
+model Invite {
+  id             String       @id @default(cuid())
+  token          String       @unique @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdById    String
+  createdBy      User         @relation("InviteCreatedBy", fields: [createdById], references: [id])
+  email          String?      // 特定メールのみ有効にする場合
+  role           String       @default("viewer") // viewer | editor | admin
+  expiresAt      DateTime
+  usedAt         DateTime?
+  createdAt      DateTime     @default(now())
 }
 
 // ─────────────────────────────────────────────

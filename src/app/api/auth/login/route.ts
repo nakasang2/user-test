@@ -31,6 +31,13 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'メールアドレスまたはパスワードが違います' }, { status: 401 })
     }
 
+    // 既存ユーザーの Member レコードを自動作成（マイグレーション対応）
+    await prisma.member.upsert({
+      where: { userId_organizationId: { userId: user.id, organizationId: user.organizationId } },
+      create: { userId: user.id, organizationId: user.organizationId, role: user.role || 'owner' },
+      update: {},
+    })
+
     const token = await signToken({ userId: user.id, orgId: user.organizationId, email: user.email })
 
     const res = NextResponse.json({ ok: true })

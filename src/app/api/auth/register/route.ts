@@ -30,11 +30,15 @@ export async function POST(req: NextRequest) {
 
     const passwordHash = await bcrypt.hash(password, 12)
 
-    // トランザクションで組織・ユーザーを一括作成
+    // トランザクションで組織・ユーザー・メンバーレコードを一括作成
     const { org, user } = await prisma.$transaction(async (tx) => {
       const org = await tx.organization.create({ data: { name: orgName } })
       const user = await tx.user.create({
         data: { email, name, passwordHash, organizationId: org.id, role: 'owner' },
+      })
+      // Member junction table にオーナーとして登録
+      await tx.member.create({
+        data: { userId: user.id, organizationId: org.id, role: 'owner' },
       })
       // 既存の未所属インタビューをこの組織に割り当て（初回登録時の自動マイグレーション）
       await tx.interview.updateMany({

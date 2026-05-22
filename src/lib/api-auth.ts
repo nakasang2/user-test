@@ -1,11 +1,20 @@
 import { cookies } from 'next/headers'
 import { NextResponse } from 'next/server'
 import { verifyToken, type TokenPayload } from './jwt'
+import { prisma } from './db'
+import { hasPermission, type Role } from './permissions'
 
 export class AuthError extends Error {
   constructor(message = 'Unauthorized') {
     super(message)
     this.name = 'AuthError'
+  }
+}
+
+export class ForbiddenError extends Error {
+  constructor(message = 'Forbidden') {
+    super(message)
+    this.name = 'ForbiddenError'
   }
 }
 
@@ -19,10 +28,25 @@ export async function requireAuth(): Promise<TokenPayload> {
   return payload
 }
 
+/** 認証 + 権限チェック。指定ロール未満なら ForbiddenError を投げる */
+export async function requireRole(minRole: Role): Promise<TokenPayload & { role: string }> {
+  const payload = await requireAuth()
+  const member = await prisma.member.findUnique({
+    where: { userId_organizationId: { userId: payload.userId, organizationId: payload.orgId } },
+    select: { role: true },
+  })
+  const role = member?.role ?? 'viewer'
+  if (!hasPermission(role, minRole)) throw new ForbiddenError()
+  return { ...payload, role }
+}
+
 /** API ルートの共通エラーハンドラー */
 export function handleApiError(err: unknown): NextResponse {
   if (err instanceof AuthError) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+  if (err instanceof ForbiddenError) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
   console.error('[API Error]', err)
   return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
