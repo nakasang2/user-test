@@ -929,14 +929,19 @@ export default function InterviewRoom({
                   /* ── サービスモード: ウィジェットが主役 ── */
                   <div className="space-y-3">
                     {/* 録画ステータス */}
-                    <div className={`flex items-center gap-2 text-xs px-3 py-1.5 rounded-lg ${
-                      screenSharing
-                        ? 'bg-red-900/40 border border-red-700/50 text-red-300'
-                        : 'bg-yellow-900/30 border border-yellow-700/50 text-yellow-300'
-                    }`}>
-                      <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${screenSharing ? 'bg-red-400 animate-pulse' : 'bg-yellow-400'}`} />
-                      {screenSharing ? '🔴 画面録画中' : '⚠️ 画面録画が開始されていません'}
-                    </div>
+                    {screenSharing ? (
+                      <div className="flex items-center gap-2 text-xs px-3 py-1.5 rounded-lg bg-red-900/40 border border-red-700/50 text-red-300">
+                        <span className="w-1.5 h-1.5 rounded-full bg-red-400 animate-pulse flex-shrink-0" />
+                        🔴 画面録画中
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => void startScreenShare()}
+                        className="w-full flex items-center justify-center gap-2 bg-red-700/80 hover:bg-red-600 border border-red-600 px-4 py-2.5 rounded-xl text-sm font-semibold transition-colors"
+                      >
+                        🖥️ 画面録画を開始する
+                      </button>
+                    )}
                     {widgetBlocked ? (
                       <div className="bg-yellow-900/30 border border-yellow-700/50 rounded-xl p-3 text-xs text-yellow-300 leading-relaxed">
                         ポップアップがブロックされました。ブラウザのアドレスバー右端でポップアップを許可するか、下のボタンで操作してください。
