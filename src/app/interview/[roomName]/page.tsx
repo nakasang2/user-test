@@ -31,7 +31,9 @@ export default async function InterviewPage(props: { params: Promise<{ roomName:
       }))}
       interviewTitle={session.interview.title}
       participantName={session.participant?.name}
-      interviewType={session.interview.type as 'interview' | 'impression' | 'prototype' | 'usability'}
+      interviewType={session.interview.type as 'interview' | 'impression' | 'usability'}
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      usabilityMode={((session.interview as any).usabilityMode as 'prototype' | 'service' | null | undefined) ?? undefined}
       stimulusUrl={session.interview.stimulusUrl ?? undefined}
       stimulusDuration={session.interview.stimulusDuration ?? undefined}
       tasks={session.interview.tasks}

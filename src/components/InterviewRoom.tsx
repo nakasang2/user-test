@@ -16,7 +16,8 @@ interface Props {
   questions: Question[]
   interviewTitle: string
   participantName?: string
-  interviewType?: 'interview' | 'impression' | 'prototype' | 'usability'
+  interviewType?: 'interview' | 'impression' | 'usability'
+  usabilityMode?: 'prototype' | 'service'
   stimulusUrl?: string
   stimulusDuration?: number  // seconds (default 5)
   tasks?: { text: string; order: number }[]
@@ -38,6 +39,7 @@ export default function InterviewRoom({
   interviewTitle,
   participantName,
   interviewType,
+  usabilityMode,
   stimulusUrl,
   stimulusDuration,
   tasks,
@@ -97,6 +99,9 @@ export default function InterviewRoom({
   const [screenShareError, setScreenShareError] = useState<string | null>(null)
   const [currentTaskIndex, setCurrentTaskIndex] = useState(0)
   const [stimulusCountdown, setStimulusCountdown] = useState(0)
+  const screenMediaRecorderRef = useRef<MediaRecorder | null>(null)
+  const screenRecordedChunksRef = useRef<Blob[]>([])
+  const [screenRecordingDownloadUrl, setScreenRecordingDownloadUrl] = useState<string | null>(null)
 
   // 音声認識サポート確認（マウント時）
   useEffect(() => {
@@ -192,6 +197,9 @@ export default function InterviewRoom({
       currentAudioRef.current = null
       if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current)
       stopDetection()
+      if (screenMediaRecorderRef.current?.state !== 'inactive') {
+        screenMediaRecorderRef.current?.stop()
+      }
       if (mediaRecorderRef.current?.state !== 'inactive') {
         mediaRecorderRef.current?.stop()
       }
@@ -416,6 +424,11 @@ export default function InterviewRoom({
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ status: 'active' }),
     })
+    // ユーザビリティテスト: 画面共有を開始
+    if (interviewType === 'usability') {
+      await startScreenShare()
+    }
+
     // 印象テストの場合: stimulus フェーズを挿入
     if (interviewType === 'impression' && stimulusUrl) {
       setPhase('stimulus')
@@ -507,6 +520,13 @@ export default function InterviewRoom({
       setRecordingDownloadUrl(url)
     }
 
+    // 画面録画も保存
+    const screenBlob = await stopScreenRecorder()
+    if (screenBlob.size > 0) {
+      const screenUrl = URL.createObjectURL(screenBlob)
+      setScreenRecordingDownloadUrl(screenUrl)
+    }
+
     await fetch(`/api/sessions/${sessionId}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
@@ -528,9 +548,19 @@ export default function InterviewRoom({
     try {
       const stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false })
       screenStreamRef.current = stream
-      if (screenVideoRef.current) {
+      // For 'service' mode: show in video element
+      if (usabilityMode === 'service' && screenVideoRef.current) {
         screenVideoRef.current.srcObject = stream
       }
+      // Record the screen stream
+      screenRecordedChunksRef.current = []
+      const mimeType = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm'].find(
+        (t) => MediaRecorder.isTypeSupported(t)
+      ) ?? ''
+      const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : {})
+      recorder.ondataavailable = (e) => { if (e.data.size > 0) screenRecordedChunksRef.current.push(e.data) }
+      recorder.start(1000)
+      screenMediaRecorderRef.current = recorder
       setScreenSharing(true)
       stream.getVideoTracks()[0].onended = () => {
         setScreenSharing(false)
@@ -539,6 +569,22 @@ export default function InterviewRoom({
     } catch {
       setScreenShareError('画面共有を開始できませんでした')
     }
+  }
+
+  // ── 画面録画停止 → Blob を返す ────────────────────────
+  function stopScreenRecorder(): Promise<Blob> {
+    return new Promise((resolve) => {
+      const recorder = screenMediaRecorderRef.current
+      if (!recorder || recorder.state === 'inactive') {
+        resolve(new Blob([], { type: 'video/webm' }))
+        return
+      }
+      recorder.onstop = () => {
+        const mimeType = recorder.mimeType || 'video/webm'
+        resolve(new Blob(screenRecordedChunksRef.current, { type: mimeType }))
+      }
+      recorder.stop()
+    })
   }
 
   const progress = ((currentQuestionIndex + 1) / questions.length) * 100
@@ -626,35 +672,42 @@ export default function InterviewRoom({
               muted
               playsInline
               className={
-                (interviewType === 'prototype' || (interviewType === 'usability' && screenSharing))
-                  && (phase === 'interview' || phase === 'thinking' || phase === 'intro')
-                  ? 'absolute bottom-4 right-4 w-28 h-20 object-cover scale-x-[-1] rounded-xl border border-gray-700 z-10'
+                interviewType === 'usability' && (phase === 'interview' || phase === 'thinking' || phase === 'intro' || phase === 'waiting')
+                  ? 'absolute bottom-4 right-4 w-44 h-28 object-cover scale-x-[-1] rounded-xl border-2 border-gray-700 z-20 shadow-lg'
                   : 'absolute inset-0 w-full h-full object-cover scale-x-[-1]'
               }
             />
           )}
 
-          {/* プロトタイプテスト: Figma iframe */}
-          {interviewType === 'prototype' && stimulusUrl && (phase === 'interview' || phase === 'thinking' || phase === 'intro') && (
+          {/* プロトタイプテスト: iframe */}
+          {interviewType === 'usability' && usabilityMode === 'prototype' && stimulusUrl && (phase === 'interview' || phase === 'thinking' || phase === 'intro' || phase === 'waiting') && (
             <div className="absolute inset-0">
               <iframe
-                src={`https://www.figma.com/embed?embed_host=share&url=${encodeURIComponent(stimulusUrl)}`}
+                src={stimulusUrl.includes('figma.com') ? `https://www.figma.com/embed?embed_host=share&url=${encodeURIComponent(stimulusUrl)}` : stimulusUrl}
                 className="w-full h-full border-0"
                 allowFullScreen
               />
             </div>
           )}
 
-          {/* ユーザビリティテスト: 画面共有映像 */}
-          {interviewType === 'usability' && screenSharing && (
-            <div className="absolute inset-0">
-              <video
-                ref={screenVideoRef}
-                autoPlay
-                muted
-                playsInline
-                className="w-full h-full object-contain bg-black"
-              />
+          {/* ユーザビリティテスト(service): 画面共有映像 */}
+          {interviewType === 'usability' && usabilityMode === 'service' && (phase === 'interview' || phase === 'thinking' || phase === 'intro' || phase === 'waiting') && (
+            <div className="absolute inset-0 flex items-center justify-center bg-gray-900">
+              {screenSharing ? (
+                <video
+                  ref={screenVideoRef}
+                  autoPlay
+                  muted
+                  playsInline
+                  className="w-full h-full object-contain bg-black"
+                />
+              ) : (
+                <div className="text-center space-y-4 px-8">
+                  <div className="text-4xl">🖥️</div>
+                  <p className="text-gray-300 text-sm font-medium">画面共有を開始してください</p>
+                  <p className="text-gray-500 text-xs">「インタビューを開始する」を押すと画面共有が求められます</p>
+                </div>
+              )}
             </div>
           )}
 
@@ -694,7 +747,7 @@ export default function InterviewRoom({
                 <div className="text-4xl mb-4">🎙️</div>
                 {interviewType && interviewType !== 'interview' && (
                   <span className="inline-block mb-3 text-xs px-3 py-1 rounded-full border border-indigo-700 text-indigo-300 bg-indigo-900/40">
-                    {interviewType === 'impression' ? '🖼️ 印象テスト' : interviewType === 'prototype' ? '🎨 プロトタイプテスト' : '🖥️ ユーザビリティテスト'}
+                    {interviewType === 'impression' ? '🖼️ 印象テスト' : interviewType === 'usability' && usabilityMode === 'prototype' ? '🎨 プロトタイプテスト' : interviewType === 'usability' ? '🖥️ ユーザビリティテスト' : '🖼️ 印象テスト'}
                   </span>
                 )}
                 <h1 className="text-2xl font-bold mb-3">{interviewTitle}</h1>
@@ -785,10 +838,19 @@ export default function InterviewRoom({
                     download={`interview-${sessionId.slice(0, 8)}.webm`}
                     className="inline-block mt-4 bg-indigo-600 hover:bg-indigo-500 px-5 py-2 rounded-lg text-sm font-medium transition-colors"
                   >
-                    📥 録画をダウンロード
+                    📷 顔録画をダウンロード
                   </a>
                 ) : (
                   <p className="text-gray-500 text-sm mt-2">このページを閉じていただいて構いません。</p>
+                )}
+                {screenRecordingDownloadUrl && (
+                  <a
+                    href={screenRecordingDownloadUrl}
+                    download={`screen-${sessionId.slice(0, 8)}.webm`}
+                    className="inline-block mt-2 bg-gray-700 hover:bg-gray-600 px-5 py-2 rounded-lg text-sm font-medium transition-colors"
+                  >
+                    🖥️ 操作録画をダウンロード
+                  </a>
                 )}
               </div>
             </div>
@@ -797,8 +859,8 @@ export default function InterviewRoom({
 
         {/* 右：質問パネル + 会話ログ（スクロール独立） */}
         <div className="w-96 border-l border-gray-800 flex flex-col overflow-hidden">
-          {/* タスクリスト (usability / prototype) */}
-          {(interviewType === 'usability' || interviewType === 'prototype') && tasks && tasks.length > 0 && (phase === 'waiting' || phase === 'interview' || phase === 'thinking' || phase === 'intro') && (
+          {/* タスクリスト (usability) */}
+          {interviewType === 'usability' && tasks && tasks.length > 0 && (phase === 'waiting' || phase === 'interview' || phase === 'thinking' || phase === 'intro') && (
             <div className="p-4 border-b border-gray-800 flex-shrink-0">
               <div className="text-xs text-gray-500 uppercase tracking-wide mb-2">タスクリスト</div>
               <div className="space-y-1.5">
@@ -828,12 +890,12 @@ export default function InterviewRoom({
                   onClick={startScreenShare}
                   className="w-full bg-gray-800 hover:bg-gray-700 border border-gray-700 hover:border-indigo-500 px-3 py-2 rounded-lg text-xs font-medium transition-colors flex items-center justify-center gap-2"
                 >
-                  🖥️ 画面共有を開始
+                  {usabilityMode === 'prototype' ? '🎙️ 録画を開始（このタブを共有）' : '🖥️ 画面共有を開始'}
                 </button>
               ) : (
                 <div className="flex items-center gap-2 text-xs text-green-400">
                   <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
-                  画面共有中
+                  {usabilityMode === 'prototype' ? '録画中' : '画面共有中'}
                 </div>
               )}
               {screenShareError && <p className="text-xs text-red-400 mt-1">{screenShareError}</p>}

@@ -74,7 +74,8 @@ model Interview {
   organization     Organization? @relation(fields: [organizationId], references: [id])
   title            String
   description      String?
-  type             String        @default("interview") // interview | impression | prototype | usability
+  type             String        @default("interview") // interview | impression | usability
+  usabilityMode    String?       // prototype | service (only when type = usability)
   stimulusUrl      String?       // impression: image URL, prototype: Figma embed URL
   stimulusDuration Int?          // impression test: seconds to display (default 5)
   questions        Question[]

@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 
-type InterviewType = 'interview' | 'impression' | 'prototype' | 'usability'
+type InterviewType = 'interview' | 'impression' | 'usability'
 
 interface QuestionItem {
   text: string
@@ -26,8 +26,7 @@ const QUESTION_TYPE_COLORS = {
 const SESSION_TYPES: { value: InterviewType; icon: string; label: string; desc: string }[] = [
   { value: 'interview',   icon: '📝', label: 'インタビュー',         desc: '音声 Q&A + 感情計測' },
   { value: 'impression',  icon: '🖼️', label: '印象テスト',           desc: '画像を見せて反応を計測' },
-  { value: 'prototype',   icon: '🎨', label: 'プロトタイプテスト',   desc: 'Figma を操作しながら計測' },
-  { value: 'usability',   icon: '🖥️', label: 'ユーザビリティテスト', desc: '画面共有 + タスク遂行' },
+  { value: 'usability',   icon: '🖥️', label: 'ユーザビリティテスト', desc: '画面操作 + 感情計測' },
 ]
 
 export default function CreateInterviewModal({ onClose, onCreated }: Props) {
@@ -45,6 +44,8 @@ export default function CreateInterviewModal({ onClose, onCreated }: Props) {
   // impression / prototype
   const [stimulusUrl, setStimulusUrl]         = useState('')
   const [stimulusDuration, setStimulusDuration] = useState(5)
+  // usability sub-type
+  const [usabilityMode, setUsabilityMode] = useState<'prototype' | 'service'>('prototype')
   // prototype / usability
   const [tasks, setTasks] = useState<TaskItem[]>([{ text: '' }, { text: '' }])
   const [loading, setLoading] = useState(false)
@@ -60,9 +61,10 @@ export default function CreateInterviewModal({ onClose, onCreated }: Props) {
           title,
           description:      description || undefined,
           type:             sessionType,
-          stimulusUrl:      (sessionType === 'impression' || sessionType === 'prototype') ? (stimulusUrl || undefined) : undefined,
+          usabilityMode:    sessionType === 'usability' ? usabilityMode : undefined,
+          stimulusUrl:      (sessionType === 'impression' || sessionType === 'usability') ? (stimulusUrl || undefined) : undefined,
           stimulusDuration: sessionType === 'impression' ? stimulusDuration : undefined,
-          tasks:            (sessionType === 'prototype' || sessionType === 'usability')
+          tasks:            sessionType === 'usability'
             ? tasks.filter((t) => t.text.trim()).map((t, i) => ({ text: t.text, order: i + 1 }))
             : undefined,
           questions: sessionType === 'interview'
@@ -129,6 +131,25 @@ export default function CreateInterviewModal({ onClose, onCreated }: Props) {
             </div>
           </div>
 
+          {/* ユーザビリティテスト: サブタイプ選択 */}
+          {sessionType === 'usability' && (
+            <div>
+              <label className="block text-sm text-gray-400 mb-2">テストの種類</label>
+              <div className="grid grid-cols-2 gap-2">
+                <button type="button" onClick={() => setUsabilityMode('prototype')}
+                  className={`p-3 rounded-xl border text-left text-xs transition-colors ${usabilityMode === 'prototype' ? 'border-indigo-500 bg-indigo-900/30 text-white' : 'border-gray-700 text-gray-400'}`}>
+                  <div className="font-medium mb-0.5">🎨 プロトタイプ</div>
+                  <div className="text-[10px] text-gray-500">Figma / ProtoPie など</div>
+                </button>
+                <button type="button" onClick={() => setUsabilityMode('service')}
+                  className={`p-3 rounded-xl border text-left text-xs transition-colors ${usabilityMode === 'service' ? 'border-indigo-500 bg-indigo-900/30 text-white' : 'border-gray-700 text-gray-400'}`}>
+                  <div className="font-medium mb-0.5">🌐 実際のサービス</div>
+                  <div className="text-[10px] text-gray-500">本番サービスのURL</div>
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* タイトル */}
           <div>
             <label className="block text-sm text-gray-400 mb-1">タイトル *</label>
@@ -179,22 +200,26 @@ export default function CreateInterviewModal({ onClose, onCreated }: Props) {
             </>
           )}
 
-          {/* 🎨 プロトタイプテスト専用フィールド */}
-          {sessionType === 'prototype' && (
+          {/* 🖥️ ユーザビリティテスト専用フィールド */}
+          {sessionType === 'usability' && (
             <div>
-              <label className="block text-sm text-gray-400 mb-1">Figma プロトタイプURL</label>
+              <label className="block text-sm text-gray-400 mb-1">
+                {usabilityMode === 'prototype' ? 'プロトタイプURL' : 'サービスURL（参考用）'}
+              </label>
               <input
                 value={stimulusUrl}
                 onChange={(e) => setStimulusUrl(e.target.value)}
-                placeholder="https://www.figma.com/proto/..."
+                placeholder={usabilityMode === 'prototype' ? 'https://www.figma.com/proto/...' : 'https://example.com'}
                 className={inputClass}
               />
-              <p className="text-xs text-gray-600 mt-1">Figma の「プロトタイプを共有」で取得したURLを貼り付けてください</p>
+              <p className="text-xs text-gray-600 mt-1">
+                {usabilityMode === 'prototype' ? 'Figma / ProtoPie などのプロトタイプ共有URLを入力してください' : '実際に操作するサービスのURL（メモ用）'}
+              </p>
             </div>
           )}
 
-          {/* タスクリスト (prototype / usability) */}
-          {(sessionType === 'prototype' || sessionType === 'usability') && (
+          {/* タスクリスト (usability) */}
+          {sessionType === 'usability' && (
             <div>
               <label className="block text-sm text-gray-400 mb-2">タスクリスト</label>
               <div className="space-y-2">

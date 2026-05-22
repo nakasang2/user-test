@@ -13,7 +13,8 @@ const createSchema = z.object({
     z.string(),
     z.object({ text: z.string(), type: z.string().optional() }),
   ])).optional(),
-  type:             z.enum(['interview', 'impression', 'prototype', 'usability']).default('interview'),
+  type:             z.enum(['interview', 'impression', 'usability']).default('interview'),
+  usabilityMode:    z.enum(['prototype', 'service']).optional(),
   stimulusUrl:      z.string().url().optional().or(z.literal('')),
   stimulusDuration: z.number().int().min(1).max(60).optional(),
   tasks:            z.array(z.object({ text: z.string(), order: z.number() })).optional(),
@@ -45,7 +46,7 @@ export async function POST(req: NextRequest) {
     if (!parsed.success) {
       return NextResponse.json({ error: parsed.error.issues[0]?.message }, { status: 400 })
     }
-    const { title, description, questions, autoGenerate, topic, type, stimulusUrl, stimulusDuration, tasks } = parsed.data
+    const { title, description, questions, autoGenerate, topic, type, usabilityMode, stimulusUrl, stimulusDuration, tasks } = parsed.data
 
     type QuestionInput = { text: string; type?: string } | string
     let questionList: QuestionInput[] = questions ?? []
@@ -55,12 +56,14 @@ export async function POST(req: NextRequest) {
       questionList = generated.map((text) => ({ text, type: 'open' }))
     }
 
-    const interview = await prisma.interview.create({
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const interview = await (prisma.interview.create as any)({
       data: {
         organizationId: orgId,
         title,
         description,
         type,
+        usabilityMode: usabilityMode ?? null,
         stimulusUrl: stimulusUrl || null,
         stimulusDuration: stimulusDuration ?? null,
         questions: {
