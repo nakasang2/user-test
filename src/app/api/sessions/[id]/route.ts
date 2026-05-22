@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { del } from '@vercel/blob'
+import { requireAuth, handleApiError } from '@/lib/api-auth'
 
 export async function GET(req: NextRequest, props: { params: Promise<{ id: string }> }) {
   const { id } = await props.params
@@ -43,25 +44,25 @@ export async function PATCH(req: NextRequest, props: { params: Promise<{ id: str
 }
 
 export async function DELETE(_req: NextRequest, props: { params: Promise<{ id: string }> }) {
-  const { id } = await props.params
+  try {
+    const { orgId } = await requireAuth()
+    const { id } = await props.params
 
-  const session = await prisma.session.findUnique({
-    where: { id },
-    select: { recordingUrl: true },
-  })
-  if (!session) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+    const session = await prisma.session.findFirst({
+      where: { id, interview: { organizationId: orgId } },
+      select: { recordingUrl: true },
+    })
+    if (!session) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
-  // Vercel Blob の動画ファイルを削除（失敗してもDB削除は続行）
-  if (session.recordingUrl) {
-    try {
-      await del(session.recordingUrl)
-    } catch (e) {
-      console.error('Blob deletion failed (continuing):', e)
+    if (session.recordingUrl) {
+      try { await del(session.recordingUrl) } catch (e) {
+        console.error('Blob deletion failed (continuing):', e)
+      }
     }
+
+    await prisma.session.delete({ where: { id } })
+    return NextResponse.json({ ok: true })
+  } catch (err) {
+    return handleApiError(err)
   }
-
-  // DB 削除（transcript・segments・emotions は onDelete: Cascade で連鎖削除）
-  await prisma.session.delete({ where: { id } })
-
-  return NextResponse.json({ ok: true })
 }

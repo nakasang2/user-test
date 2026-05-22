@@ -3,6 +3,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import Link from 'next/link'
 import CreateInterviewModal from '@/components/CreateInterviewModal'
+import StatusBadge from '@/components/StatusBadge'
 
 interface Question {
   id: string
@@ -441,20 +442,3 @@ function StatCard({ value, label }: { value: number; label: string }) {
   )
 }
 
-function StatusBadge({ status }: { status: string }) {
-  const colors: Record<string, string> = {
-    pending:    'bg-yellow-500/20 text-yellow-400',
-    active:     'bg-green-500/20 text-green-400',
-    completed:  'bg-blue-500/20 text-blue-400',
-    processing: 'bg-purple-500/20 text-purple-400',
-    done:       'bg-indigo-500/20 text-indigo-400',
-  }
-  const labels: Record<string, string> = {
-    pending: '待機中', active: '進行中', completed: '完了', processing: '処理中', done: '分析済み',
-  }
-  return (
-    <span className={`px-2 py-1 rounded-full text-xs font-medium flex-shrink-0 ${colors[status] ?? 'bg-gray-700 text-gray-400'}`}>
-      {labels[status] ?? status}
-    </span>
-  )
-}

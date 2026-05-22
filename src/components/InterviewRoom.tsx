@@ -92,7 +92,6 @@ export default function InterviewRoom({
 
   // ── TTS（OpenAI tts-1）────────────────────────────────
   const speak = useCallback((text: string, onEnd?: () => void) => {
-    console.log('[TTS] speak called:', text.slice(0, 30))
     if (typeof window === 'undefined') return
 
     // 再生中の音声をキャンセル
@@ -113,8 +112,6 @@ export default function InterviewRoom({
     transcriptRef.current = [...transcriptRef.current, entry]
     setTranscript([...transcriptRef.current])
 
-    // OpenAI TTS API → mp3 再生
-    console.log('[TTS] fetching /api/tts')
     fetch('/api/tts', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

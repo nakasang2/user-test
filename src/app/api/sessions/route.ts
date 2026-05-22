@@ -1,63 +1,22 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { createRoom } from '@/lib/daily'
-import { v4 as uuidv4 } from 'uuid'
+import { requireAuth, handleApiError } from '@/lib/api-auth'
 
 export async function GET() {
-  const sessions = await prisma.session.findMany({
-    include: {
-      interview: { select: { id: true, title: true } },
-      participant: true,
-      transcript: { select: { id: true, summary: true } },
-      _count: { select: { emotions: true } },
-    },
-    orderBy: { createdAt: 'desc' },
-  })
-  return NextResponse.json(sessions)
-}
-
-export async function POST(req: NextRequest) {
-  const body = await req.json()
-  const { interviewId, participantName, participantEmail } = body
-
-  const roomName = `interview-${uuidv4().slice(0, 8)}`
-  const origin = process.env.NEXT_PUBLIC_APP_URL ?? new URL(req.url).origin
-  let roomUrl = `${origin}/interview/${roomName}`
-  let dailyRoomUrl = roomUrl
-
-  if (process.env.DAILY_API_KEY) {
-    try {
-      const room = await createRoom(roomName)
-      dailyRoomUrl = room.url
-    } catch {
-      // Use built-in room if Daily.co is not configured
-    }
-  }
-
-  let participantId: string | undefined
-
-  if (participantName) {
-    const participant = await prisma.participant.create({
-      data: { name: participantName, email: participantEmail },
+  try {
+    const { orgId } = await requireAuth()
+    const sessions = await prisma.session.findMany({
+      where: { interview: { organizationId: orgId } },
+      include: {
+        interview: { select: { id: true, title: true } },
+        participant: true,
+        transcript: { select: { id: true, summary: true } },
+        _count: { select: { emotions: true } },
+      },
+      orderBy: { createdAt: 'desc' },
     })
-    participantId = participant.id
+    return NextResponse.json(sessions)
+  } catch (err) {
+    return handleApiError(err)
   }
-
-  const session = await prisma.session.create({
-    data: {
-      interviewId,
-      participantId,
-      dailyRoomName: roomName,
-      dailyRoomUrl,
-    },
-    include: {
-      interview: { include: { questions: { orderBy: { order: 'asc' } } } },
-      participant: true,
-    },
-  })
-
-  return NextResponse.json({
-    ...session,
-    joinUrl: `${origin}/interview/${roomName}`,
-  }, { status: 201 })
 }

@@ -1,12 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { generateCommonInsights } from '@/lib/ai'
+import { requireAuth, handleApiError } from '@/lib/api-auth'
 
 export async function GET(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  try {
+  const { orgId } = await requireAuth()
   const { id } = await props.params
 
-  const interview = await prisma.interview.findUnique({
-    where: { id },
+  const interview = await prisma.interview.findFirst({
+    where: { id, organizationId: orgId },
     include: {
       questions: { orderBy: { order: 'asc' } },
       sessions: {
@@ -66,6 +69,9 @@ export async function GET(req: NextRequest, props: { params: Promise<{ id: strin
   }
 
   return NextResponse.json({ interview, sessions: sessionsWithStats, commonInsights })
+  } catch (err) {
+    return handleApiError(err)
+  }
 }
 
 function avg(nums: number[]): number {

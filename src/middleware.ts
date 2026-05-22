@@ -1,27 +1,29 @@
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
+import { verifyToken } from '@/lib/jwt'
 
-export function middleware(request: NextRequest) {
+export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl
 
-  // /dashboard/* のみ保護。/interview/* と API は公開のまま
+  // /dashboard/* のみ保護。/interview/* /join/* /register などは公開
   if (!pathname.startsWith('/dashboard')) {
     return NextResponse.next()
   }
 
-  const password = process.env.DASHBOARD_PASSWORD
-  // DASHBOARD_PASSWORD が未設定の場合は開発環境とみなしてスルー
-  if (!password) return NextResponse.next()
-
-  const authCookie = request.cookies.get('auth')
-  if (authCookie?.value === password) {
-    return NextResponse.next()
+  const token = request.cookies.get('token')?.value
+  if (!token) {
+    return NextResponse.redirect(new URL(`/login?from=${encodeURIComponent(pathname)}`, request.url))
   }
 
-  // 認証失敗 → ログインページへ（戻り先を from クエリに保存）
-  const loginUrl = new URL('/login', request.url)
-  loginUrl.searchParams.set('from', pathname)
-  return NextResponse.redirect(loginUrl)
+  const payload = await verifyToken(token)
+  if (!payload) {
+    // 不正・期限切れトークン → クッキー削除してログインへ
+    const res = NextResponse.redirect(new URL(`/login?from=${encodeURIComponent(pathname)}`, request.url))
+    res.cookies.delete('token')
+    return res
+  }
+
+  return NextResponse.next()
 }
 
 export const config = {

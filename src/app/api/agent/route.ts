@@ -1,8 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { chatWithAgent } from '@/lib/ai'
+import { requireAuth, handleApiError } from '@/lib/api-auth'
 
 export async function POST(req: NextRequest) {
+  try {
+  await requireAuth()
   const body = await req.json()
   const { messages, sessionId, interviewId } = body
 
@@ -44,6 +47,9 @@ export async function POST(req: NextRequest) {
 
   const reply = await chatWithAgent(messages, context)
   return NextResponse.json({ reply })
+  } catch (err) {
+    return handleApiError(err)
+  }
 }
 
 function buildSessionContext(session: {
