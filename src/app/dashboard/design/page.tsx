@@ -4,13 +4,22 @@ import { useState, useRef, useEffect } from 'react'
 import Link from 'next/link'
 
 type Role = 'user' | 'assistant'
+type InterviewType = 'interview' | 'impression' | 'prototype' | 'usability'
 interface Message { role: Role; content: string }
 interface Question { text: string; type: string }
+interface TaskItem  { text: string; order: number }
 interface InterviewPlot {
   title: string
   description: string
   questions: Question[]
 }
+
+const SESSION_TYPES: { value: InterviewType; icon: string; label: string }[] = [
+  { value: 'interview',  icon: '📝', label: 'インタビュー' },
+  { value: 'impression', icon: '🖼️', label: '印象テスト' },
+  { value: 'prototype',  icon: '🎨', label: 'プロトタイプ' },
+  { value: 'usability',  icon: '🖥️', label: 'ユーザビリティ' },
+]
 
 const INITIAL_MESSAGE: Message = {
   role: 'assistant',
@@ -25,6 +34,11 @@ export default function DesignPage() {
   const [generating, setGenerating] = useState(false)
   const [saving, setSaving] = useState(false)
   const [savedId, setSavedId] = useState<string | null>(null)
+  // セッションタイプ設定
+  const [sessionType, setSessionType]           = useState<InterviewType>('interview')
+  const [stimulusUrl, setStimulusUrl]           = useState('')
+  const [stimulusDuration, setStimulusDuration] = useState(5)
+  const [tasks, setTasks]                       = useState<TaskItem[]>([{ text: '', order: 1 }, { text: '', order: 2 }])
 
   const bottomRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
@@ -92,9 +106,15 @@ export default function DesignPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          title: plot.title,
-          description: plot.description,
-          questions: plot.questions,
+          title:            plot.title,
+          description:      plot.description,
+          questions:        plot.questions,
+          type:             sessionType,
+          stimulusUrl:      (sessionType === 'impression' || sessionType === 'prototype') ? (stimulusUrl || undefined) : undefined,
+          stimulusDuration: sessionType === 'impression' ? stimulusDuration : undefined,
+          tasks:            (sessionType === 'prototype' || sessionType === 'usability')
+            ? tasks.filter((t) => t.text.trim()).map((t, i) => ({ text: t.text, order: i + 1 }))
+            : undefined,
         }),
       })
       const data = await res.json()
@@ -238,6 +258,79 @@ export default function DesignPage() {
                 <h2 className="text-sm font-semibold text-gray-400">生成されたプロット</h2>
                 <span className="text-xs text-gray-600">編集できます</span>
               </div>
+
+              {/* セッションタイプ */}
+              <div>
+                <label className="block text-xs text-gray-500 mb-2">セッションタイプ</label>
+                <div className="grid grid-cols-2 gap-1.5">
+                  {SESSION_TYPES.map((t) => (
+                    <button key={t.value} type="button" onClick={() => setSessionType(t.value)}
+                      className={`flex items-center gap-1.5 px-3 py-2 rounded-lg border text-xs transition-colors ${
+                        sessionType === t.value
+                          ? 'border-indigo-500 bg-indigo-900/30 text-white'
+                          : 'border-gray-700 text-gray-500 hover:border-gray-600'
+                      }`}>
+                      <span>{t.icon}</span>{t.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* 印象テスト: 画像URL */}
+              {sessionType === 'impression' && (
+                <div className="space-y-2">
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1.5">画像URL</label>
+                    <input type="url" value={stimulusUrl} onChange={(e) => setStimulusUrl(e.target.value)}
+                      placeholder="https://example.com/image.png"
+                      className="w-full bg-gray-800 border border-gray-700 focus:border-indigo-500 focus:outline-none rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600" />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1.5">表示秒数</label>
+                    <input type="number" value={stimulusDuration} onChange={(e) => setStimulusDuration(Number(e.target.value))}
+                      min={1} max={60}
+                      className="w-20 bg-gray-800 border border-gray-700 focus:border-indigo-500 focus:outline-none rounded-lg px-3 py-2 text-sm text-white" />
+                  </div>
+                </div>
+              )}
+
+              {/* プロトタイプ: Figma URL */}
+              {sessionType === 'prototype' && (
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1.5">Figma プロトタイプURL</label>
+                  <input type="url" value={stimulusUrl} onChange={(e) => setStimulusUrl(e.target.value)}
+                    placeholder="https://www.figma.com/proto/..."
+                    className="w-full bg-gray-800 border border-gray-700 focus:border-indigo-500 focus:outline-none rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600" />
+                </div>
+              )}
+
+              {/* タスクリスト (prototype / usability) */}
+              {(sessionType === 'prototype' || sessionType === 'usability') && (
+                <div>
+                  <label className="block text-xs text-gray-500 mb-2">タスクリスト</label>
+                  <div className="space-y-1.5">
+                    {tasks.map((t, i) => (
+                      <div key={i} className="flex gap-2 items-center">
+                        <span className="text-gray-600 text-xs w-4 text-right">{i + 1}</span>
+                        <input value={t.text}
+                          onChange={(e) => {
+                            const next = [...tasks]
+                            next[i] = { ...next[i], text: e.target.value }
+                            setTasks(next)
+                          }}
+                          placeholder={`タスク ${i + 1}`}
+                          className="flex-1 bg-gray-800 border border-gray-700 focus:border-indigo-500 focus:outline-none rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600" />
+                        {tasks.length > 1 && (
+                          <button type="button" onClick={() => setTasks(tasks.filter((_, j) => j !== i))}
+                            className="text-gray-700 hover:text-red-400 text-xs transition-colors">✕</button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                  <button type="button" onClick={() => setTasks([...tasks, { text: '', order: tasks.length + 1 }])}
+                    className="mt-1.5 text-xs text-indigo-400 hover:text-indigo-300">+ タスクを追加</button>
+                </div>
+              )}
 
               {/* タイトル */}
               <div>

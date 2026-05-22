@@ -8,7 +8,12 @@ export default async function InterviewPage(props: { params: Promise<{ roomName:
   const session = await prisma.session.findUnique({
     where: { dailyRoomName: roomName },
     include: {
-      interview: { include: { questions: { orderBy: { order: 'asc' } } } },
+      interview: {
+        include: {
+          questions: { orderBy: { order: 'asc' } },
+          tasks: { orderBy: { order: 'asc' } },
+        },
+      },
       participant: true,
     },
   })
@@ -26,6 +31,10 @@ export default async function InterviewPage(props: { params: Promise<{ roomName:
       }))}
       interviewTitle={session.interview.title}
       participantName={session.participant?.name}
+      interviewType={session.interview.type as 'interview' | 'impression' | 'prototype' | 'usability'}
+      stimulusUrl={session.interview.stimulusUrl ?? undefined}
+      stimulusDuration={session.interview.stimulusDuration ?? undefined}
+      tasks={session.interview.tasks}
     />
   )
 }

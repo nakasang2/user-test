@@ -5,14 +5,18 @@ import { generateInterviewQuestions } from '@/lib/ai'
 import { requireAuth, handleApiError } from '@/lib/api-auth'
 
 const createSchema = z.object({
-  title:        z.string().min(1, 'タイトルを入力してください').max(200),
-  description:  z.string().max(1000).optional(),
-  autoGenerate: z.boolean().optional(),
-  topic:        z.string().max(500).optional(),
-  questions:    z.array(z.union([
+  title:            z.string().min(1, 'タイトルを入力してください').max(200),
+  description:      z.string().max(1000).optional(),
+  autoGenerate:     z.boolean().optional(),
+  topic:            z.string().max(500).optional(),
+  questions:        z.array(z.union([
     z.string(),
     z.object({ text: z.string(), type: z.string().optional() }),
   ])).optional(),
+  type:             z.enum(['interview', 'impression', 'prototype', 'usability']).default('interview'),
+  stimulusUrl:      z.string().url().optional().or(z.literal('')),
+  stimulusDuration: z.number().int().min(1).max(60).optional(),
+  tasks:            z.array(z.object({ text: z.string(), order: z.number() })).optional(),
 })
 
 export async function GET() {
@@ -22,6 +26,7 @@ export async function GET() {
       where: { organizationId: orgId },
       include: {
         questions: { orderBy: { order: 'asc' } },
+        tasks: { orderBy: { order: 'asc' } },
         _count: { select: { sessions: true } },
       },
       orderBy: { createdAt: 'desc' },
@@ -40,7 +45,7 @@ export async function POST(req: NextRequest) {
     if (!parsed.success) {
       return NextResponse.json({ error: parsed.error.issues[0]?.message }, { status: 400 })
     }
-    const { title, description, questions, autoGenerate, topic } = parsed.data
+    const { title, description, questions, autoGenerate, topic, type, stimulusUrl, stimulusDuration, tasks } = parsed.data
 
     type QuestionInput = { text: string; type?: string } | string
     let questionList: QuestionInput[] = questions ?? []
@@ -55,6 +60,9 @@ export async function POST(req: NextRequest) {
         organizationId: orgId,
         title,
         description,
+        type,
+        stimulusUrl: stimulusUrl || null,
+        stimulusDuration: stimulusDuration ?? null,
         questions: {
           create: questionList.map((q: QuestionInput, index: number) => ({
             text: typeof q === 'string' ? q : q.text,
@@ -62,8 +70,12 @@ export async function POST(req: NextRequest) {
             order: index + 1,
           })),
         },
+        tasks: { create: (tasks ?? []).map(t => ({ text: t.text, order: t.order })) },
       },
-      include: { questions: { orderBy: { order: 'asc' } } },
+      include: {
+        questions: { orderBy: { order: 'asc' } },
+        tasks: { orderBy: { order: 'asc' } },
+      },
     })
 
     return NextResponse.json(interview, { status: 201 })

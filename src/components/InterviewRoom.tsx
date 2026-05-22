@@ -16,6 +16,10 @@ interface Props {
   questions: Question[]
   interviewTitle: string
   participantName?: string
+  interviewType?: 'interview' | 'impression' | 'prototype' | 'usability'
+  stimulusUrl?: string
+  stimulusDuration?: number  // seconds (default 5)
+  tasks?: { text: string; order: number }[]
 }
 
 interface TranscriptEntry {
@@ -26,13 +30,17 @@ interface TranscriptEntry {
 }
 
 // Feature 6: 案内フェーズを追加
-type Phase = 'guide' | 'waiting' | 'intro' | 'interview' | 'thinking' | 'ending' | 'done'
+type Phase = 'guide' | 'waiting' | 'stimulus' | 'intro' | 'interview' | 'thinking' | 'ending' | 'done'
 
 export default function InterviewRoom({
   sessionId,
   questions,
   interviewTitle,
   participantName,
+  interviewType,
+  stimulusUrl,
+  stimulusDuration,
+  tasks,
 }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const streamRef = useRef<MediaStream | null>(null)
@@ -81,6 +89,14 @@ export default function InterviewRoom({
   const [recordingDownloadUrl, setRecordingDownloadUrl] = useState<string | null>(null)
   // テキスト入力フォールバック用：listenForAnswer のコールバックを保持
   const onAnswerCallbackRef = useRef<((answer: string) => void) | null>(null)
+
+  // usability / prototype 用：画面共有
+  const screenVideoRef = useRef<HTMLVideoElement>(null)
+  const screenStreamRef = useRef<MediaStream | null>(null)
+  const [screenSharing, setScreenSharing] = useState(false)
+  const [screenShareError, setScreenShareError] = useState<string | null>(null)
+  const [currentTaskIndex, setCurrentTaskIndex] = useState(0)
+  const [stimulusCountdown, setStimulusCountdown] = useState(0)
 
   // 音声認識サポート確認（マウント時）
   useEffect(() => {
@@ -170,6 +186,7 @@ export default function InterviewRoom({
     initCamera()
     return () => {
       streamRef.current?.getTracks().forEach((t) => t.stop())
+      screenStreamRef.current?.getTracks().forEach((t) => t.stop())
       speakVersionRef.current++ // 再生中の speak を無効化
       currentAudioRef.current?.pause()
       currentAudioRef.current = null
@@ -399,6 +416,35 @@ export default function InterviewRoom({
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ status: 'active' }),
     })
+    // 印象テストの場合: stimulus フェーズを挿入
+    if (interviewType === 'impression' && stimulusUrl) {
+      setPhase('stimulus')
+      const duration = stimulusDuration ?? 5
+      setStimulusCountdown(duration)
+      const countdownInterval = setInterval(() => {
+        setStimulusCountdown((prev) => {
+          if (prev <= 1) {
+            clearInterval(countdownInterval)
+            return 0
+          }
+          return prev - 1
+        })
+      }, 1000)
+      setTimeout(() => {
+        setPhase('interview')
+        currentQuestionIndexRef.current = 0
+        setCurrentQuestionIndex(0)
+        setIsFollowUp(false)
+        const q = questions[0]
+        setDisplayedQuestion(q.text)
+        conversationBufferRef.current = `AI: ${q.text}`
+        speak(q.text, () => {
+          if (q.type === 'open') listenForAnswer(decideNext)
+        })
+      }, duration * 1000)
+      return
+    }
+
     const intro = `こんにちは${participantName ? `、${participantName}さん` : ''}。本日はインタビューにご参加いただきありがとうございます。「${interviewTitle}」についてお聞きします。`
     speak(intro, () => {
       setPhase('interview')
@@ -475,6 +521,24 @@ export default function InterviewRoom({
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ transcript: fullText, segments, emotions: getSnapshots() }),
     })
+  }
+
+  // ── 画面共有開始 ──────────────────────────────────────
+  async function startScreenShare() {
+    try {
+      const stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false })
+      screenStreamRef.current = stream
+      if (screenVideoRef.current) {
+        screenVideoRef.current.srcObject = stream
+      }
+      setScreenSharing(true)
+      stream.getVideoTracks()[0].onended = () => {
+        setScreenSharing(false)
+        screenStreamRef.current = null
+      }
+    } catch {
+      setScreenShareError('画面共有を開始できませんでした')
+    }
   }
 
   const progress = ((currentQuestionIndex + 1) / questions.length) * 100
@@ -561,8 +625,37 @@ export default function InterviewRoom({
               autoPlay
               muted
               playsInline
-              className="absolute inset-0 w-full h-full object-cover scale-x-[-1]"
+              className={
+                (interviewType === 'prototype' || (interviewType === 'usability' && screenSharing))
+                  && (phase === 'interview' || phase === 'thinking' || phase === 'intro')
+                  ? 'absolute bottom-4 right-4 w-28 h-20 object-cover scale-x-[-1] rounded-xl border border-gray-700 z-10'
+                  : 'absolute inset-0 w-full h-full object-cover scale-x-[-1]'
+              }
             />
+          )}
+
+          {/* プロトタイプテスト: Figma iframe */}
+          {interviewType === 'prototype' && stimulusUrl && (phase === 'interview' || phase === 'thinking' || phase === 'intro') && (
+            <div className="absolute inset-0">
+              <iframe
+                src={`https://www.figma.com/embed?embed_host=share&url=${encodeURIComponent(stimulusUrl)}`}
+                className="w-full h-full border-0"
+                allowFullScreen
+              />
+            </div>
+          )}
+
+          {/* ユーザビリティテスト: 画面共有映像 */}
+          {interviewType === 'usability' && screenSharing && (
+            <div className="absolute inset-0">
+              <video
+                ref={screenVideoRef}
+                autoPlay
+                muted
+                playsInline
+                className="w-full h-full object-contain bg-black"
+              />
+            </div>
           )}
 
           {/* 感情検出ステータス（右上オーバーレイ） */}
@@ -599,6 +692,11 @@ export default function InterviewRoom({
             <div className="absolute inset-0 bg-black/75 flex items-center justify-center p-8">
               <div className="text-center max-w-lg w-full">
                 <div className="text-4xl mb-4">🎙️</div>
+                {interviewType && interviewType !== 'interview' && (
+                  <span className="inline-block mb-3 text-xs px-3 py-1 rounded-full border border-indigo-700 text-indigo-300 bg-indigo-900/40">
+                    {interviewType === 'impression' ? '🖼️ 印象テスト' : interviewType === 'prototype' ? '🎨 プロトタイプテスト' : '🖥️ ユーザビリティテスト'}
+                  </span>
+                )}
                 <h1 className="text-2xl font-bold mb-3">{interviewTitle}</h1>
                 <div className="bg-gray-900/80 border border-gray-700 rounded-xl p-5 text-left mb-6 space-y-3">
                   <p className="text-sm text-gray-300 font-medium">インタビューの流れ</p>
@@ -637,6 +735,22 @@ export default function InterviewRoom({
                   {emotionStatus === 'loading' ? '感情モデル準備中...' : 'インタビューを開始する'}
                 </button>
               </div>
+            </div>
+          )}
+
+          {/* 印象テスト: 刺激表示フェーズ */}
+          {phase === 'stimulus' && stimulusUrl && (
+            <div className="absolute inset-0 bg-black flex items-center justify-center">
+              <img
+                src={stimulusUrl}
+                alt="stimulus"
+                className="max-w-full max-h-full object-contain"
+              />
+              {stimulusCountdown > 0 && (
+                <div className="absolute bottom-6 right-6 w-12 h-12 rounded-full bg-black/70 flex items-center justify-center text-xl font-bold text-white">
+                  {stimulusCountdown}
+                </div>
+              )}
             </div>
           )}
 
@@ -683,6 +797,49 @@ export default function InterviewRoom({
 
         {/* 右：質問パネル + 会話ログ（スクロール独立） */}
         <div className="w-96 border-l border-gray-800 flex flex-col overflow-hidden">
+          {/* タスクリスト (usability / prototype) */}
+          {(interviewType === 'usability' || interviewType === 'prototype') && tasks && tasks.length > 0 && (phase === 'waiting' || phase === 'interview' || phase === 'thinking' || phase === 'intro') && (
+            <div className="p-4 border-b border-gray-800 flex-shrink-0">
+              <div className="text-xs text-gray-500 uppercase tracking-wide mb-2">タスクリスト</div>
+              <div className="space-y-1.5">
+                {tasks.map((task, i) => (
+                  <div
+                    key={i}
+                    onClick={() => setCurrentTaskIndex(i)}
+                    className={`flex gap-2 items-start cursor-pointer rounded-lg px-2 py-1.5 text-xs transition-colors ${
+                      currentTaskIndex === i ? 'bg-indigo-900/40 text-indigo-200 border border-indigo-700/50' : 'text-gray-400 hover:text-gray-300'
+                    }`}
+                  >
+                    <span className={`mt-0.5 w-4 h-4 rounded-full flex items-center justify-center text-[9px] font-bold shrink-0 ${
+                      currentTaskIndex === i ? 'bg-indigo-600 text-white' : 'bg-gray-700 text-gray-500'
+                    }`}>{i + 1}</span>
+                    <span>{task.text}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* 画面共有ボタン (usability) */}
+          {interviewType === 'usability' && (phase === 'waiting' || phase === 'interview' || phase === 'thinking' || phase === 'intro') && (
+            <div className="p-3 border-b border-gray-800 flex-shrink-0">
+              {!screenSharing ? (
+                <button
+                  onClick={startScreenShare}
+                  className="w-full bg-gray-800 hover:bg-gray-700 border border-gray-700 hover:border-indigo-500 px-3 py-2 rounded-lg text-xs font-medium transition-colors flex items-center justify-center gap-2"
+                >
+                  🖥️ 画面共有を開始
+                </button>
+              ) : (
+                <div className="flex items-center gap-2 text-xs text-green-400">
+                  <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
+                  画面共有中
+                </div>
+              )}
+              {screenShareError && <p className="text-xs text-red-400 mt-1">{screenShareError}</p>}
+            </div>
+          )}
+
           {(phase === 'interview' || phase === 'thinking') && (
             <div className="p-4 border-b border-gray-800 flex-shrink-0">
               <div className="flex items-center justify-between text-xs text-gray-500 mb-2">

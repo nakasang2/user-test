@@ -10,6 +10,7 @@ export async function GET(req: NextRequest, props: { params: Promise<{ id: strin
       where: { id, organizationId: orgId },
       include: {
         questions: { orderBy: { order: 'asc' } },
+        tasks: { orderBy: { order: 'asc' } },
         sessions: {
           include: {
             participant: true,
