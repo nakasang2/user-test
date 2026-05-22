@@ -26,7 +26,7 @@ function LoginForm() {
       })
       const data = await res.json()
       if (!res.ok) { setError(data.error ?? 'エラーが発生しました'); return }
-      router.replace(from)
+      window.location.href = from
     } catch {
       setError('ネットワークエラーが発生しました')
     } finally {

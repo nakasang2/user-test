@@ -36,7 +36,7 @@ export default function RegisterPage() {
       })
       const data = await res.json()
       if (!res.ok) { setError(data.error ?? 'エラーが発生しました'); return }
-      router.replace('/dashboard')
+      window.location.href = '/dashboard'
     } catch {
       setError('ネットワークエラーが発生しました')
     } finally {
