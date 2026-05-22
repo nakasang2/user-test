@@ -102,6 +102,10 @@ export default function InterviewRoom({
   const screenRecordedChunksRef = useRef<Blob[]>([])
   const [screenRecordingDownloadUrl, setScreenRecordingDownloadUrl] = useState<string | null>(null)
 
+  // フローティングウィジェット (service モード)
+  const widgetChannelRef = useRef<BroadcastChannel | null>(null)
+  const [widgetBlocked, setWidgetBlocked] = useState(false)
+
   // 音声認識サポート確認（マウント時）
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -205,6 +209,36 @@ export default function InterviewRoom({
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // ── task フェーズ(service モード)に入ったらウィジェット + サービスを自動オープン ──
+  useEffect(() => {
+    if (phase !== 'task' || interviewType !== 'usability' || usabilityMode !== 'service') return
+
+    // サービスをポップアップで開く
+    if (stimulusUrl) {
+      window.open(stimulusUrl, 'usability-service', 'popup,width=1280,height=820,left=80,top=40')
+    }
+
+    // タスクウィジェットを開く
+    const tasksEncoded = btoa(JSON.stringify(tasks ?? []))
+    const widgetUrl = `/interview/widget?session=${encodeURIComponent(sessionId)}&tasks=${tasksEncoded}&current=0`
+    const popup = window.open(widgetUrl, 'uservoice-widget', 'popup,width=380,height=280,top=40,left=40')
+    setWidgetBlocked(!popup)
+
+    // BroadcastChannel でウィジェットからのメッセージを受信
+    const channel = new BroadcastChannel(`uservoice-widget-${sessionId}`)
+    widgetChannelRef.current = channel
+    channel.onmessage = (e) => {
+      if (e.data.type === 'task_complete') completeTasksAndStartInterview()
+      else if (e.data.type === 'end_session') endInterview()
+    }
+
+    return () => {
+      channel.close()
+      widgetChannelRef.current = null
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase])
 
   // 感情検出はインタビュー開始時に startInterview() 内で起動する。
   // こうすることで録画の t=0 と感情タイムスタンプの t=0 が一致する。
@@ -417,8 +451,18 @@ export default function InterviewRoom({
     window.open(stimulusUrl, 'usability-service', 'popup,width=1280,height=820,left=80,top=40')
   }
 
+  // ── フローティングタスクウィジェットを開く ──────────────
+  function openWidget() {
+    const tasksEncoded = btoa(JSON.stringify(tasks ?? []))
+    const url = `/interview/widget?session=${encodeURIComponent(sessionId)}&tasks=${tasksEncoded}&current=${currentTaskIndex}`
+    const popup = window.open(url, 'uservoice-widget', 'popup,width=380,height=280,top=40,left=40')
+    setWidgetBlocked(!popup)
+  }
+
   // ── タスク完了 → 事後インタビュー開始 ─────────────────
   function completeTasksAndStartInterview() {
+    // ウィジェットを閉じる
+    widgetChannelRef.current?.postMessage({ type: 'session_ended' })
     if (questions.length === 0) {
       endInterview()
       return
@@ -521,6 +565,8 @@ export default function InterviewRoom({
 
   // ── インタビュー終了 ──────────────────────────────────
   async function endInterview() {
+    // ウィジェットを閉じる
+    widgetChannelRef.current?.postMessage({ type: 'session_ended' })
     setPhase('ending')
     if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current)
     speechRef.current?.stop()
@@ -873,30 +919,72 @@ export default function InterviewRoom({
                     </p>
                   </div>
                 )}
-                {/* サービスをポップアップで開く（service モードのみ） */}
-                {usabilityMode === 'service' && stimulusUrl && (
-                  <button
-                    onClick={openServicePopup}
-                    className="w-full border border-indigo-600 text-indigo-400 hover:bg-indigo-900/30 px-4 py-2.5 rounded-xl text-sm font-medium transition-colors"
-                  >
-                    🌐 サービスを別ウィンドウで開く
-                  </button>
+
+                {usabilityMode === 'service' ? (
+                  /* ── サービスモード: ウィジェットが主役 ── */
+                  <div className="space-y-3">
+                    {widgetBlocked ? (
+                      <div className="bg-yellow-900/30 border border-yellow-700/50 rounded-xl p-3 text-xs text-yellow-300 leading-relaxed">
+                        ポップアップがブロックされました。ブラウザのアドレスバー右端でポップアップを許可するか、下のボタンで操作してください。
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-2 text-xs text-green-400">
+                        <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse flex-shrink-0" />
+                        タスクウィジェットが別ウィンドウで起動中です
+                      </div>
+                    )}
+                    {/* 再オープンボタン */}
+                    <div className="flex gap-2">
+                      {stimulusUrl && (
+                        <button
+                          onClick={openServicePopup}
+                          className="flex-1 border border-indigo-700 text-indigo-400 hover:bg-indigo-900/30 px-3 py-2 rounded-xl text-xs font-medium transition-colors"
+                        >
+                          🌐 サービスを再度開く
+                        </button>
+                      )}
+                      <button
+                        onClick={openWidget}
+                        className="flex-1 border border-gray-600 text-gray-400 hover:bg-gray-800 px-3 py-2 rounded-xl text-xs font-medium transition-colors"
+                      >
+                        🔲 ウィジェットを再度開く
+                      </button>
+                    </div>
+                    {/* ポップアップブロック時のフォールバックボタン */}
+                    {widgetBlocked && (
+                      <div className="flex gap-2 pt-1 border-t border-gray-700">
+                        <button
+                          onClick={completeTasksAndStartInterview}
+                          className="flex-1 bg-indigo-600 hover:bg-indigo-500 px-4 py-2.5 rounded-xl text-sm font-semibold transition-colors"
+                        >
+                          ✅ タスク完了 → 質問へ
+                        </button>
+                        <button
+                          onClick={endInterview}
+                          className="border border-gray-700 hover:border-gray-500 text-gray-400 hover:text-white px-4 py-2.5 rounded-xl text-sm font-medium transition-colors"
+                        >
+                          終了
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  /* ── プロトタイプモード: 完了ボタンをここに ── */
+                  <div className="flex gap-2">
+                    <button
+                      onClick={completeTasksAndStartInterview}
+                      className="flex-1 bg-indigo-600 hover:bg-indigo-500 px-4 py-2.5 rounded-xl text-sm font-semibold transition-colors"
+                    >
+                      ✅ タスク完了 → 質問へ
+                    </button>
+                    <button
+                      onClick={endInterview}
+                      className="border border-gray-700 hover:border-gray-500 text-gray-400 hover:text-white px-4 py-2.5 rounded-xl text-sm font-medium transition-colors"
+                    >
+                      終了
+                    </button>
+                  </div>
                 )}
-                {/* タスク完了 / 終了 ボタン */}
-                <div className="flex gap-2">
-                  <button
-                    onClick={completeTasksAndStartInterview}
-                    className="flex-1 bg-indigo-600 hover:bg-indigo-500 px-4 py-2.5 rounded-xl text-sm font-semibold transition-colors"
-                  >
-                    ✅ タスク完了 → 質問へ
-                  </button>
-                  <button
-                    onClick={endInterview}
-                    className="border border-gray-700 hover:border-gray-500 text-gray-400 hover:text-white px-4 py-2.5 rounded-xl text-sm font-medium transition-colors"
-                  >
-                    終了
-                  </button>
-                </div>
               </div>
             </div>
           )}
