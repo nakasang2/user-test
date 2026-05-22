@@ -491,12 +491,12 @@ export default function InterviewRoom({
         if (e.data.type === 'task_complete') completeTasksAndStartInterview()
         else if (e.data.type === 'end_session') endInterview()
       }
-      // ① 画面録画を開始（ダイアログで「画面全体」を選んでもらう）
-      await startScreenShare()
-      // ② 録画確認後にウィジェット（PiP）を開く — getDisplayMedia 後もジェスチャー継続
-      void openWidget()
-      // ③ サービスタブを開く
+      // ① サービスタブを先に開く（バックグラウンド）→ 画面共有ダイアログの選択肢に現れる
       if (stimulusUrl) window.open(stimulusUrl, 'uservoice-service')
+      // ② 画面録画開始（ダイアログにサービスタブが選択肢として出るので指定可能）
+      await startScreenShare()
+      // ③ 録画確認後にウィジェット（PiP）を開く
+      void openWidget()
     }
 
     await fetch(`/api/sessions/${sessionId}`, {
@@ -838,11 +838,11 @@ export default function InterviewRoom({
                       ) : (
                         <>
                           <li className="flex gap-2"><span className="text-indigo-400 flex-shrink-0">②</span>
-                            <span>「開始する」を押すと<strong className="text-white">画面共有のダイアログ</strong>が出ます。<br />
-                            <span className="text-yellow-400 font-medium">「画面全体」または「デスクトップ」</span>を選んで共有してください。<br />
-                            これにより操作画面が録画されます。</span>
+                            <span>「開始する」を押すとサービスが新しいタブで開き、続けて<strong className="text-white">画面共有のダイアログ</strong>が出ます。<br />
+                            ダイアログの「タブ」から<span className="text-yellow-400 font-medium">開いたサービスのタブ</span>を選んでください。<br />
+                            操作画面が録画されます。</span>
                           </li>
-                          <li className="flex gap-2"><span className="text-indigo-400 flex-shrink-0">③</span>サービスが新しいタブで開きます。タスクに沿って自由に操作してください</li>
+                          <li className="flex gap-2"><span className="text-indigo-400 flex-shrink-0">③</span>サービスのタブに切り替えてタスクに沿って自由に操作してください</li>
                           <li className="flex gap-2"><span className="text-indigo-400 flex-shrink-0">④</span>操作しながら気づいたこと・感じたことを声に出してください（シンクアラウド）</li>
                           <li className="flex gap-2"><span className="text-indigo-400 flex-shrink-0">⑤</span>操作が終わったら浮かんでいる小窓の「タスク完了」を押してください</li>
                         </>
