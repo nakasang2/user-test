@@ -329,9 +329,9 @@ export default function Dashboard() {
                         <button
                           onClick={(e) => copyInviteLink(iv.id, e)}
                           className="border border-gray-700 hover:border-indigo-500 px-3 py-1.5 rounded-lg text-xs text-gray-400 hover:text-indigo-300 transition-colors flex-shrink-0"
-                          title="この URL を参加者に共有すると、名前を入力するだけで自動的にセッションが作成されます"
+                          title="参加者に送るリンクです。このリンクを開いた人が名前を入力すると、新しいセッションが自動作成されます。複数人に同じリンクを送れます。"
                         >
-                          {copiedInviteId === iv.id ? '✓ コピー済み' : '🔗 招待リンク'}
+                          {copiedInviteId === iv.id ? '✓ コピー済み' : '📨 参加者を招待'}
                         </button>
                       </div>
 
@@ -377,8 +377,9 @@ export default function Dashboard() {
                                     <button
                                       onClick={(e) => copyInterviewUrl(s, e)}
                                       className="absolute top-1/2 -translate-y-1/2 right-3 bg-gray-800 hover:bg-indigo-700 border border-gray-700 px-2.5 py-1 rounded-lg text-xs text-gray-300 hover:text-white transition-colors"
+                                      title="このセッション専用のURLです。特定の参加者に直接送ると、名前入力なしでインタビューをすぐ開始できます"
                                     >
-                                      {copiedId === s.id ? '✓ コピー済み' : '🔗 URL'}
+                                      {copiedId === s.id ? '✓ コピー済み' : '🔗 このセッションのURL'}
                                     </button>
                                   )}
 

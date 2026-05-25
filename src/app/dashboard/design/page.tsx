@@ -33,12 +33,15 @@ export default function DesignPage() {
   const [generating, setGenerating] = useState(false)
   const [saving, setSaving] = useState(false)
   const [savedId, setSavedId] = useState<string | null>(null)
+  const [copiedSavedLink, setCopiedSavedLink] = useState(false)
   // セッションタイプ設定
   const [sessionType, setSessionType]           = useState<InterviewType>('interview')
   const [usabilityMode, setUsabilityMode]       = useState<'prototype' | 'service'>('prototype')
   const [stimulusUrl, setStimulusUrl]           = useState('')
   const [stimulusDuration, setStimulusDuration] = useState(5)
   const [tasks, setTasks]                       = useState<TaskItem[]>([{ text: '', order: 1 }, { text: '', order: 2 }])
+  const [taskBulkMode, setTaskBulkMode]         = useState(false)
+  const [taskBulkText, setTaskBulkText]         = useState('')
 
   const bottomRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
@@ -114,7 +117,9 @@ export default function DesignPage() {
           stimulusUrl:      (sessionType === 'impression' || sessionType === 'usability') ? (stimulusUrl || undefined) : undefined,
           stimulusDuration: sessionType === 'impression' ? stimulusDuration : undefined,
           tasks:            sessionType === 'usability'
-            ? tasks.filter((t) => t.text.trim()).map((t, i) => ({ text: t.text, order: i + 1 }))
+            ? (taskBulkMode
+                ? taskBulkText.split('\n').filter((l) => l.trim()).map((text, i) => ({ text, order: i + 1 }))
+                : tasks.filter((t) => t.text.trim()).map((t, i) => ({ text: t.text, order: i + 1 })))
             : undefined,
         }),
       })
@@ -238,10 +243,33 @@ export default function DesignPage() {
               </p>
             </div>
           ) : savedId ? (
-            <div className="flex-1 flex flex-col items-center justify-center text-center px-8 gap-4">
+            <div className="flex-1 flex flex-col items-center justify-center text-center px-8 gap-5">
               <div className="text-5xl">🎉</div>
-              <h2 className="text-lg font-semibold text-white">インタビューを保存しました</h2>
-              <p className="text-gray-400 text-sm">招待リンクを発行してユーザーを招待できます</p>
+              <div>
+                <h2 className="text-lg font-semibold text-white mb-1">インタビューを保存しました</h2>
+                <p className="text-gray-500 text-sm">下の招待リンクをコピーして参加者に送りましょう</p>
+              </div>
+              {/* 招待リンクをその場でコピー */}
+              <div className="w-full max-w-sm bg-gray-900 border border-gray-700 rounded-xl p-4 text-left">
+                <p className="text-xs text-gray-500 mb-2">📨 参加者招待リンク</p>
+                <div className="flex gap-2 items-center">
+                  <code className="flex-1 text-xs text-indigo-300 bg-gray-800 rounded-lg px-3 py-2 overflow-hidden text-ellipsis whitespace-nowrap block">
+                    {typeof window !== 'undefined' ? `${window.location.origin}/join/${savedId}` : `/join/${savedId}`}
+                  </code>
+                  <button
+                    onClick={async () => {
+                      if (typeof window === 'undefined') return
+                      await navigator.clipboard.writeText(`${window.location.origin}/join/${savedId}`)
+                      setCopiedSavedLink(true)
+                      setTimeout(() => setCopiedSavedLink(false), 2000)
+                    }}
+                    className="bg-indigo-600 hover:bg-indigo-500 px-3 py-2 rounded-lg text-xs font-medium transition-colors whitespace-nowrap flex-shrink-0"
+                  >
+                    {copiedSavedLink ? '✓ コピー済み' : 'コピー'}
+                  </button>
+                </div>
+                <p className="text-[10px] text-gray-600 mt-2">このリンクを開いた参加者が名前を入力するだけでセッションが自動作成されます</p>
+              </div>
               <div className="flex gap-3">
                 <Link href="/dashboard"
                   className="border border-gray-700 hover:border-gray-500 px-4 py-2 rounded-lg text-sm text-gray-400 hover:text-white transition-colors">
@@ -332,28 +360,67 @@ export default function DesignPage() {
               {/* タスクリスト (usability) */}
               {sessionType === 'usability' && (
                 <div>
-                  <label className="block text-xs text-gray-500 mb-2">タスクリスト</label>
-                  <div className="space-y-1.5">
-                    {tasks.map((t, i) => (
-                      <div key={i} className="flex gap-2 items-center">
-                        <span className="text-gray-600 text-xs w-4 text-right">{i + 1}</span>
-                        <input value={t.text}
-                          onChange={(e) => {
-                            const next = [...tasks]
-                            next[i] = { ...next[i], text: e.target.value }
-                            setTasks(next)
-                          }}
-                          placeholder={`タスク ${i + 1}`}
-                          className="flex-1 bg-gray-800 border border-gray-700 focus:border-indigo-500 focus:outline-none rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600" />
-                        {tasks.length > 1 && (
-                          <button type="button" onClick={() => setTasks(tasks.filter((_, j) => j !== i))}
-                            className="text-gray-700 hover:text-red-400 text-xs transition-colors">✕</button>
-                        )}
-                      </div>
-                    ))}
+                  <div className="flex items-center justify-between mb-2">
+                    <label className="block text-xs text-gray-500">タスクリスト</label>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (!taskBulkMode) {
+                          // 1行ずつ → まとめて入力 へ切り替え
+                          setTaskBulkText(tasks.filter((t) => t.text.trim()).map((t) => t.text).join('\n'))
+                        } else {
+                          // まとめて → 1行ずつ へ切り替え
+                          const lines = taskBulkText.split('\n').filter((l) => l.trim())
+                          setTasks(lines.length > 0
+                            ? lines.map((text, i) => ({ text, order: i + 1 }))
+                            : [{ text: '', order: 1 }, { text: '', order: 2 }])
+                        }
+                        setTaskBulkMode(!taskBulkMode)
+                      }}
+                      className="text-xs text-indigo-400 hover:text-indigo-300 transition-colors"
+                    >
+                      {taskBulkMode ? '1行ずつ編集' : '複数行でまとめて入力'}
+                    </button>
                   </div>
-                  <button type="button" onClick={() => setTasks([...tasks, { text: '', order: tasks.length + 1 }])}
-                    className="mt-1.5 text-xs text-indigo-400 hover:text-indigo-300">+ タスクを追加</button>
+                  {taskBulkMode ? (
+                    <div>
+                      <textarea
+                        value={taskBulkText}
+                        onChange={(e) => setTaskBulkText(e.target.value)}
+                        placeholder={'タスクを1行ずつ入力してください\n\n例:\nログインする\n商品を検索して詳細ページを開く\nカートに追加して購入する'}
+                        rows={6}
+                        className="w-full bg-gray-800 border border-gray-700 focus:border-indigo-500 focus:outline-none rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 resize-none"
+                      />
+                      <p className="text-[10px] text-gray-600 mt-1">
+                        1行 = 1タスク。空行は無視されます。
+                        現在 {taskBulkText.split('\n').filter((l) => l.trim()).length} タスク
+                      </p>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="space-y-1.5">
+                        {tasks.map((t, i) => (
+                          <div key={i} className="flex gap-2 items-center">
+                            <span className="text-gray-600 text-xs w-4 text-right">{i + 1}</span>
+                            <input value={t.text}
+                              onChange={(e) => {
+                                const next = [...tasks]
+                                next[i] = { ...next[i], text: e.target.value }
+                                setTasks(next)
+                              }}
+                              placeholder={`タスク ${i + 1}`}
+                              className="flex-1 bg-gray-800 border border-gray-700 focus:border-indigo-500 focus:outline-none rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600" />
+                            {tasks.length > 1 && (
+                              <button type="button" onClick={() => setTasks(tasks.filter((_, j) => j !== i))}
+                                className="text-gray-700 hover:text-red-400 text-xs transition-colors">✕</button>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                      <button type="button" onClick={() => setTasks([...tasks, { text: '', order: tasks.length + 1 }])}
+                        className="mt-1.5 text-xs text-indigo-400 hover:text-indigo-300">+ タスクを追加</button>
+                    </>
+                  )}
                 </div>
               )}
 

@@ -850,13 +850,13 @@ export default function InterviewRoom({
                       ) : (
                         <>
                           <li className="flex gap-2"><span className="text-indigo-400 flex-shrink-0">②</span>
-                            <span>「開始する」を押すとサービスが新しいタブで開き、続けて<strong className="text-white">画面共有のダイアログ</strong>が出ます。<br />
-                            ダイアログの「タブ」から<span className="text-yellow-400 font-medium">開いたサービスのタブ</span>を選んでください。<br />
-                            操作画面が録画されます。</span>
+                            <span>「開始する」を押すと<span className="text-white font-medium">サービスが新しいタブ</span>で開き、<span className="text-white font-medium">タスク用の小窓</span>が自動表示されます</span>
                           </li>
-                          <li className="flex gap-2"><span className="text-indigo-400 flex-shrink-0">③</span>サービスのタブに切り替えてタスクに沿って自由に操作してください</li>
-                          <li className="flex gap-2"><span className="text-indigo-400 flex-shrink-0">④</span>操作しながら気づいたこと・感じたことを声に出してください（シンクアラウド）</li>
-                          <li className="flex gap-2"><span className="text-indigo-400 flex-shrink-0">⑤</span>操作が終わったら浮かんでいる小窓の「タスク完了」を押してください</li>
+                          <li className="flex gap-2"><span className="text-indigo-400 flex-shrink-0">③</span>
+                            <span>小窓の <span className="text-red-400 font-medium">🖥️ 画面録画を開始する</span> を<strong className="text-white">必ず押してから</strong>操作を始めてください</span>
+                          </li>
+                          <li className="flex gap-2"><span className="text-indigo-400 flex-shrink-0">④</span>タスクに沿ってサービスを操作しながら、気づいたこと・感じたことを声に出してください（シンクアラウド）</li>
+                          <li className="flex gap-2"><span className="text-indigo-400 flex-shrink-0">⑤</span>操作が終わったら小窓の「✅ タスク完了 → 質問へ」を押してください</li>
                         </>
                       )}
                     </ul>
@@ -874,30 +874,19 @@ export default function InterviewRoom({
                   </div>
                 </div>
                 <button
-                  onClick={() => setPhase('waiting')}
-                  className="bg-indigo-600 hover:bg-indigo-500 px-8 py-3 rounded-xl font-semibold text-lg transition-colors"
-                >
-                  準備ができました
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* 待機フェーズ（オーバーレイ） */}
-          {phase === 'waiting' && (
-            <div className="absolute inset-0 bg-black/50 flex items-center justify-center p-8">
-              <div className="text-center max-w-md">
-                <p className="text-gray-300 mb-4 text-sm">カメラ・マイクが有効になったら開始してください</p>
-                <button
                   onClick={startInterview}
                   disabled={!cameraReady || emotionStatus === 'loading'}
                   className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-wait px-8 py-3 rounded-xl font-semibold text-lg transition-colors"
                 >
-                  {emotionStatus === 'loading' ? '感情モデル準備中...' : 'インタビューを開始する'}
+                  {!cameraReady || emotionStatus === 'loading' ? '準備中...' : 'インタビューを開始する →'}
                 </button>
+                {(!cameraReady || emotionStatus === 'loading') && (
+                  <p className="text-xs text-gray-500 mt-2 animate-pulse">カメラと解析モデルを初期化中...</p>
+                )}
               </div>
             </div>
           )}
+
 
           {/* 印象テスト: 刺激表示フェーズ */}
           {phase === 'stimulus' && stimulusUrl && (

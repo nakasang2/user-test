@@ -21,6 +21,7 @@ function WidgetContent() {
   const [widgetPhase, setWidgetPhase]           = useState<WidgetPhase>('task')
   const [doneMessage, setDoneMessage]           = useState('')
   const [isScreenRecording, setIsScreenRecording] = useState(false)
+  const [warnNoRecord, setWarnNoRecord]         = useState(false)
 
   const channelRef             = useRef<BroadcastChannel | null>(null)
   const webcamVideoRef         = useRef<HTMLVideoElement>(null)
@@ -159,7 +160,14 @@ function WidgetContent() {
       // 合成描画ループを停止
       cancelAnimationFrame(animFrameRef.current)
       const recorder = screenMediaRecorderRef.current
-      if (!recorder || recorder.state === 'inactive') { resolve(); return }
+      if (!recorder || recorder.state === 'inactive') {
+        // すでに停止済み（画面共有が先に終了した場合など）でも chunks があれば送信
+        const blob = new Blob(screenChunksRef.current, { type: recorder?.mimeType || 'video/webm' })
+        if (blob.size > 0) channelRef.current?.postMessage({ type: 'screen_recording_blob', blob })
+        screenStreamRef.current?.getTracks().forEach((t) => t.stop())
+        resolve()
+        return
+      }
       recorder.onstop = () => {
         const blob = new Blob(screenChunksRef.current, { type: recorder.mimeType || 'video/webm' })
         if (blob.size > 0) {
@@ -186,8 +194,24 @@ function WidgetContent() {
 
   /* ── タスク完了 ───────────────────────────────────────────── */
   async function taskComplete() {
+    // 録画未開始なら警告を表示して処理を止める
+    if (!isScreenRecording && screenChunksRef.current.length === 0) {
+      setWarnNoRecord(true)
+      return
+    }
+    setWarnNoRecord(false)
     focusInterviewPage()            // ① フォーカス（ユーザージェスチャー文脈）
     await stopAndSendRecording()    // ② 録画停止 & blob 送信
+    channelRef.current?.postMessage({ type: 'task_complete' })
+    setDoneMessage('インタビューページに戻ります...')
+    setWidgetPhase('done')
+  }
+
+  /* ── 録画なしで強制的にタスク完了（警告を経由） ──────────── */
+  async function forceTaskComplete() {
+    setWarnNoRecord(false)
+    focusInterviewPage()
+    await stopAndSendRecording()
     channelRef.current?.postMessage({ type: 'task_complete' })
     setDoneMessage('インタビューページに戻ります...')
     setWidgetPhase('done')
@@ -266,14 +290,37 @@ function WidgetContent() {
         {!isScreenRecording ? (
           <button
             onClick={startScreenRecording}
-            className="w-full flex items-center justify-center gap-2 bg-gray-800 hover:bg-gray-700 border border-gray-600 hover:border-red-500 py-2.5 rounded-xl text-sm font-medium transition-colors"
+            className="w-full flex items-center justify-center gap-2 bg-red-950/60 hover:bg-red-900/60 border-2 border-red-600 hover:border-red-400 py-3 rounded-xl text-sm font-semibold transition-colors animate-pulse hover:animate-none"
           >
             🖥️ 画面録画を開始する
+            <span className="bg-red-600 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full leading-none">必須</span>
           </button>
         ) : (
           <div className="flex items-center justify-center gap-2 py-2 text-xs text-red-400">
             <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
             画面録画中
+          </div>
+        )}
+
+        {/* 録画未開始の警告 */}
+        {warnNoRecord && (
+          <div className="bg-amber-900/40 border border-amber-600 rounded-xl p-3 text-xs text-amber-300 space-y-2">
+            <p className="font-semibold">⚠️ 画面録画が開始されていません</p>
+            <p className="text-amber-400/80">録画なしでタスクを完了しますか？</p>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setWarnNoRecord(false)}
+                className="flex-1 bg-amber-700 hover:bg-amber-600 py-1.5 rounded-lg text-xs font-medium transition-colors"
+              >
+                録画してから完了する
+              </button>
+              <button
+                onClick={forceTaskComplete}
+                className="flex-1 border border-amber-700 hover:border-amber-500 text-amber-400 py-1.5 rounded-lg text-xs transition-colors"
+              >
+                このまま完了
+              </button>
+            </div>
           </div>
         )}
 

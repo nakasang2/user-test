@@ -7,6 +7,8 @@ interface InterviewInfo {
   id: string
   title: string
   description: string | null
+  type?: string
+  _count?: { questions: number }
 }
 
 export default function JoinPage(props: { params: Promise<{ interviewId: string }> }) {
@@ -17,6 +19,7 @@ export default function JoinPage(props: { params: Promise<{ interviewId: string 
   const [notFound, setNotFound] = useState(false)
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
+  const [consent, setConsent] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -31,7 +34,7 @@ export default function JoinPage(props: { params: Promise<{ interviewId: string 
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    if (!name.trim()) return
+    if (!name.trim() || !consent) return
     setLoading(true)
     setError(null)
 
@@ -73,16 +76,50 @@ export default function JoinPage(props: { params: Promise<{ interviewId: string 
     )
   }
 
+  const isUsability = interview!.type === 'usability'
+  const isImpression = interview!.type === 'impression'
+
   return (
-    <div className="min-h-screen bg-gray-950 flex items-center justify-center px-4">
+    <div className="min-h-screen bg-gray-950 flex items-center justify-center px-4 py-12">
       <div className="w-full max-w-md">
         {/* ヘッダー */}
-        <div className="text-center mb-8">
-          <div className="text-3xl mb-3">🎤</div>
+        <div className="text-center mb-6">
+          <div className="text-3xl mb-3">
+            {isUsability ? '🖥️' : isImpression ? '🖼️' : '🎤'}
+          </div>
           <h1 className="text-xl font-bold text-white mb-1">{interview!.title}</h1>
           {interview!.description && (
-            <p className="text-gray-400 text-sm">{interview!.description}</p>
+            <p className="text-gray-400 text-sm leading-relaxed">{interview!.description}</p>
           )}
+        </div>
+
+        {/* セッション概要カード */}
+        <div className="bg-gray-900 border border-gray-800 rounded-2xl p-4 mb-4 space-y-3">
+          <p className="text-xs text-gray-500 uppercase tracking-wide font-medium">参加前にご確認ください</p>
+          <ul className="space-y-2 text-sm text-gray-300">
+            <li className="flex items-start gap-2.5">
+              <span className="text-indigo-400 mt-0.5 flex-shrink-0">⏱</span>
+              <span>所要時間：<strong className="text-white">約 15〜30 分</strong></span>
+            </li>
+            <li className="flex items-start gap-2.5">
+              <span className="text-indigo-400 mt-0.5 flex-shrink-0">📷</span>
+              <span>カメラ・マイクへのアクセスが必要です（表情・音声を録画します）</span>
+            </li>
+            {isUsability && (
+              <li className="flex items-start gap-2.5">
+                <span className="text-indigo-400 mt-0.5 flex-shrink-0">🖥️</span>
+                <span>画面操作も録画されます（録画は参加者自身が開始します）</span>
+              </li>
+            )}
+            <li className="flex items-start gap-2.5">
+              <span className="text-indigo-400 mt-0.5 flex-shrink-0">🔇</span>
+              <span>静かな場所で、<strong className="text-white">イヤホンなし</strong>での参加を推奨します</span>
+            </li>
+            <li className="flex items-start gap-2.5">
+              <span className="text-indigo-400 mt-0.5 flex-shrink-0">💬</span>
+              <span>操作・思考の過程を声に出してください（シンクアラウド）</span>
+            </li>
+          </ul>
         </div>
 
         {/* フォーム */}
@@ -119,6 +156,28 @@ export default function JoinPage(props: { params: Promise<{ interviewId: string 
             />
           </div>
 
+          {/* 録画同意チェック */}
+          <label className="flex items-start gap-3 cursor-pointer group">
+            <div className="relative flex-shrink-0 mt-0.5">
+              <input
+                type="checkbox"
+                checked={consent}
+                onChange={(e) => setConsent(e.target.checked)}
+                disabled={loading}
+                className="sr-only"
+              />
+              <div className={`w-4.5 h-4.5 w-[18px] h-[18px] rounded border-2 flex items-center justify-center transition-colors ${
+                consent ? 'bg-indigo-600 border-indigo-600' : 'border-gray-600 group-hover:border-gray-400'
+              }`}>
+                {consent && <span className="text-white text-[11px] font-bold leading-none">✓</span>}
+              </div>
+            </div>
+            <span className="text-xs text-gray-400 leading-relaxed">
+              カメラ・マイク・画面の録画および AI による分析に同意します。
+              収集した情報は本調査目的にのみ使用されます。
+            </span>
+          </label>
+
           {error && (
             <p className="text-sm text-red-400 bg-red-900/20 border border-red-800 rounded-lg px-3 py-2">
               {error}
@@ -127,15 +186,17 @@ export default function JoinPage(props: { params: Promise<{ interviewId: string 
 
           <button
             type="submit"
-            disabled={loading || !name.trim()}
+            disabled={loading || !name.trim() || !consent}
             className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed px-4 py-3 rounded-lg text-sm font-semibold transition-colors"
           >
             {loading ? '準備中...' : 'インタビューを開始する →'}
           </button>
 
-          <p className="text-center text-xs text-gray-600">
-            開始するとカメラ・マイクの許可が求められます
-          </p>
+          {!consent && name.trim() && (
+            <p className="text-center text-xs text-amber-500">
+              同意のチェックボックスをオンにしてください
+            </p>
+          )}
         </form>
       </div>
     </div>
