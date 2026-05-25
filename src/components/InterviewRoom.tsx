@@ -3,6 +3,22 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useEmotionDetection, EmotionSnapshot } from '@/hooks/useEmotionDetection'
 import { AreaChart, Area, ResponsiveContainer, XAxis, YAxis } from 'recharts'
+import {
+  Mic,
+  Monitor,
+  Image as ImageIcon,
+  Palette,
+  Globe,
+  AppWindow,
+  Check,
+  CheckCircle2,
+  Video,
+  ArrowRight,
+  Send,
+  Sparkles,
+  AlertCircle,
+  Copy,
+} from 'lucide-react'
 
 interface Question {
   text: string
@@ -692,45 +708,49 @@ export default function InterviewRoom({
   // ── ブラウザチェック画面 ──────────────────────────────
   if (speechSupported === false && !textOnlyMode) {
     return (
-      <div className="min-h-screen bg-gray-950 text-white flex flex-col items-center justify-center p-8">
-        <div className="max-w-md w-full bg-gray-900 border border-yellow-700/50 rounded-2xl p-8 text-center">
-          <div className="text-5xl mb-5">🌐</div>
-          <h1 className="text-xl font-bold text-yellow-300 mb-2">推奨ブラウザでアクセスしてください</h1>
-          <p className="text-gray-400 text-sm mb-6 leading-relaxed">
+      <div className="min-h-screen bg-gray-50 text-gray-900 flex flex-col items-center justify-center p-8">
+        <div className="max-w-md w-full bg-white border border-gray-200 rounded-xl p-8 text-center">
+          <div className="w-12 h-12 rounded-full bg-amber-50 border border-amber-200 flex items-center justify-center mx-auto mb-4">
+            <Globe className="w-5 h-5 text-amber-600" strokeWidth={1.75} />
+          </div>
+          <h1 className="text-lg font-semibold text-gray-900 mb-2 tracking-tight">推奨ブラウザでアクセスしてください</h1>
+          <p className="text-gray-600 text-sm mb-6 leading-relaxed">
             このインタビューは音声認識を使用します。<br />
             現在のブラウザ（Brave など）では音声認識がブロックされているため、
-            <span className="text-white font-medium"> Google Chrome または Microsoft Edge </span>
+            <span className="text-gray-900 font-medium"> Google Chrome または Microsoft Edge </span>
             で開いてください。
           </p>
 
           {/* URL コピーボタン */}
-          <div className="bg-gray-800 rounded-xl p-4 mb-6">
-            <p className="text-xs text-gray-500 mb-2">このページの URL を Chrome / Edge で開く</p>
+          <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 mb-6 text-left">
+            <p className="text-xs text-gray-500 mb-2 uppercase tracking-wide font-medium">このページの URL を Chrome / Edge で開く</p>
             <div className="flex gap-2">
               <input
                 readOnly
                 value={typeof window !== 'undefined' ? window.location.href : ''}
-                className="flex-1 bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-xs text-gray-300 focus:outline-none"
+                className="flex-1 bg-white border border-gray-300 rounded-md px-2.5 py-1.5 text-xs text-gray-700 focus:outline-none focus:border-gray-900"
               />
               <button
                 onClick={() => {
                   navigator.clipboard.writeText(window.location.href)
                   alert('URLをコピーしました')
                 }}
-                className="bg-indigo-600 hover:bg-indigo-500 px-4 py-2 rounded-lg text-xs font-medium transition-colors whitespace-nowrap"
+                className="inline-flex items-center gap-1 bg-gray-900 hover:bg-gray-800 text-white px-3 py-1.5 rounded-md text-xs font-medium transition-colors whitespace-nowrap"
               >
-                URLをコピー
+                <Copy className="w-3 h-3" strokeWidth={2} />
+                コピー
               </button>
             </div>
           </div>
 
-          <div className="border-t border-gray-800 pt-5">
-            <p className="text-xs text-gray-600 mb-3">または、テキスト入力のみで続けることもできます</p>
+          <div className="border-t border-gray-200 pt-5">
+            <p className="text-xs text-gray-500 mb-3">または、テキスト入力のみで続けることもできます</p>
             <button
               onClick={() => setTextOnlyMode(true)}
-              className="text-sm text-gray-400 hover:text-white border border-gray-700 hover:border-gray-500 px-5 py-2 rounded-lg transition-colors"
+              className="inline-flex items-center gap-1.5 text-sm text-gray-700 hover:text-gray-900 border border-gray-300 hover:border-gray-400 px-4 py-1.5 rounded-md transition-colors"
             >
-              テキスト入力で続ける →
+              テキスト入力で続ける
+              <ArrowRight className="w-3.5 h-3.5" strokeWidth={2} />
             </button>
           </div>
         </div>
@@ -739,17 +759,17 @@ export default function InterviewRoom({
   }
 
   return (
-    <div className="h-screen bg-gray-950 text-white flex flex-col overflow-hidden">
+    <div className="h-screen bg-white text-gray-900 flex flex-col overflow-hidden">
       {/* ヘッダー */}
-      <div className="border-b border-gray-800 px-6 py-3 flex items-center justify-between flex-shrink-0">
-        <div>
-          <span className="text-lg font-bold text-indigo-400">UserVoice</span>
-          <span className="text-gray-500 mx-2">/</span>
-          <span className="text-gray-300 text-sm">{interviewTitle}</span>
+      <div className="border-b border-gray-200 px-6 py-3 flex items-center justify-between flex-shrink-0">
+        <div className="flex items-center gap-2.5">
+          <span className="text-base font-semibold tracking-tight text-gray-900">UserVoice</span>
+          <span className="text-gray-300">/</span>
+          <span className="text-gray-600 text-sm">{interviewTitle}</span>
         </div>
         {isRecording && (
-          <span className="flex items-center gap-2 text-red-400 text-sm">
-            <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+          <span className="flex items-center gap-1.5 text-red-600 text-sm">
+            <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
             録音中
           </span>
         )}
@@ -761,7 +781,7 @@ export default function InterviewRoom({
 
           {/* カメラ映像：左カラム全体を覆う */}
           {cameraError ? (
-            <div className="absolute inset-0 flex items-center justify-center">
+            <div className="absolute inset-0 flex items-center justify-center bg-gray-100">
               <span className="text-gray-500 text-sm">カメラが利用できません</span>
             </div>
           ) : (
@@ -772,7 +792,7 @@ export default function InterviewRoom({
               playsInline
               className={
                 interviewType === 'usability' && (phase === 'task' || phase === 'interview' || phase === 'thinking' || phase === 'intro' || phase === 'waiting')
-                  ? 'absolute bottom-4 right-4 w-44 h-28 object-cover scale-x-[-1] rounded-xl border-2 border-gray-700 z-20 shadow-lg'
+                  ? 'absolute bottom-4 right-4 w-44 h-28 object-cover scale-x-[-1] rounded-lg border border-white/20 z-20 shadow-xl'
                   : 'absolute inset-0 w-full h-full object-cover scale-x-[-1]'
               }
             />
@@ -793,82 +813,87 @@ export default function InterviewRoom({
 
           {/* 感情検出ステータス（右上オーバーレイ） */}
           {emotionStatus === 'loading' && (
-            <div className="absolute top-4 right-4 bg-black/60 text-gray-400 text-[10px] px-2 py-1 rounded-full">
-              感情検出準備中...
+            <div className="absolute top-4 right-4 bg-white/95 border border-gray-200 text-gray-600 text-[10px] px-2 py-1 rounded-md shadow-sm font-medium">
+              感情検出準備中
             </div>
           )}
           {emotionStatus === 'ready' && lastEmotion && (
-            <div className="absolute top-4 right-4 bg-black/70 text-[10px] px-2 py-1 rounded-full text-green-300 font-medium">
+            <div className="absolute top-4 right-4 bg-white/95 border border-gray-200 text-[10px] px-2 py-1 rounded-md shadow-sm text-gray-900 font-medium">
               {getDominantEmotionLabel(lastEmotion)}
             </div>
           )}
           {emotionStatus === 'error' && (
-            <div className="absolute top-4 right-4 bg-black/60 text-red-400 text-[10px] px-2 py-1 rounded-full">
+            <div className="absolute top-4 right-4 bg-white/95 border border-red-200 text-red-600 text-[10px] px-2 py-1 rounded-md shadow-sm font-medium">
               検出エラー
             </div>
           )}
 
           {/* AI ステータスバッジ（左下オーバーレイ） */}
           {isSpeaking && (
-            <div className="absolute bottom-4 left-4 bg-indigo-600/90 text-xs px-3 py-1.5 rounded-full animate-pulse">
-              AI 話中...
+            <div className="absolute bottom-4 left-4 inline-flex items-center gap-1.5 bg-gray-900 text-white text-xs px-3 py-1.5 rounded-full shadow-lg">
+              <Sparkles className="w-3 h-3 animate-pulse" strokeWidth={2} />
+              AI 話中
             </div>
           )}
           {aiThinking && (
-            <div className="absolute bottom-4 left-4 bg-amber-600/90 text-xs px-3 py-1.5 rounded-full animate-pulse">
-              AI 考え中...
+            <div className="absolute bottom-4 left-4 inline-flex items-center gap-1.5 bg-amber-500 text-white text-xs px-3 py-1.5 rounded-full shadow-lg">
+              <Sparkles className="w-3 h-3 animate-pulse" strokeWidth={2} />
+              AI 考え中
             </div>
           )}
 
           {/* 案内フェーズ（オーバーレイ） */}
           {phase === 'guide' && (
-            <div className="absolute inset-0 bg-black/75 flex items-center justify-center p-8">
-              <div className="text-center max-w-lg w-full">
-                <div className="text-4xl mb-4">
-                  {interviewType === 'impression' ? '🖼️' : interviewType === 'usability' ? (usabilityMode === 'prototype' ? '🎨' : '🖥️') : '🎙️'}
+            <div className="absolute inset-0 bg-gray-950/40 backdrop-blur-sm flex items-center justify-center p-8">
+              <div className="text-center max-w-lg w-full bg-white rounded-2xl border border-gray-200 shadow-xl p-8">
+                <div className="w-12 h-12 mx-auto mb-4 rounded-xl bg-gray-100 flex items-center justify-center text-gray-700">
+                  {interviewType === 'impression' ? <ImageIcon className="w-5 h-5" strokeWidth={1.75} />
+                    : interviewType === 'usability' && usabilityMode === 'prototype' ? <Palette className="w-5 h-5" strokeWidth={1.75} />
+                    : interviewType === 'usability' ? <Monitor className="w-5 h-5" strokeWidth={1.75} />
+                    : <Mic className="w-5 h-5" strokeWidth={1.75} />}
                 </div>
-                <span className="inline-block mb-3 text-xs px-3 py-1 rounded-full border border-indigo-700 text-indigo-300 bg-indigo-900/40">
+                <span className="inline-block mb-3 text-[10px] px-2 py-0.5 rounded-md border border-gray-300 text-gray-700 bg-gray-50 font-medium uppercase tracking-wide">
                   {interviewType === 'impression' ? '印象テスト'
                     : interviewType === 'usability' && usabilityMode === 'prototype' ? 'プロトタイプテスト'
                     : interviewType === 'usability' ? 'ユーザビリティテスト'
                     : 'インタビュー'}
                 </span>
-                <h1 className="text-2xl font-bold mb-3">{interviewTitle}</h1>
-                <div className="bg-gray-900/80 border border-gray-700 rounded-xl p-5 text-left mb-6 space-y-3">
-                  <p className="text-sm text-gray-300 font-medium">
+                <h1 className="text-xl font-semibold tracking-tight mb-4 text-gray-900">{interviewTitle}</h1>
+                <div className="bg-gray-50 border border-gray-200 rounded-lg p-5 text-left mb-5 space-y-3">
+                  <p className="text-xs text-gray-500 font-medium uppercase tracking-wide">
                     {interviewType === 'usability' ? 'テストの流れ' : 'インタビューの流れ'}
                   </p>
                   {interviewType === 'usability' ? (
-                    <ul className="space-y-2 text-sm text-gray-400">
-                      <li className="flex gap-2"><span className="text-indigo-400 flex-shrink-0">①</span>カメラ・マイクを許可してください</li>
+                    <ul className="space-y-2 text-sm text-gray-700">
+                      <li className="flex gap-2.5"><span className="text-gray-400 flex-shrink-0 font-medium">1.</span>カメラ・マイクを許可してください</li>
                       {usabilityMode === 'prototype' ? (
                         <>
-                          <li className="flex gap-2"><span className="text-indigo-400 flex-shrink-0">②</span>画面にプロトタイプが表示されます。タスクに沿って操作してください</li>
-                          <li className="flex gap-2"><span className="text-indigo-400 flex-shrink-0">③</span>気づいたこと・感じたことを声に出しながら操作してください（シンクアラウド）</li>
-                          <li className="flex gap-2"><span className="text-indigo-400 flex-shrink-0">④</span>操作が終わったら「タスク完了」を押してください。その後、簡単な質問があります</li>
+                          <li className="flex gap-2.5"><span className="text-gray-400 flex-shrink-0 font-medium">2.</span>画面にプロトタイプが表示されます。タスクに沿って操作してください</li>
+                          <li className="flex gap-2.5"><span className="text-gray-400 flex-shrink-0 font-medium">3.</span>気づいたこと・感じたことを声に出しながら操作してください（シンクアラウド）</li>
+                          <li className="flex gap-2.5"><span className="text-gray-400 flex-shrink-0 font-medium">4.</span>操作が終わったら「タスク完了」を押してください。その後、簡単な質問があります</li>
                         </>
                       ) : (
                         <>
-                          <li className="flex gap-2"><span className="text-indigo-400 flex-shrink-0">②</span>
-                            <span>「開始する」を押すと<span className="text-white font-medium">サービスが新しいタブ</span>で開き、<span className="text-white font-medium">タスク用の小窓</span>が自動表示されます</span>
+                          <li className="flex gap-2.5"><span className="text-gray-400 flex-shrink-0 font-medium">2.</span>
+                            <span>「開始する」を押すと<span className="text-gray-900 font-medium">サービスが新しいタブ</span>で開き、<span className="text-gray-900 font-medium">タスク用の小窓</span>が自動表示されます</span>
                           </li>
-                          <li className="flex gap-2"><span className="text-indigo-400 flex-shrink-0">③</span>
-                            <span>小窓の <span className="text-red-400 font-medium">🖥️ 画面録画を開始する</span> を<strong className="text-white">必ず押してから</strong>操作を始めてください</span>
+                          <li className="flex gap-2.5"><span className="text-gray-400 flex-shrink-0 font-medium">3.</span>
+                            <span>小窓の <span className="inline-flex items-center gap-1 text-red-600 font-medium"><Monitor className="w-3 h-3 inline" strokeWidth={2} />画面録画を開始する</span> を<strong className="text-gray-900">必ず押してから</strong>操作を始めてください</span>
                           </li>
-                          <li className="flex gap-2"><span className="text-indigo-400 flex-shrink-0">④</span>タスクに沿ってサービスを操作しながら、気づいたこと・感じたことを声に出してください（シンクアラウド）</li>
-                          <li className="flex gap-2"><span className="text-indigo-400 flex-shrink-0">⑤</span>操作が終わったら小窓の「✅ タスク完了 → 質問へ」を押してください</li>
+                          <li className="flex gap-2.5"><span className="text-gray-400 flex-shrink-0 font-medium">4.</span>タスクに沿ってサービスを操作しながら、気づいたこと・感じたことを声に出してください（シンクアラウド）</li>
+                          <li className="flex gap-2.5"><span className="text-gray-400 flex-shrink-0 font-medium">5.</span>操作が終わったら小窓の「タスク完了 → 質問へ」を押してください</li>
                         </>
                       )}
                     </ul>
                   ) : (
-                    <ul className="space-y-2 text-sm text-gray-400">
-                      <li className="flex gap-2"><span className="text-indigo-400 flex-shrink-0">①</span>カメラ・マイクを許可してください</li>
-                      <li className="flex gap-2"><span className="text-indigo-400 flex-shrink-0">②</span>AI が質問を音声で読み上げます（{questions.length} 問 + 深掘り）</li>
-                      <li className="flex gap-2"><span className="text-indigo-400 flex-shrink-0">③</span>マイクに向かって自由に話してください</li>
-                      <li className="flex gap-2"><span className="text-indigo-400 flex-shrink-0">④</span>回答が終わったら AI が自動で次の質問に進みます</li>
+                    <ul className="space-y-2 text-sm text-gray-700">
+                      <li className="flex gap-2.5"><span className="text-gray-400 flex-shrink-0 font-medium">1.</span>カメラ・マイクを許可してください</li>
+                      <li className="flex gap-2.5"><span className="text-gray-400 flex-shrink-0 font-medium">2.</span>AI が質問を音声で読み上げます（{questions.length} 問 + 深掘り）</li>
+                      <li className="flex gap-2.5"><span className="text-gray-400 flex-shrink-0 font-medium">3.</span>マイクに向かって自由に話してください</li>
+                      <li className="flex gap-2.5"><span className="text-gray-400 flex-shrink-0 font-medium">4.</span>回答が終わったら AI が自動で次の質問に進みます</li>
                     </ul>
                   )}
-                  <div className="pt-1 border-t border-gray-700 text-xs text-gray-500 space-y-1">
+                  <div className="pt-2 border-t border-gray-200 text-xs text-gray-500 space-y-1">
                     <p>・静かな場所で、イヤホンなしで参加することをお勧めします</p>
                     <p>・表情・音声・操作内容が録画・分析されます</p>
                   </div>
@@ -876,12 +901,12 @@ export default function InterviewRoom({
                 <button
                   onClick={startInterview}
                   disabled={!cameraReady || emotionStatus === 'loading'}
-                  className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-wait px-8 py-3 rounded-xl font-semibold text-lg transition-colors"
+                  className="inline-flex items-center gap-1.5 bg-gray-900 hover:bg-gray-800 text-white disabled:opacity-50 disabled:cursor-wait px-6 py-2.5 rounded-md font-medium text-sm transition-colors"
                 >
-                  {!cameraReady || emotionStatus === 'loading' ? '準備中...' : 'インタビューを開始する →'}
+                  {!cameraReady || emotionStatus === 'loading' ? '準備中...' : (<>インタビューを開始する<ArrowRight className="w-4 h-4" strokeWidth={2} /></>)}
                 </button>
                 {(!cameraReady || emotionStatus === 'loading') && (
-                  <p className="text-xs text-gray-500 mt-2 animate-pulse">カメラと解析モデルを初期化中...</p>
+                  <p className="text-xs text-gray-500 mt-2 animate-pulse">カメラと解析モデルを初期化中</p>
                 )}
               </div>
             </div>
@@ -890,14 +915,14 @@ export default function InterviewRoom({
 
           {/* 印象テスト: 刺激表示フェーズ */}
           {phase === 'stimulus' && stimulusUrl && (
-            <div className="absolute inset-0 bg-black flex items-center justify-center">
+            <div className="absolute inset-0 bg-gray-50 flex items-center justify-center">
               <img
                 src={stimulusUrl}
                 alt="stimulus"
                 className="max-w-full max-h-full object-contain"
               />
               {stimulusCountdown > 0 && (
-                <div className="absolute bottom-6 right-6 w-12 h-12 rounded-full bg-black/70 flex items-center justify-center text-xl font-bold text-white">
+                <div className="absolute bottom-6 right-6 w-12 h-12 rounded-full bg-gray-900 text-white flex items-center justify-center text-xl font-semibold shadow-lg">
                   {stimulusCountdown}
                 </div>
               )}
@@ -906,74 +931,74 @@ export default function InterviewRoom({
 
           {/* ユーザビリティテスト: タスクフェーズオーバーレイ */}
           {phase === 'task' && interviewType === 'usability' && (
-            <div className="absolute inset-0 bg-black/60 flex items-end justify-center pb-8 z-10">
-              <div className="bg-gray-900 border border-gray-700 rounded-2xl p-5 max-w-md w-full mx-4 space-y-4">
-                {/* 現在のタスク表示 */}
+            <div className="absolute inset-0 bg-gray-950/40 backdrop-blur-sm flex items-end justify-center pb-8 z-10">
+              <div className="bg-white border border-gray-200 rounded-xl shadow-xl p-5 max-w-md w-full mx-4 space-y-4">
                 {tasks && tasks.length > 0 && (
                   <div>
-                    <p className="text-xs text-gray-500 mb-1">
+                    <p className="text-[10px] text-gray-500 mb-1 uppercase tracking-wide font-medium">
                       タスク {currentTaskIndex + 1} / {tasks.length}
                     </p>
-                    <p className="text-sm text-white font-medium leading-relaxed">
+                    <p className="text-sm text-gray-900 font-medium leading-relaxed">
                       {tasks[currentTaskIndex]?.text}
                     </p>
                   </div>
                 )}
 
                 {usabilityMode === 'service' ? (
-                  /* ── サービスモード: ウィジェットが主役 ── */
                   <div className="space-y-3">
-                    {/* 録画ステータス（録画操作はウィジェット内で行う） */}
                     {screenSharing ? (
-                      <div className="flex items-center gap-2 text-xs px-3 py-1.5 rounded-lg bg-red-900/40 border border-red-700/50 text-red-300">
-                        <span className="w-1.5 h-1.5 rounded-full bg-red-400 animate-pulse flex-shrink-0" />
-                        🔴 画面録画中
+                      <div className="flex items-center gap-2 text-xs px-3 py-1.5 rounded-md bg-red-50 border border-red-200 text-red-700">
+                        <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse flex-shrink-0" />
+                        画面録画中
                       </div>
                     ) : (
-                      <div className="flex items-center gap-2 text-xs px-3 py-1.5 rounded-lg bg-gray-800 border border-gray-700 text-gray-500">
-                        <span className="w-1.5 h-1.5 rounded-full bg-gray-600 flex-shrink-0" />
+                      <div className="flex items-center gap-2 text-xs px-3 py-1.5 rounded-md bg-gray-50 border border-gray-200 text-gray-600">
+                        <span className="w-1.5 h-1.5 rounded-full bg-gray-400 flex-shrink-0" />
                         ウィジェットから画面録画を開始してください
                       </div>
                     )}
                     {widgetBlocked ? (
-                      <div className="bg-yellow-900/30 border border-yellow-700/50 rounded-xl p-3 text-xs text-yellow-300 leading-relaxed">
+                      <div className="bg-amber-50 border border-amber-200 rounded-md p-3 text-xs text-amber-800 leading-relaxed">
                         ポップアップがブロックされました。ブラウザのアドレスバー右端でポップアップを許可するか、下のボタンで操作してください。
                       </div>
                     ) : (
-                      <div className="flex items-center gap-2 text-xs text-green-400">
-                        <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse flex-shrink-0" />
+                      <div className="flex items-center gap-2 text-xs text-emerald-700">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse flex-shrink-0" />
                         タスクウィジェットが別ウィンドウで起動中です
                       </div>
                     )}
-                    {/* 再オープンボタン */}
                     <div className="flex gap-2">
                       {stimulusUrl && (
                         <button
                           onClick={openServicePopup}
-                          className="flex-1 border border-indigo-700 text-indigo-400 hover:bg-indigo-900/30 px-3 py-2 rounded-xl text-xs font-medium transition-colors"
+                          className="flex-1 inline-flex items-center justify-center gap-1.5 border border-gray-300 hover:border-gray-400 text-gray-700 hover:text-gray-900 px-3 py-2 rounded-md text-xs font-medium transition-colors"
                         >
-                          🌐 サービスを再度開く
+                          <Globe className="w-3.5 h-3.5" strokeWidth={2} />
+                          サービスを再度開く
                         </button>
                       )}
                       <button
                         onClick={openWidget}
-                        className="flex-1 border border-gray-600 text-gray-400 hover:bg-gray-800 px-3 py-2 rounded-xl text-xs font-medium transition-colors"
+                        className="flex-1 inline-flex items-center justify-center gap-1.5 border border-gray-300 hover:border-gray-400 text-gray-700 hover:text-gray-900 px-3 py-2 rounded-md text-xs font-medium transition-colors"
                       >
-                        🔲 ウィジェットを再度開く
+                        <AppWindow className="w-3.5 h-3.5" strokeWidth={2} />
+                        ウィジェットを再度開く
                       </button>
                     </div>
-                    {/* ポップアップブロック時のフォールバックボタン */}
                     {widgetBlocked && (
-                      <div className="flex gap-2 pt-1 border-t border-gray-700">
+                      <div className="flex gap-2 pt-2 border-t border-gray-200">
                         <button
                           onClick={completeTasksAndStartInterview}
-                          className="flex-1 bg-indigo-600 hover:bg-indigo-500 px-4 py-2.5 rounded-xl text-sm font-semibold transition-colors"
+                          className="flex-1 inline-flex items-center justify-center gap-1.5 bg-gray-900 hover:bg-gray-800 text-white px-4 py-2 rounded-md text-sm font-medium transition-colors"
                         >
-                          ✅ タスク完了 → 質問へ
+                          <Check className="w-3.5 h-3.5" strokeWidth={2.5} />
+                          タスク完了
+                          <ArrowRight className="w-3.5 h-3.5" strokeWidth={2} />
+                          質問へ
                         </button>
                         <button
                           onClick={endInterview}
-                          className="border border-gray-700 hover:border-gray-500 text-gray-400 hover:text-white px-4 py-2.5 rounded-xl text-sm font-medium transition-colors"
+                          className="border border-gray-300 hover:border-gray-400 text-gray-700 hover:text-gray-900 px-4 py-2 rounded-md text-sm transition-colors"
                         >
                           終了
                         </button>
@@ -981,17 +1006,19 @@ export default function InterviewRoom({
                     )}
                   </div>
                 ) : (
-                  /* ── プロトタイプモード: 完了ボタンをここに ── */
                   <div className="flex gap-2">
                     <button
                       onClick={completeTasksAndStartInterview}
-                      className="flex-1 bg-indigo-600 hover:bg-indigo-500 px-4 py-2.5 rounded-xl text-sm font-semibold transition-colors"
+                      className="flex-1 inline-flex items-center justify-center gap-1.5 bg-gray-900 hover:bg-gray-800 text-white px-4 py-2.5 rounded-md text-sm font-medium transition-colors"
                     >
-                      ✅ タスク完了 → 質問へ
+                      <Check className="w-3.5 h-3.5" strokeWidth={2.5} />
+                      タスク完了
+                      <ArrowRight className="w-3.5 h-3.5" strokeWidth={2} />
+                      質問へ
                     </button>
                     <button
                       onClick={endInterview}
-                      className="border border-gray-700 hover:border-gray-500 text-gray-400 hover:text-white px-4 py-2.5 rounded-xl text-sm font-medium transition-colors"
+                      className="border border-gray-300 hover:border-gray-400 text-gray-700 hover:text-gray-900 px-4 py-2.5 rounded-md text-sm transition-colors"
                     >
                       終了
                     </button>
@@ -1003,73 +1030,83 @@ export default function InterviewRoom({
 
           {/* 評価質問（オーバーレイ） */}
           {phase === 'interview' && !isSpeaking && currentQ?.type === 'rating' && (
-            <div className="absolute inset-0 bg-black/70 flex items-center justify-center p-8">
-              <RatingQuestion
-                question={currentQ.text}
-                onSubmit={(v) => submitRating(v, `${v} / 5`)}
-              />
+            <div className="absolute inset-0 bg-gray-950/40 backdrop-blur-sm flex items-center justify-center p-8">
+              <div className="bg-white rounded-xl border border-gray-200 shadow-xl p-8">
+                <RatingQuestion
+                  question={currentQ.text}
+                  onSubmit={(v) => submitRating(v, `${v} / 5`)}
+                />
+              </div>
             </div>
           )}
           {phase === 'interview' && !isSpeaking && currentQ?.type === 'nps' && (
-            <div className="absolute inset-0 bg-black/70 flex items-center justify-center p-8">
-              <NpsQuestion
-                question={currentQ.text}
-                onSubmit={(v) => submitRating(v, `${v} / 10`)}
-              />
+            <div className="absolute inset-0 bg-gray-950/40 backdrop-blur-sm flex items-center justify-center p-8">
+              <div className="bg-white rounded-xl border border-gray-200 shadow-xl p-8">
+                <NpsQuestion
+                  question={currentQ.text}
+                  onSubmit={(v) => submitRating(v, `${v} / 10`)}
+                />
+              </div>
             </div>
           )}
 
           {/* 完了画面（オーバーレイ）— ダッシュボードボタンなし */}
           {phase === 'done' && (
-            <div className="absolute inset-0 bg-black/80 flex items-center justify-center">
-              <div className="text-center max-w-md px-8">
-                <div className="text-6xl mb-6">✅</div>
-                <h2 className="text-2xl font-bold mb-3">インタビュー完了</h2>
-                <p className="text-gray-300 mb-2">ご回答いただきありがとうございました。</p>
-                {recordingDownloadUrl ? (
-                  <a
-                    href={recordingDownloadUrl}
-                    download={`interview-${sessionId.slice(0, 8)}.webm`}
-                    className="inline-block mt-4 bg-indigo-600 hover:bg-indigo-500 px-5 py-2 rounded-lg text-sm font-medium transition-colors"
-                  >
-                    📷 顔録画をダウンロード
-                  </a>
-                ) : (
-                  <p className="text-gray-500 text-sm mt-2">このページを閉じていただいて構いません。</p>
-                )}
-                {screenRecordingDownloadUrl && (
-                  <a
-                    href={screenRecordingDownloadUrl}
-                    download={`screen-${sessionId.slice(0, 8)}.webm`}
-                    className="inline-block mt-2 bg-gray-700 hover:bg-gray-600 px-5 py-2 rounded-lg text-sm font-medium transition-colors"
-                  >
-                    🖥️ 操作録画（顔合成）をダウンロード
-                  </a>
-                )}
+            <div className="absolute inset-0 bg-gray-950/40 backdrop-blur-sm flex items-center justify-center">
+              <div className="text-center max-w-md px-8 bg-white rounded-2xl border border-gray-200 shadow-xl py-10">
+                <div className="w-14 h-14 rounded-full bg-emerald-50 border border-emerald-200 flex items-center justify-center mx-auto mb-5">
+                  <CheckCircle2 className="w-7 h-7 text-emerald-600" strokeWidth={1.5} />
+                </div>
+                <h2 className="text-xl font-semibold tracking-tight mb-2 text-gray-900">インタビュー完了</h2>
+                <p className="text-gray-600 text-sm mb-4">ご回答いただきありがとうございました。</p>
+                <div className="flex flex-col gap-2 items-center">
+                  {recordingDownloadUrl ? (
+                    <a
+                      href={recordingDownloadUrl}
+                      download={`interview-${sessionId.slice(0, 8)}.webm`}
+                      className="inline-flex items-center gap-1.5 bg-gray-900 hover:bg-gray-800 text-white px-4 py-2 rounded-md text-sm font-medium transition-colors"
+                    >
+                      <Video className="w-3.5 h-3.5" strokeWidth={2} />
+                      顔録画をダウンロード
+                    </a>
+                  ) : (
+                    <p className="text-gray-500 text-xs">このページを閉じていただいて構いません。</p>
+                  )}
+                  {screenRecordingDownloadUrl && (
+                    <a
+                      href={screenRecordingDownloadUrl}
+                      download={`screen-${sessionId.slice(0, 8)}.webm`}
+                      className="inline-flex items-center gap-1.5 border border-gray-300 hover:border-gray-400 text-gray-700 hover:text-gray-900 px-4 py-2 rounded-md text-sm font-medium transition-colors"
+                    >
+                      <Monitor className="w-3.5 h-3.5" strokeWidth={2} />
+                      操作録画（顔合成）をダウンロード
+                    </a>
+                  )}
+                </div>
               </div>
             </div>
           )}
         </div>
 
         {/* 右：質問パネル + 会話ログ（スクロール独立） */}
-        <div className="w-96 border-l border-gray-800 flex flex-col overflow-hidden">
+        <div className="w-96 border-l border-gray-200 bg-gray-50 flex flex-col overflow-hidden">
           {/* タスクリスト (usability) */}
           {interviewType === 'usability' && tasks && tasks.length > 0 && (phase === 'waiting' || phase === 'task' || phase === 'interview' || phase === 'thinking' || phase === 'intro') && (
-            <div className="p-4 border-b border-gray-800 flex-shrink-0">
-              <div className="text-xs text-gray-500 uppercase tracking-wide mb-2">タスクリスト</div>
-              <div className="space-y-1.5">
+            <div className="p-4 border-b border-gray-200 flex-shrink-0 bg-white">
+              <div className="text-[10px] text-gray-500 uppercase tracking-wide mb-2 font-medium">タスクリスト</div>
+              <div className="space-y-1">
                 {tasks.map((task, i) => (
                   <div
                     key={i}
                     onClick={() => setCurrentTaskIndex(i)}
-                    className={`flex gap-2 items-start cursor-pointer rounded-lg px-2 py-1.5 text-xs transition-colors ${
-                      currentTaskIndex === i ? 'bg-indigo-900/40 text-indigo-200 border border-indigo-700/50' : 'text-gray-400 hover:text-gray-300'
+                    className={`flex gap-2 items-start cursor-pointer rounded-md px-2 py-1.5 text-xs transition-colors ${
+                      currentTaskIndex === i ? 'bg-gray-900 text-white' : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
                     }`}
                   >
-                    <span className={`mt-0.5 w-4 h-4 rounded-full flex items-center justify-center text-[9px] font-bold shrink-0 ${
-                      currentTaskIndex === i ? 'bg-indigo-600 text-white' : 'bg-gray-700 text-gray-500'
+                    <span className={`mt-0.5 w-4 h-4 rounded flex items-center justify-center text-[9px] font-semibold shrink-0 ${
+                      currentTaskIndex === i ? 'bg-white text-gray-900' : 'bg-gray-200 text-gray-500'
                     }`}>{i + 1}</span>
-                    <span>{task.text}</span>
+                    <span className="leading-snug">{task.text}</span>
                   </div>
                 ))}
               </div>
@@ -1078,49 +1115,55 @@ export default function InterviewRoom({
 
           {/* 画面共有ボタン (prototype モードのみ) */}
           {interviewType === 'usability' && usabilityMode === 'prototype' && (phase === 'waiting' || phase === 'task' || phase === 'interview' || phase === 'thinking' || phase === 'intro') && (
-            <div className="p-3 border-b border-gray-800 flex-shrink-0">
+            <div className="p-3 border-b border-gray-200 flex-shrink-0 bg-white">
               {!screenSharing ? (
                 <button
                   onClick={startScreenShare}
-                  className="w-full bg-gray-800 hover:bg-gray-700 border border-gray-700 hover:border-indigo-500 px-3 py-2 rounded-lg text-xs font-medium transition-colors flex items-center justify-center gap-2"
+                  className="w-full inline-flex items-center justify-center gap-1.5 bg-white hover:bg-gray-50 border border-gray-300 hover:border-gray-900 text-gray-700 hover:text-gray-900 px-3 py-2 rounded-md text-xs font-medium transition-colors"
                 >
-                  🎙️ 録画を開始（このタブを共有）
+                  <Mic className="w-3.5 h-3.5" strokeWidth={2} />
+                  録画を開始（このタブを共有）
                 </button>
               ) : (
-                <div className="flex items-center gap-2 text-xs text-green-400">
-                  <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
+                <div className="flex items-center gap-2 text-xs text-emerald-700">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
                   録画中
                 </div>
               )}
-              {screenShareError && <p className="text-xs text-red-400 mt-1">{screenShareError}</p>}
+              {screenShareError && (
+                <p className="inline-flex items-center gap-1 text-xs text-red-600 mt-1">
+                  <AlertCircle className="w-3 h-3" strokeWidth={2} />
+                  {screenShareError}
+                </p>
+              )}
             </div>
           )}
 
           {(phase === 'interview' || phase === 'thinking') && (
-            <div className="p-4 border-b border-gray-800 flex-shrink-0">
-              <div className="flex items-center justify-between text-xs text-gray-500 mb-2">
+            <div className="p-4 border-b border-gray-200 flex-shrink-0 bg-white">
+              <div className="flex items-center justify-between text-[10px] text-gray-500 mb-2 uppercase tracking-wide font-medium">
                 <span>{isFollowUp ? `質問 ${currentQuestionIndex + 1}（深掘り中）` : `質問 ${currentQuestionIndex + 1} / ${questions.length}`}</span>
                 <span className="flex items-center gap-1.5">
-                  {isFollowUp && <span className="bg-amber-500/20 text-amber-400 px-2 py-0.5 rounded-full text-[10px]">AI 深掘り</span>}
+                  {isFollowUp && <span className="bg-amber-50 border border-amber-200 text-amber-700 px-1.5 py-0.5 rounded text-[9px]">AI 深掘り</span>}
                   {currentQ?.type !== 'open' && (
-                    <span className="bg-blue-500/20 text-blue-400 px-2 py-0.5 rounded-full text-[10px]">
+                    <span className="bg-blue-50 border border-blue-200 text-blue-700 px-1.5 py-0.5 rounded text-[9px]">
                       {currentQ?.type === 'rating' ? '5段階評価' : 'NPS'}
                     </span>
                   )}
                 </span>
               </div>
-              <div className="h-1 bg-gray-800 rounded-full mb-3">
-                <div className="h-1 bg-indigo-500 rounded-full transition-all duration-500" style={{ width: `${progress}%` }} />
+              <div className="h-1 bg-gray-100 rounded-full mb-3 overflow-hidden">
+                <div className="h-full bg-gray-900 rounded-full transition-all duration-500" style={{ width: `${progress}%` }} />
               </div>
-              <p className={`text-sm font-medium leading-relaxed ${isFollowUp ? 'text-amber-200' : 'text-white'}`}>
+              <p className={`text-sm font-medium leading-relaxed ${isFollowUp ? 'text-amber-700' : 'text-gray-900'}`}>
                 {displayedQuestion || currentQ?.text}
               </p>
               {aiThinking && (
-                <div className="mt-3 flex items-center gap-2 text-xs text-amber-400">
-                  <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-bounce" />
-                  <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-bounce" style={{ animationDelay: '150ms' }} />
-                  <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-bounce" style={{ animationDelay: '300ms' }} />
-                  <span>AI が次の質問を考えています...</span>
+                <div className="mt-3 flex items-center gap-2 text-xs text-amber-700">
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-bounce" />
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-bounce" style={{ animationDelay: '150ms' }} />
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-bounce" style={{ animationDelay: '300ms' }} />
+                  <span>AI が次の質問を考えています</span>
                 </div>
               )}
             </div>
@@ -1128,29 +1171,29 @@ export default function InterviewRoom({
 
           {/* リアルタイム感情モニター */}
           {(phase === 'interview' || phase === 'thinking' || phase === 'ending') && emotionStatus === 'ready' && (
-            <div className="border-b border-gray-800 p-3 flex-shrink-0">
-              <div className="text-[10px] text-gray-600 uppercase tracking-wide mb-2">感情モニター</div>
+            <div className="border-b border-gray-200 p-3 flex-shrink-0 bg-white">
+              <div className="text-[10px] text-gray-500 uppercase tracking-wide mb-2 font-medium">感情モニター</div>
               <RealtimeEmotionGraph history={emotionHistory} />
             </div>
           )}
 
           {liveText && (
-            <div className="p-3 border-b border-gray-800 bg-gray-900/50 flex-shrink-0">
-              <div className="text-[10px] text-gray-500 mb-1">音声認識中...</div>
-              <p className="text-sm text-gray-300">{liveText}</p>
+            <div className="p-3 border-b border-gray-200 bg-emerald-50/50 flex-shrink-0">
+              <div className="text-[10px] text-emerald-700 mb-1 font-medium uppercase tracking-wide">音声認識中</div>
+              <p className="text-sm text-gray-900">{liveText}</p>
             </div>
           )}
 
           {phase === 'interview' && !isSpeaking && !aiThinking && currentQ?.type === 'open' && (
-            <div className="p-3 border-b border-gray-800 space-y-2 flex-shrink-0">
+            <div className="p-3 border-b border-gray-200 space-y-2 flex-shrink-0 bg-white">
               {isListening && (
-                <div className="flex items-center gap-2 text-[10px] text-green-400">
-                  <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
-                  音声認識中...
+                <div className="flex items-center gap-2 text-[10px] text-emerald-700 font-medium">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                  音声認識中
                 </div>
               )}
               {!speechSupported && (
-                <p className="text-[10px] text-yellow-500">音声認識不可 — テキストで入力してください</p>
+                <p className="text-[10px] text-amber-700">音声認識不可 — テキストで入力してください</p>
               )}
               <div className="flex gap-2">
                 <input
@@ -1158,33 +1201,37 @@ export default function InterviewRoom({
                   onChange={(e) => setTextInput(e.target.value)}
                   onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); submitTextAnswer() } }}
                   placeholder={speechSupported ? 'テキストでも入力できます' : '回答を入力...'}
-                  className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-indigo-500"
+                  className="flex-1 bg-white border border-gray-300 focus:border-gray-900 focus:ring-1 focus:ring-gray-900 rounded-md px-2.5 py-1.5 text-xs text-gray-900 placeholder-gray-400 focus:outline-none"
                 />
                 <button
                   onClick={submitTextAnswer}
                   disabled={!textInput.trim()}
-                  className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-30 px-3 py-2 rounded-lg text-xs font-medium transition-colors"
+                  className="inline-flex items-center gap-1 bg-gray-900 hover:bg-gray-800 text-white disabled:opacity-30 px-2.5 py-1.5 rounded-md text-xs font-medium transition-colors"
                 >
+                  <Send className="w-3 h-3" strokeWidth={2} />
                   送信
                 </button>
               </div>
               <button onClick={manualNext}
-                className="w-full border border-gray-700 hover:border-indigo-500 py-1.5 rounded-lg text-xs text-gray-500 hover:text-indigo-400 transition-colors">
-                回答を終了して次へ →
+                className="w-full inline-flex items-center justify-center gap-1 border border-gray-300 hover:border-gray-400 py-1.5 rounded-md text-xs text-gray-600 hover:text-gray-900 transition-colors">
+                回答を終了して次へ
+                <ArrowRight className="w-3 h-3" strokeWidth={2} />
               </button>
             </div>
           )}
 
           {/* 会話ログ（ここだけスクロール） */}
-          <div className="flex-1 overflow-y-auto p-4">
-            <div className="text-xs text-gray-600 uppercase tracking-wide mb-3">会話ログ</div>
-            <div className="space-y-3">
+          <div className="flex-1 overflow-y-auto p-4 bg-gray-50">
+            <div className="text-[10px] text-gray-500 uppercase tracking-wide mb-3 font-medium">会話ログ</div>
+            <div className="space-y-2">
               {transcript.map((t, i) => (
                 <div key={i} className={`flex gap-2 ${t.speaker === 'Interviewer' ? '' : 'flex-row-reverse'}`}>
-                  <div className={`text-xs px-3 py-2 rounded-xl max-w-[85%] leading-relaxed ${
-                    t.speaker === 'Interviewer' ? 'bg-indigo-900 text-indigo-100' : 'bg-gray-800 text-gray-100'
+                  <div className={`text-xs px-3 py-2 rounded-lg max-w-[85%] leading-relaxed ${
+                    t.speaker === 'Interviewer' ? 'bg-white border border-gray-200 text-gray-900' : 'bg-gray-900 text-white'
                   }`}>
-                    <div className="text-[10px] opacity-60 mb-1">
+                    <div className={`text-[9px] mb-1 uppercase tracking-wide font-medium ${
+                      t.speaker === 'Interviewer' ? 'text-gray-400' : 'text-gray-400'
+                    }`}>
                       {t.speaker === 'Interviewer' ? 'AI インタビュアー' : '参加者'}
                     </div>
                     {t.text}
@@ -1247,10 +1294,10 @@ function RealtimeEmotionGraph({ history }: { history: EmotionSnapshot[] }) {
         {/* 凡例 */}
         <div className="flex gap-3 justify-center mt-1">
           {[
-            { label: '喜び',  color: '#34d399' },
-            { label: '中立',  color: '#9ca3af' },
-            { label: '悲しみ', color: '#60a5fa' },
-            { label: '驚き',  color: '#fb923c' },
+            { label: '喜び',  color: '#10b981' },
+            { label: '中立',  color: '#6b7280' },
+            { label: '悲しみ', color: '#3b82f6' },
+            { label: '驚き',  color: '#f97316' },
           ].map((e) => (
             <span key={e.label} className="flex items-center gap-1 text-[9px] text-gray-500">
               <span className="w-2 h-0.5 rounded-full inline-block" style={{ backgroundColor: e.color }} />
@@ -1267,14 +1314,14 @@ function RealtimeEmotionGraph({ history }: { history: EmotionSnapshot[] }) {
             const pct = Math.round((latest[key] as number) * 100)
             return (
               <div key={key} className="flex items-center gap-1.5">
-                <span className="text-[9px] text-gray-600 w-7 text-right leading-none">{label}</span>
-                <div className="flex-1 h-1 bg-gray-800 rounded-full overflow-hidden">
+                <span className="text-[9px] text-gray-500 w-7 text-right leading-none">{label}</span>
+                <div className="flex-1 h-1 bg-gray-200 rounded-full overflow-hidden">
                   <div
                     className="h-full rounded-full transition-all duration-700"
                     style={{ width: `${pct}%`, backgroundColor: color }}
                   />
                 </div>
-                <span className="text-[9px] text-gray-600 w-5 text-right leading-none">{pct}%</span>
+                <span className="text-[9px] text-gray-500 w-5 text-right leading-none">{pct}%</span>
               </div>
             )
           })}
@@ -1289,13 +1336,13 @@ function getDominantEmotionLabel(e: EmotionSnapshot): string {
   const keys = ['happy', 'sad', 'angry', 'fearful', 'disgusted', 'surprised', 'neutral'] as const
   const dominant = keys.reduce((a, b) => (e[a] >= e[b] ? a : b))
   const labels: Record<typeof dominant, string> = {
-    happy: '😊 喜び',
-    sad: '😢 悲しみ',
-    angry: '😠 怒り',
-    fearful: '😨 恐怖',
-    disgusted: '🤢 嫌悪',
-    surprised: '😲 驚き',
-    neutral: '😐 中立',
+    happy: '喜び',
+    sad: '悲しみ',
+    angry: '怒り',
+    fearful: '恐怖',
+    disgusted: '嫌悪',
+    surprised: '驚き',
+    neutral: '中立',
   }
   return labels[dominant]
 }
@@ -1306,25 +1353,25 @@ function RatingQuestion({ question, onSubmit }: { question: string; onSubmit: (v
   const labels = ['全く思わない', 'あまり思わない', '普通', 'そう思う', '非常にそう思う']
   return (
     <div className="text-center max-w-sm w-full">
-      <p className="text-sm text-gray-400 mb-4">{question}</p>
-      <div className="flex gap-3 justify-center mb-2">
+      <p className="text-sm text-gray-700 mb-5 leading-relaxed">{question}</p>
+      <div className="flex gap-2.5 justify-center mb-3">
         {[1, 2, 3, 4, 5].map((v) => (
           <button
             key={v}
             onMouseEnter={() => setHovered(v)}
             onMouseLeave={() => setHovered(null)}
             onClick={() => onSubmit(v)}
-            className={`w-12 h-12 rounded-xl font-bold text-lg transition-all ${
+            className={`w-11 h-11 rounded-md font-semibold text-base transition-all border ${
               (hovered ?? 0) >= v
-                ? 'bg-indigo-500 text-white scale-110'
-                : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
+                ? 'bg-gray-900 text-white border-gray-900 scale-110'
+                : 'bg-white text-gray-600 border-gray-300 hover:border-gray-500'
             }`}
           >
             {v}
           </button>
         ))}
       </div>
-      <p className="text-xs text-gray-600 h-4">
+      <p className="text-xs text-gray-500 h-4">
         {hovered ? labels[hovered - 1] : ''}
       </p>
     </div>
@@ -1336,26 +1383,26 @@ function NpsQuestion({ question, onSubmit }: { question: string; onSubmit: (v: n
   const [hovered, setHovered] = useState<number | null>(null)
   return (
     <div className="text-center max-w-lg w-full">
-      <p className="text-sm text-gray-400 mb-4">{question}</p>
-      <div className="flex gap-1.5 justify-center mb-2 flex-wrap">
+      <p className="text-sm text-gray-700 mb-5 leading-relaxed">{question}</p>
+      <div className="flex gap-1 justify-center mb-2.5 flex-wrap">
         {[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((v) => {
-          const color = v <= 6 ? 'bg-red-900 text-red-300 hover:bg-red-700'
-            : v <= 8 ? 'bg-yellow-900 text-yellow-300 hover:bg-yellow-700'
-            : 'bg-green-900 text-green-300 hover:bg-green-700'
+          const color = v <= 6 ? 'border-red-200 text-red-700 hover:bg-red-50'
+            : v <= 8 ? 'border-amber-200 text-amber-700 hover:bg-amber-50'
+            : 'border-emerald-200 text-emerald-700 hover:bg-emerald-50'
           return (
             <button
               key={v}
               onMouseEnter={() => setHovered(v)}
               onMouseLeave={() => setHovered(null)}
               onClick={() => onSubmit(v)}
-              className={`w-10 h-10 rounded-lg font-medium text-sm transition-all ${color} ${hovered === v ? 'scale-110' : ''}`}
+              className={`w-9 h-9 rounded-md font-medium text-sm transition-all bg-white border ${color} ${hovered === v ? 'scale-110' : ''}`}
             >
               {v}
             </button>
           )
         })}
       </div>
-      <div className="flex justify-between text-xs text-gray-600 max-w-sm mx-auto">
+      <div className="flex justify-between text-xs text-gray-500 max-w-sm mx-auto">
         <span>全く勧めない</span>
         <span>非常に勧めたい</span>
       </div>

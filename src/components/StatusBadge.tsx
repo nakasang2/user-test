@@ -1,9 +1,9 @@
 const COLORS: Record<string, string> = {
-  pending:    'bg-yellow-500/20 text-yellow-400',
-  active:     'bg-green-500/20 text-green-400',
-  completed:  'bg-blue-500/20 text-blue-400',
-  processing: 'bg-purple-500/20 text-purple-400',
-  done:       'bg-indigo-500/20 text-indigo-400',
+  pending:    'bg-amber-50 text-amber-700 border-amber-200',
+  active:     'bg-emerald-50 text-emerald-700 border-emerald-200',
+  completed:  'bg-blue-50 text-blue-700 border-blue-200',
+  processing: 'bg-violet-50 text-violet-700 border-violet-200',
+  done:       'bg-gray-100 text-gray-700 border-gray-200',
 }
 
 const LABELS: Record<string, string> = {
@@ -16,7 +16,7 @@ const LABELS: Record<string, string> = {
 
 export default function StatusBadge({ status }: { status: string }) {
   return (
-    <span className={`px-2 py-1 rounded-full text-xs font-medium flex-shrink-0 ${COLORS[status] ?? 'bg-gray-700 text-gray-400'}`}>
+    <span className={`px-2 py-0.5 rounded-md text-xs font-medium border flex-shrink-0 ${COLORS[status] ?? 'bg-gray-100 text-gray-600 border-gray-200'}`}>
       {LABELS[status] ?? status}
     </span>
   )

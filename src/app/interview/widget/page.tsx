@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useRef, Suspense } from 'react'
 import { useSearchParams } from 'next/navigation'
+import { Monitor, Check, X, AlertTriangle, ArrowRight, CheckCircle2 } from 'lucide-react'
 
 interface Task {
   text: string
@@ -230,10 +231,12 @@ function WidgetContent() {
   /* ── 完了画面 ─────────────────────────────────────────────── */
   if (widgetPhase === 'done') {
     return (
-      <div className="min-h-screen bg-gray-950 text-white flex items-center justify-center">
+      <div className="min-h-screen bg-white text-gray-900 flex items-center justify-center">
         <div className="text-center px-6">
-          <div className="text-4xl mb-3">✅</div>
-          <p className="text-sm text-gray-300">{doneMessage}</p>
+          <div className="w-10 h-10 rounded-full bg-emerald-50 border border-emerald-200 flex items-center justify-center mx-auto mb-3">
+            <CheckCircle2 className="w-5 h-5 text-emerald-600" strokeWidth={1.75} />
+          </div>
+          <p className="text-sm text-gray-600">{doneMessage}</p>
         </div>
       </div>
     )
@@ -243,17 +246,17 @@ function WidgetContent() {
 
   /* ── タスク画面 ─────────────────────────────────────────────── */
   return (
-    <div className="min-h-screen bg-gray-950 text-white flex flex-col overflow-hidden">
+    <div className="min-h-screen bg-white text-gray-900 flex flex-col overflow-hidden">
       {/* ヘッダー */}
-      <div className="flex items-center justify-between px-3 py-2 border-b border-gray-800 flex-shrink-0">
-        <span className="text-indigo-400 text-xs font-bold tracking-wide">UserVoice</span>
+      <div className="flex items-center justify-between px-3 py-2 border-b border-gray-200 flex-shrink-0">
+        <span className="text-xs font-semibold text-gray-900 tracking-tight">UserVoice</span>
         {tasks.length > 0 && (
-          <span className="text-gray-600 text-xs">タスク {currentTaskIndex + 1} / {tasks.length}</span>
+          <span className="text-gray-500 text-xs">タスク {currentTaskIndex + 1} / {tasks.length}</span>
         )}
       </div>
 
       {/* ウェブカメラ */}
-      <div className="relative bg-black flex-shrink-0" style={{ height: 140 }}>
+      <div className="relative bg-gray-900 flex-shrink-0" style={{ height: 140 }}>
         <video
           ref={webcamVideoRef}
           autoPlay
@@ -261,11 +264,10 @@ function WidgetContent() {
           playsInline
           className="w-full h-full object-cover scale-x-[-1]"
         />
-        {/* 録画インジケーター */}
         {isScreenRecording && (
-          <div className="absolute top-2 right-2 flex items-center gap-1.5 bg-black/70 px-2 py-1 rounded-full">
+          <div className="absolute top-2 right-2 flex items-center gap-1.5 bg-white/95 border border-red-200 px-2 py-1 rounded-md shadow-sm">
             <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
-            <span className="text-[10px] text-red-400 font-medium">REC</span>
+            <span className="text-[10px] text-red-600 font-semibold tracking-wide">REC</span>
           </div>
         )}
       </div>
@@ -273,13 +275,13 @@ function WidgetContent() {
       {/* タスク内容 */}
       <div className="px-3 py-3 flex-1">
         {currentTask ? (
-          <div className="bg-gray-900 border border-gray-700 rounded-xl p-3 h-full">
-            <p className="text-[10px] text-gray-500 mb-1.5 uppercase tracking-wide">現在のタスク</p>
-            <p className="text-sm text-white leading-relaxed">{currentTask.text}</p>
+          <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 h-full">
+            <p className="text-[10px] text-gray-500 mb-1.5 uppercase tracking-wide font-medium">現在のタスク</p>
+            <p className="text-sm text-gray-900 leading-relaxed">{currentTask.text}</p>
           </div>
         ) : (
-          <div className="bg-gray-900 border border-gray-700 rounded-xl p-3">
-            <p className="text-sm text-gray-400">タスクを実行してください</p>
+          <div className="bg-gray-50 border border-gray-200 rounded-lg p-3">
+            <p className="text-sm text-gray-500">タスクを実行してください</p>
           </div>
         )}
       </div>
@@ -290,13 +292,14 @@ function WidgetContent() {
         {!isScreenRecording ? (
           <button
             onClick={startScreenRecording}
-            className="w-full flex items-center justify-center gap-2 bg-red-950/60 hover:bg-red-900/60 border-2 border-red-600 hover:border-red-400 py-3 rounded-xl text-sm font-semibold transition-colors animate-pulse hover:animate-none"
+            className="w-full inline-flex items-center justify-center gap-2 bg-red-50 hover:bg-red-100 border-2 border-red-500 hover:border-red-600 text-red-700 py-2.5 rounded-lg text-sm font-semibold transition-colors animate-pulse hover:animate-none"
           >
-            🖥️ 画面録画を開始する
-            <span className="bg-red-600 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full leading-none">必須</span>
+            <Monitor className="w-4 h-4" strokeWidth={2} />
+            画面録画を開始する
+            <span className="bg-red-600 text-white text-[10px] font-bold px-1.5 py-0.5 rounded leading-none">必須</span>
           </button>
         ) : (
-          <div className="flex items-center justify-center gap-2 py-2 text-xs text-red-400">
+          <div className="flex items-center justify-center gap-1.5 py-2 text-xs text-red-600">
             <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
             画面録画中
           </div>
@@ -304,19 +307,22 @@ function WidgetContent() {
 
         {/* 録画未開始の警告 */}
         {warnNoRecord && (
-          <div className="bg-amber-900/40 border border-amber-600 rounded-xl p-3 text-xs text-amber-300 space-y-2">
-            <p className="font-semibold">⚠️ 画面録画が開始されていません</p>
-            <p className="text-amber-400/80">録画なしでタスクを完了しますか？</p>
+          <div className="bg-amber-50 border border-amber-300 rounded-lg p-3 text-xs text-amber-900 space-y-2">
+            <p className="flex items-center gap-1.5 font-semibold">
+              <AlertTriangle className="w-3.5 h-3.5" strokeWidth={2} />
+              画面録画が開始されていません
+            </p>
+            <p className="text-amber-800/80">録画なしでタスクを完了しますか？</p>
             <div className="flex gap-2">
               <button
                 onClick={() => setWarnNoRecord(false)}
-                className="flex-1 bg-amber-700 hover:bg-amber-600 py-1.5 rounded-lg text-xs font-medium transition-colors"
+                className="flex-1 bg-amber-600 hover:bg-amber-700 text-white py-1.5 rounded-md text-xs font-medium transition-colors"
               >
-                録画してから完了する
+                録画してから完了
               </button>
               <button
                 onClick={forceTaskComplete}
-                className="flex-1 border border-amber-700 hover:border-amber-500 text-amber-400 py-1.5 rounded-lg text-xs transition-colors"
+                className="flex-1 bg-white border border-amber-300 hover:border-amber-500 text-amber-800 py-1.5 rounded-md text-xs transition-colors"
               >
                 このまま完了
               </button>
@@ -327,17 +333,21 @@ function WidgetContent() {
         {/* タスク完了 */}
         <button
           onClick={taskComplete}
-          className="w-full bg-indigo-600 hover:bg-indigo-500 active:bg-indigo-700 py-3 rounded-xl text-sm font-semibold transition-colors"
+          className="w-full inline-flex items-center justify-center gap-1.5 bg-gray-900 hover:bg-gray-800 active:bg-black text-white py-2.5 rounded-lg text-sm font-semibold transition-colors"
         >
-          ✅ タスク完了 → 質問へ
+          <Check className="w-4 h-4" strokeWidth={2.5} />
+          タスク完了
+          <ArrowRight className="w-3.5 h-3.5" strokeWidth={2} />
+          質問へ
         </button>
 
         {/* セッション終了 */}
         <button
           onClick={endSession}
-          className="w-full border border-gray-700 hover:border-gray-500 text-gray-400 hover:text-white py-2 rounded-xl text-xs transition-colors"
+          className="w-full inline-flex items-center justify-center gap-1.5 border border-gray-300 hover:border-gray-400 text-gray-600 hover:text-gray-900 py-2 rounded-lg text-xs transition-colors"
         >
-          セッションを終了する
+          <X className="w-3.5 h-3.5" strokeWidth={2} />
+          セッションを終了
         </button>
       </div>
     </div>
@@ -347,8 +357,8 @@ function WidgetContent() {
 export default function WidgetPage() {
   return (
     <Suspense fallback={
-      <div className="min-h-screen bg-gray-950 flex items-center justify-center">
-        <div className="text-gray-600 text-sm">読み込み中...</div>
+      <div className="min-h-screen bg-white flex items-center justify-center">
+        <div className="text-gray-500 text-sm">読み込み中...</div>
       </div>
     }>
       <WidgetContent />
