@@ -2,6 +2,7 @@
 
 import { useState, useEffect, use } from 'react'
 import { ROLE_LABELS, type Role } from '@/lib/permissions'
+import { Link2Off, AlertCircle } from 'lucide-react'
 
 interface InviteInfo {
   orgName: string
@@ -58,7 +59,7 @@ export default function InvitePage({ params }: { params: Promise<{ token: string
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-950 flex items-center justify-center">
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <p className="text-gray-500 text-sm">読み込み中...</p>
       </div>
     )
@@ -66,11 +67,13 @@ export default function InvitePage({ params }: { params: Promise<{ token: string
 
   if (error) {
     return (
-      <div className="min-h-screen bg-gray-950 flex items-center justify-center px-4">
-        <div className="text-center">
-          <p className="text-2xl mb-2">🔗</p>
-          <h1 className="text-lg font-semibold text-white mb-2">招待リンクが無効です</h1>
-          <p className="text-gray-400 text-sm">{error}</p>
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center px-4">
+        <div className="text-center max-w-sm">
+          <div className="w-12 h-12 rounded-full bg-red-50 border border-red-200 flex items-center justify-center mx-auto mb-3">
+            <Link2Off className="w-5 h-5 text-red-600" strokeWidth={1.75} />
+          </div>
+          <h1 className="text-base font-semibold text-gray-900 mb-1 tracking-tight">招待リンクが無効です</h1>
+          <p className="text-gray-500 text-sm">{error}</p>
         </div>
       </div>
     )
@@ -79,59 +82,60 @@ export default function InvitePage({ params }: { params: Promise<{ token: string
   const roleLabel = ROLE_LABELS[info!.role as Role] ?? info!.role
 
   return (
-    <div className="min-h-screen bg-gray-950 flex items-center justify-center px-4">
+    <div className="min-h-screen bg-gray-50 flex items-center justify-center px-4 py-12">
       <div className="w-full max-w-sm">
-        <div className="text-center mb-8">
-          <h1 className="text-2xl font-bold text-indigo-400 mb-1">UserVoice</h1>
-          <p className="text-gray-400 text-sm mt-2">
-            <span className="text-white font-medium">{info!.orgName}</span> に招待されています
+        <div className="text-center mb-6">
+          <h1 className="text-xl font-semibold text-gray-900 tracking-tight mb-1">UserVoice</h1>
+          <p className="text-gray-500 text-sm mt-2">
+            <span className="text-gray-900 font-medium">{info!.orgName}</span> に招待されています
           </p>
-          <span className="inline-block mt-2 text-xs text-indigo-300 bg-indigo-900/40 border border-indigo-700 rounded-full px-3 py-0.5">
+          <span className="inline-block mt-2 text-[10px] font-medium uppercase tracking-wide text-gray-700 bg-white border border-gray-300 rounded-md px-2 py-0.5">
             {roleLabel}として参加
           </span>
         </div>
 
-        <form onSubmit={handleSubmit} className="bg-gray-900 border border-gray-800 rounded-2xl p-6 space-y-4">
+        <form onSubmit={handleSubmit} className="bg-white border border-gray-200 rounded-xl p-6 space-y-4">
           <div>
-            <label className="block text-sm text-gray-400 mb-1.5">名前 <span className="text-red-400">*</span></label>
+            <label className="block text-xs font-medium text-gray-700 mb-1.5">名前 <span className="text-red-500">*</span></label>
             <input type="text" value={name} onChange={(e) => setName(e.target.value)}
               placeholder="例：田中 太郎" required disabled={submitting}
               className={inputClass} />
           </div>
           <div>
-            <label className="block text-sm text-gray-400 mb-1.5">メールアドレス <span className="text-red-400">*</span></label>
+            <label className="block text-xs font-medium text-gray-700 mb-1.5">メールアドレス <span className="text-red-500">*</span></label>
             <input type="email" value={email} onChange={(e) => setEmail(e.target.value)}
               placeholder="例：tanaka@example.com" required disabled={submitting || !!info!.email}
               className={inputClass} />
           </div>
           <div>
-            <label className="block text-sm text-gray-400 mb-1.5">
-              パスワード <span className="text-red-400">*</span>
-              <span className="text-gray-600 text-xs ml-1">(8文字以上)</span>
+            <label className="block text-xs font-medium text-gray-700 mb-1.5">
+              パスワード <span className="text-red-500">*</span>
+              <span className="text-gray-400 font-normal ml-1">(8文字以上)</span>
             </label>
             <input type="password" value={password} onChange={(e) => setPassword(e.target.value)}
               placeholder="8文字以上" required minLength={8} disabled={submitting}
               className={inputClass} />
           </div>
           <div>
-            <label className="block text-sm text-gray-400 mb-1.5">パスワード（確認） <span className="text-red-400">*</span></label>
+            <label className="block text-xs font-medium text-gray-700 mb-1.5">パスワード（確認） <span className="text-red-500">*</span></label>
             <input type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)}
               placeholder="もう一度入力" required disabled={submitting}
               className={inputClass} />
           </div>
 
           {submitError && (
-            <p className="text-sm text-red-400 bg-red-900/20 border border-red-800 rounded-lg px-3 py-2">
-              {submitError}
-            </p>
+            <div className="flex items-start gap-2 text-sm text-red-700 bg-red-50 border border-red-200 rounded-md px-3 py-2">
+              <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" strokeWidth={2} />
+              <span>{submitError}</span>
+            </div>
           )}
 
           <button type="submit" disabled={submitting}
-            className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed px-4 py-2.5 rounded-lg text-sm font-medium transition-colors">
+            className="w-full bg-gray-900 hover:bg-gray-800 text-white disabled:opacity-40 disabled:cursor-not-allowed px-4 py-2.5 rounded-md text-sm font-medium transition-colors">
             {submitting ? '参加中...' : '組織に参加する'}
           </button>
 
-          <p className="text-center text-xs text-gray-600">
+          <p className="text-center text-xs text-gray-500">
             すでにアカウントをお持ちの場合も同じメールアドレスで登録できます
           </p>
         </form>
@@ -141,4 +145,4 @@ export default function InvitePage({ params }: { params: Promise<{ token: string
 }
 
 const inputClass =
-  'w-full bg-gray-800 border border-gray-700 focus:border-indigo-500 focus:outline-none rounded-lg px-3 py-2.5 text-white placeholder-gray-600 text-sm transition-colors disabled:opacity-50'
+  'w-full bg-white border border-gray-300 focus:border-gray-900 focus:ring-1 focus:ring-gray-900 focus:outline-none rounded-md px-3 py-2 text-gray-900 placeholder-gray-400 text-sm transition-colors disabled:opacity-50'

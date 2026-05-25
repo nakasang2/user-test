@@ -6,6 +6,7 @@ import EmotionChart from '@/components/EmotionChart'
 import TranscriptView from '@/components/TranscriptView'
 import FloatingAgentChat from '@/components/FloatingAgentChat'
 import StatusBadge from '@/components/StatusBadge'
+import { Video, Download, X, Folder } from 'lucide-react'
 
 interface Segment {
   id: string
@@ -133,8 +134,8 @@ export default function SessionDetail(props: { params: Promise<{ id: string }> }
 
   if (!session) {
     return (
-      <div className="min-h-screen bg-gray-950 flex items-center justify-center">
-        <div className="text-gray-400">読み込み中...</div>
+      <div className="min-h-screen bg-white flex items-center justify-center">
+        <div className="text-gray-500 text-sm">読み込み中...</div>
       </div>
     )
   }
@@ -147,14 +148,14 @@ export default function SessionDetail(props: { params: Promise<{ id: string }> }
 
   const actionButton = (() => {
     if (session.status === 'processing') {
-      return <span className="text-purple-400 text-sm animate-pulse">AI 分析中...</span>
+      return <span className="text-gray-700 text-sm animate-pulse">AI 分析中...</span>
     }
     if (session.status === 'done' && session.transcript) {
       return (
         <button
           onClick={reanalyze}
           disabled={processing}
-          className="border border-gray-600 hover:border-indigo-500 disabled:opacity-50 px-4 py-2 rounded-lg text-sm text-gray-300 hover:text-indigo-400 transition-colors"
+          className="border border-gray-300 hover:border-gray-400 text-gray-700 hover:text-gray-900 disabled:opacity-50 px-4 py-2 rounded-md text-sm transition-colors"
         >
           {processing ? '再分析中...' : 'AI 再分析'}
         </button>
@@ -164,22 +165,22 @@ export default function SessionDetail(props: { params: Promise<{ id: string }> }
   })()
 
   return (
-    <div className="min-h-screen bg-gray-950 text-white">
+    <div className="min-h-screen bg-white text-gray-900">
       {/* ナビ */}
-      <nav className="border-b border-gray-800 px-6 py-4 flex items-center justify-between">
+      <nav className="border-b border-gray-200 px-6 py-4 flex items-center justify-between bg-white">
         <div className="flex items-center gap-2 text-sm">
-          <Link href="/" className="text-indigo-400 hover:text-indigo-300">UserVoice</Link>
-          <span className="text-gray-600">/</span>
-          <Link href="/dashboard" className="text-gray-400 hover:text-gray-300">ダッシュボード</Link>
-          <span className="text-gray-600">/</span>
-          <span className="text-gray-300">{session.participant?.name ?? 'Anonymous'}</span>
+          <Link href="/" className="text-gray-700 hover:text-gray-900">UserVoice</Link>
+          <span className="text-gray-300">/</span>
+          <Link href="/dashboard" className="text-gray-500 hover:text-gray-900">ダッシュボード</Link>
+          <span className="text-gray-300">/</span>
+          <span className="text-gray-900">{session.participant?.name ?? 'Anonymous'}</span>
         </div>
         <div className="flex items-center gap-3">
           <StatusBadge status={session.status} />
           {session.transcript && (
             <button
               onClick={exportCsv}
-              className="border border-gray-700 hover:border-gray-500 px-3 py-2 rounded-lg text-xs text-gray-400 hover:text-gray-200 transition-colors"
+              className="border border-gray-300 hover:border-gray-400 text-gray-700 hover:text-gray-900 px-3 py-2 rounded-md text-xs transition-colors"
             >
               CSV 出力
             </button>
@@ -187,7 +188,7 @@ export default function SessionDetail(props: { params: Promise<{ id: string }> }
           {actionButton}
           <Link
             href={roomLink}
-            className="bg-green-600 hover:bg-green-500 px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+            className="bg-gray-900 hover:bg-gray-800 text-white px-4 py-2 rounded-md text-sm font-medium transition-colors"
           >
             インタビュールームを開く
           </Link>
@@ -197,18 +198,18 @@ export default function SessionDetail(props: { params: Promise<{ id: string }> }
       <div className="max-w-7xl mx-auto px-6 py-8 pb-24">
         {/* ヒーロー */}
         <div className="mb-6">
-          <h1 className="text-2xl font-bold mb-1">
+          <h1 className="text-2xl font-semibold tracking-tight text-gray-900 mb-1">
             {session.participant?.name ?? 'Anonymous'}
           </h1>
-          <p className="text-gray-400">
+          <p className="text-sm text-gray-500">
             {session.interview.title} · {new Date(session.createdAt).toLocaleDateString('ja-JP')}
           </p>
         </div>
 
         {/* インタビュー未完了の案内 */}
         {(session.status === 'pending' || session.status === 'active') && (
-          <div className="mb-6 p-4 bg-yellow-900/20 border border-yellow-800 rounded-xl flex items-center justify-between">
-            <p className="text-yellow-300 text-sm">
+          <div className="mb-6 p-4 bg-amber-50 border border-amber-200 rounded-lg flex items-center justify-between">
+            <p className="text-amber-700 text-sm">
               インタビューがまだ完了していません。被験者に上のボタンの URL を共有してください。
             </p>
             <button
@@ -216,7 +217,7 @@ export default function SessionDetail(props: { params: Promise<{ id: string }> }
                 await navigator.clipboard.writeText(`${window.location.origin}${roomLink}`)
                 alert('インタビュー URL をコピーしました')
               }}
-              className="ml-4 flex-shrink-0 bg-yellow-600 hover:bg-yellow-500 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
+              className="ml-4 flex-shrink-0 bg-amber-700 hover:bg-amber-800 text-white px-3 py-1.5 rounded-md text-xs font-medium transition-colors"
             >
               URL をコピー
             </button>
@@ -225,17 +226,18 @@ export default function SessionDetail(props: { params: Promise<{ id: string }> }
 
         {/* 録画バナー */}
         {serverVideoUrl && (
-          <div className="mb-6 flex items-center justify-between bg-gray-900 border border-gray-800 rounded-xl px-4 py-3">
-            <span className="text-sm text-gray-400 flex items-center gap-2">
+          <div className="mb-6 flex items-center justify-between bg-white border border-gray-200 rounded-lg px-4 py-3">
+            <span className="text-sm text-gray-700 flex items-center gap-2">
               <span className="w-2 h-2 rounded-full bg-red-500" />
               録画データあり — 右カラムの感情グラフと同期して確認できます
             </span>
             <a
               href={serverVideoUrl}
               download={`interview-${session.participant?.name ?? 'anonymous'}.webm`}
-              className="text-xs text-gray-500 hover:text-gray-300 border border-gray-700 hover:border-gray-500 px-3 py-1.5 rounded-lg transition-colors"
+              className="text-xs text-gray-700 hover:text-gray-900 border border-gray-300 hover:border-gray-400 px-3 py-1.5 rounded-md transition-colors flex items-center gap-1.5"
             >
-              ↓ ダウンロード
+              <Download className="w-3 h-3" strokeWidth={2} />
+              ダウンロード
             </a>
           </div>
         )}
@@ -258,16 +260,17 @@ export default function SessionDetail(props: { params: Promise<{ id: string }> }
 
             {/* 動画プレーヤー or ファイルピッカー */}
             {videoSrc ? (
-              <div className="mb-4 bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
-                <div className="px-4 py-2.5 border-b border-gray-800 flex items-center justify-between">
+              <div className="mb-4 bg-white border border-gray-200 rounded-lg overflow-hidden">
+                <div className="px-4 py-2.5 border-b border-gray-200 flex items-center justify-between">
                   <p className="text-xs text-gray-500">
                     グラフをクリック → その時刻にジャンプ · 再生位置がグラフに反映されます
                   </p>
                   <button
                     onClick={clearLocalVideo}
-                    className="text-xs text-gray-600 hover:text-gray-400 transition-colors ml-4 flex-shrink-0"
+                    className="text-xs text-gray-500 hover:text-gray-900 transition-colors ml-4 flex-shrink-0 flex items-center gap-1"
                   >
-                    × 別のファイル
+                    <X className="w-3 h-3" strokeWidth={2} />
+                    別のファイル
                   </button>
                 </div>
                 <video
@@ -281,14 +284,14 @@ export default function SessionDetail(props: { params: Promise<{ id: string }> }
                 />
               </div>
             ) : (
-              <div className="mb-4 bg-gray-900 border border-gray-800 border-dashed rounded-xl p-6 text-center">
-                <div className="text-2xl mb-2">🎬</div>
-                <p className="text-sm text-gray-300 font-medium mb-1">
+              <div className="mb-4 bg-gray-50 border border-gray-200 border-dashed rounded-lg p-6 text-center">
+                <Video className="w-5 h-5 text-gray-400 mx-auto mb-3" strokeWidth={1.75} />
+                <p className="text-sm text-gray-900 font-medium mb-1">
                   録画ファイルを読み込むと感情グラフと同期できます
                 </p>
-                <p className="text-xs text-gray-600 mb-4">
+                <p className="text-xs text-gray-500 mb-4">
                   インタビュー終了時にダウンロードした{' '}
-                  <span className="font-mono text-gray-500">interview-XXXXXXXX.webm</span>{' '}
+                  <span className="font-mono text-gray-700">interview-XXXXXXXX.webm</span>{' '}
                   を選択
                 </p>
                 <input
@@ -300,9 +303,10 @@ export default function SessionDetail(props: { params: Promise<{ id: string }> }
                 />
                 <button
                   onClick={() => fileInputRef.current?.click()}
-                  className="bg-indigo-600 hover:bg-indigo-500 px-5 py-2 rounded-lg text-sm font-medium transition-colors"
+                  className="bg-gray-900 hover:bg-gray-800 text-white px-5 py-2 rounded-md text-sm font-medium transition-colors inline-flex items-center gap-2"
                 >
-                  📂 録画ファイルを選択
+                  <Folder className="w-3.5 h-3.5" strokeWidth={2} />
+                  録画ファイルを選択
                 </button>
               </div>
             )}
@@ -329,9 +333,8 @@ export default function SessionDetail(props: { params: Promise<{ id: string }> }
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
-    <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">
+    <div className="text-xs font-medium uppercase tracking-wide text-gray-500 mb-3">
       {children}
     </div>
   )
 }
-

@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { ROLE_LABELS, ASSIGNABLE_ROLES, type Role } from '@/lib/permissions'
+import { Check, Link2 } from 'lucide-react'
 
 interface Member {
   id:    string
@@ -103,7 +104,7 @@ export default function MembersPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-950 flex items-center justify-center">
+      <div className="min-h-screen bg-white flex items-center justify-center">
         <p className="text-gray-500 text-sm">読み込み中...</p>
       </div>
     )
@@ -111,45 +112,45 @@ export default function MembersPage() {
 
   if (error) {
     return (
-      <div className="min-h-screen bg-gray-950 flex items-center justify-center">
-        <p className="text-red-400 text-sm">{error}</p>
+      <div className="min-h-screen bg-white flex items-center justify-center">
+        <p className="text-red-700 text-sm">{error}</p>
       </div>
     )
   }
 
   return (
-    <div className="min-h-screen bg-gray-950 text-white">
+    <div className="min-h-screen bg-white text-gray-900">
       <div className="max-w-3xl mx-auto px-6 py-10 space-y-10">
 
         {/* ヘッダー */}
         <div className="flex items-center gap-3">
-          <a href="/dashboard" className="text-gray-500 hover:text-gray-300 text-sm">← ダッシュボード</a>
-          <span className="text-gray-700">/</span>
-          <h1 className="text-lg font-semibold">メンバー管理</h1>
+          <a href="/dashboard" className="text-gray-500 hover:text-gray-900 text-sm">← ダッシュボード</a>
+          <span className="text-gray-300">/</span>
+          <h1 className="text-lg font-semibold tracking-tight">メンバー管理</h1>
         </div>
 
         {/* 招待リンク作成 */}
-        <section className="bg-gray-900 border border-gray-800 rounded-2xl p-6 space-y-4">
-          <h2 className="text-sm font-semibold text-gray-300">新しい招待リンクを生成</h2>
+        <section className="bg-white border border-gray-200 rounded-lg p-6 space-y-4">
+          <h2 className="text-sm font-semibold tracking-tight text-gray-900">新しい招待リンクを生成</h2>
           <div className="flex flex-wrap gap-3">
             <div className="flex-1 min-w-[160px]">
-              <label className="block text-xs text-gray-500 mb-1">ロール</label>
+              <label className="block text-xs font-medium uppercase tracking-wide text-gray-500 mb-1">ロール</label>
               <select value={newRole} onChange={(e) => setNewRole(e.target.value as typeof newRole)}
-                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:border-indigo-500 focus:outline-none">
+                className="w-full bg-white border border-gray-300 rounded-md px-3 py-2 text-sm text-gray-900 focus:border-gray-900 focus:ring-1 focus:ring-gray-900 focus:outline-none">
                 {ASSIGNABLE_ROLES.map((r) => (
                   <option key={r} value={r}>{ROLE_LABELS[r]}</option>
                 ))}
               </select>
             </div>
             <div className="flex-[2] min-w-[200px]">
-              <label className="block text-xs text-gray-500 mb-1">メールアドレス（任意・特定の人のみ有効にする場合）</label>
+              <label className="block text-xs font-medium uppercase tracking-wide text-gray-500 mb-1">メールアドレス（任意・特定の人のみ有効にする場合）</label>
               <input type="email" value={newEmail} onChange={(e) => setNewEmail(e.target.value)}
                 placeholder="例：tanaka@example.com（空白で誰でも使用可）"
-                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 focus:border-indigo-500 focus:outline-none" />
+                className="w-full bg-white border border-gray-300 rounded-md px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:border-gray-900 focus:ring-1 focus:ring-gray-900 focus:outline-none" />
             </div>
           </div>
           <button onClick={createInvite} disabled={creating}
-            className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 px-4 py-2 rounded-lg text-sm font-medium transition-colors">
+            className="bg-gray-900 hover:bg-gray-800 text-white disabled:opacity-50 px-4 py-2 rounded-md text-sm font-medium transition-colors">
             {creating ? '生成中...' : '招待リンクを生成'}
           </button>
         </section>
@@ -157,34 +158,44 @@ export default function MembersPage() {
         {/* 有効な招待リンク一覧 */}
         {invites.length > 0 && (
           <section className="space-y-3">
-            <h2 className="text-sm font-semibold text-gray-400">有効な招待リンク</h2>
+            <h2 className="text-xs font-medium uppercase tracking-wide text-gray-500">有効な招待リンク</h2>
             <div className="space-y-2">
               {invites.map((inv) => (
                 <div key={inv.id}
-                  className="bg-gray-900 border border-gray-800 rounded-xl px-4 py-3 flex items-center gap-3 flex-wrap">
+                  className="bg-white border border-gray-200 rounded-lg px-4 py-3 flex items-center gap-3 flex-wrap">
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
-                      <span className="text-xs text-indigo-300 bg-indigo-900/40 border border-indigo-700 rounded-full px-2 py-0.5">
+                      <span className="text-xs text-blue-700 bg-blue-50 border border-blue-200 rounded-md px-2 py-0.5">
                         {ROLE_LABELS[inv.role as Role] ?? inv.role}
                       </span>
                       {inv.email && (
-                        <span className="text-xs text-gray-400">{inv.email} 専用</span>
+                        <span className="text-xs text-gray-700">{inv.email} 専用</span>
                       )}
-                      <span className="text-xs text-gray-600">
+                      <span className="text-xs text-gray-500">
                         有効期限: {new Date(inv.expiresAt).toLocaleDateString('ja-JP')}
                       </span>
                     </div>
-                    <p className="text-xs text-gray-600 mt-0.5 truncate">
+                    <p className="text-xs text-gray-500 mt-0.5 truncate">
                       作成者: {inv.createdBy.name}
                     </p>
                   </div>
                   <div className="flex gap-2 shrink-0">
                     <button onClick={() => copyInviteLink(inv.token)}
-                      className="text-xs bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded-lg px-3 py-1.5 transition-colors">
-                      {copiedToken === inv.token ? '✓ コピー済み' : '🔗 リンクをコピー'}
+                      className="text-xs text-gray-700 hover:text-gray-900 bg-white hover:bg-gray-50 border border-gray-300 hover:border-gray-400 rounded-md px-3 py-1.5 transition-colors flex items-center gap-1.5">
+                      {copiedToken === inv.token ? (
+                        <>
+                          <Check className="w-3 h-3" strokeWidth={2} />
+                          コピー済み
+                        </>
+                      ) : (
+                        <>
+                          <Link2 className="w-3 h-3" strokeWidth={2} />
+                          リンクをコピー
+                        </>
+                      )}
                     </button>
                     <button onClick={() => revokeInvite(inv.token)}
-                      className="text-xs text-red-400 hover:text-red-300 border border-red-900/50 hover:border-red-700 rounded-lg px-3 py-1.5 transition-colors">
+                      className="text-xs text-red-700 hover:text-red-800 border border-red-200 hover:border-red-300 bg-red-50 hover:bg-red-100 rounded-md px-3 py-1.5 transition-colors">
                       無効化
                     </button>
                   </div>
@@ -196,17 +207,17 @@ export default function MembersPage() {
 
         {/* メンバー一覧 */}
         <section className="space-y-3">
-          <h2 className="text-sm font-semibold text-gray-400">メンバー ({members.length}人)</h2>
+          <h2 className="text-xs font-medium uppercase tracking-wide text-gray-500">メンバー ({members.length}人)</h2>
           <div className="space-y-2">
             {members.map((m) => (
               <div key={m.id}
-                className="bg-gray-900 border border-gray-800 rounded-xl px-4 py-3 flex items-center gap-3">
+                className="bg-white border border-gray-200 rounded-lg px-4 py-3 flex items-center gap-3">
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-white truncate">{m.user.name}</p>
+                  <p className="text-sm font-medium text-gray-900 truncate">{m.user.name}</p>
                   <p className="text-xs text-gray-500 truncate">{m.user.email}</p>
                 </div>
                 {m.role === 'owner' ? (
-                  <span className="text-xs text-amber-400 bg-amber-900/30 border border-amber-700/50 rounded-full px-3 py-0.5 shrink-0">
+                  <span className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-3 py-0.5 shrink-0">
                     オーナー
                   </span>
                 ) : (
@@ -214,14 +225,14 @@ export default function MembersPage() {
                     <select
                       value={m.role}
                       onChange={(e) => changeRole(m.user.id, e.target.value as Role)}
-                      className="bg-gray-800 border border-gray-700 rounded-lg px-2 py-1 text-xs text-white focus:border-indigo-500 focus:outline-none">
+                      className="bg-white border border-gray-300 rounded-md px-2 py-1 text-xs text-gray-900 focus:border-gray-900 focus:ring-1 focus:ring-gray-900 focus:outline-none">
                       {ASSIGNABLE_ROLES.map((r) => (
                         <option key={r} value={r}>{ROLE_LABELS[r]}</option>
                       ))}
                     </select>
                     <button
                       onClick={() => removeMember(m.user.id, m.user.name)}
-                      className="text-xs text-gray-600 hover:text-red-400 transition-colors px-1">
+                      className="text-xs text-gray-500 hover:text-red-700 transition-colors px-1">
                       削除
                     </button>
                   </div>
@@ -232,23 +243,23 @@ export default function MembersPage() {
         </section>
 
         {/* ロール説明 */}
-        <section className="bg-gray-900/50 border border-gray-800 rounded-2xl p-5">
-          <h2 className="text-sm font-semibold text-gray-400 mb-3">ロールと権限</h2>
-          <div className="space-y-2 text-xs text-gray-500">
+        <section className="bg-gray-50 border border-gray-200 rounded-lg p-5">
+          <h2 className="text-xs font-medium uppercase tracking-wide text-gray-500 mb-3">ロールと権限</h2>
+          <div className="space-y-2 text-xs text-gray-700">
             <div className="flex gap-3">
-              <span className="text-amber-400 w-16 shrink-0">オーナー</span>
+              <span className="text-amber-700 w-16 shrink-0">オーナー</span>
               <span>すべての操作が可能。組織の削除・譲渡。</span>
             </div>
             <div className="flex gap-3">
-              <span className="text-indigo-400 w-16 shrink-0">管理者</span>
+              <span className="text-blue-700 w-16 shrink-0">管理者</span>
               <span>メンバーの招待・管理、インタビューの作成・編集、セッションの閲覧・分析。</span>
             </div>
             <div className="flex gap-3">
-              <span className="text-green-400 w-16 shrink-0">編集者</span>
+              <span className="text-emerald-700 w-16 shrink-0">編集者</span>
               <span>インタビューの作成・編集、セッションの閲覧・分析。</span>
             </div>
             <div className="flex gap-3">
-              <span className="text-gray-400 w-16 shrink-0">閲覧者</span>
+              <span className="text-gray-700 w-16 shrink-0">閲覧者</span>
               <span>インタビューとセッションの閲覧のみ。</span>
             </div>
           </div>

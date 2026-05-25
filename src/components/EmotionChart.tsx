@@ -13,6 +13,7 @@ import {
   Bar,
   ReferenceLine,
 } from 'recharts'
+import { LineChart as LineChartIcon } from 'lucide-react'
 
 interface EmotionResult {
   timestamp: number
@@ -34,13 +35,13 @@ interface Props {
 }
 
 const EMOTION_COLORS = {
-  happy: '#34d399',
-  neutral: '#94a3b8',
-  surprised: '#fb923c',
-  sad: '#60a5fa',
-  fearful: '#a78bfa',
-  angry: '#f87171',
-  disgusted: '#4ade80',
+  happy: '#10b981',
+  neutral: '#6b7280',
+  surprised: '#f59e0b',
+  sad: '#3b82f6',
+  fearful: '#8b5cf6',
+  angry: '#ef4444',
+  disgusted: '#ec4899',
 }
 
 const EMOTION_LABELS: Record<string, string> = {
@@ -60,8 +61,9 @@ function formatTime(seconds: number) {
 export default function EmotionChart({ emotions, currentTime, onSeek }: Props) {
   if (emotions.length === 0) {
     return (
-      <div className="p-8 text-center text-gray-500 bg-gray-900 border border-gray-800 rounded-xl">
-        感情データがありません。インタビュー中に収集されます。
+      <div className="p-8 text-center bg-white border border-gray-200 rounded-lg">
+        <LineChartIcon className="w-5 h-5 text-gray-400 mx-auto mb-3" strokeWidth={1.75} />
+        <p className="text-sm text-gray-500">感情データがありません。インタビュー中に収集されます。</p>
       </div>
     )
   }
@@ -107,27 +109,27 @@ export default function EmotionChart({ emotions, currentTime, onSeek }: Props) {
           .sort((a, b) => b.value - a.value)
           .slice(0, 4)
           .map((e) => (
-            <div key={e.emotion} className="bg-gray-900 border border-gray-800 rounded-xl p-4">
-              <div className="text-2xl font-bold mb-1" style={{ color: e.color }}>
+            <div key={e.emotion} className="bg-white border border-gray-200 rounded-lg p-4">
+              <div className="text-2xl font-semibold tracking-tight mb-1" style={{ color: e.color }}>
                 {e.value}%
               </div>
-              <div className="text-sm text-gray-400">{e.emotion}</div>
+              <div className="text-sm text-gray-700">{e.emotion}</div>
             </div>
           ))}
       </div>
 
-      <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
-        <div className="text-sm text-gray-400 mb-1">主要感情</div>
-        <div className="font-semibold" style={{ color: dominant.color }}>
+      <div className="bg-white border border-gray-200 rounded-lg p-4">
+        <div className="text-xs font-medium uppercase tracking-wide text-gray-500 mb-1">主要感情</div>
+        <div className="font-semibold tracking-tight" style={{ color: dominant.color }}>
           {dominant.emotion} ({dominant.value}%)
         </div>
       </div>
 
-      <div className="bg-gray-900 border border-gray-800 rounded-xl p-6">
+      <div className="bg-white border border-gray-200 rounded-lg p-6">
         <div className="flex items-center justify-between mb-4">
-          <h3 className="text-sm font-semibold text-gray-300">感情の推移（時系列）</h3>
+          <h3 className="text-sm font-semibold tracking-tight text-gray-900">感情の推移（時系列）</h3>
           {onSeek && (
-            <span className="text-[10px] text-gray-600">
+            <span className="text-[10px] text-gray-500">
               グラフをクリックすると動画がその時刻にジャンプします
             </span>
           )}
@@ -143,12 +145,12 @@ export default function EmotionChart({ emotions, currentTime, onSeek }: Props) {
               if (ts !== undefined) onSeek?.(ts)
             }}
           >
-            <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+            <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
             <XAxis dataKey="time" stroke="#6b7280" tick={{ fontSize: 11 }} />
             <YAxis stroke="#6b7280" tick={{ fontSize: 11 }} unit="%" domain={[0, 100]} />
             <Tooltip
-              contentStyle={{ backgroundColor: '#111827', border: '1px solid #374151', borderRadius: '8px' }}
-              labelStyle={{ color: '#9ca3af' }}
+              contentStyle={{ backgroundColor: '#ffffff', border: '1px solid #e5e7eb', borderRadius: '6px', color: '#111827' }}
+              labelStyle={{ color: '#6b7280' }}
             />
             <Legend formatter={(val) => EMOTION_LABELS[val] ?? val} />
             {Object.entries(EMOTION_COLORS).map(([key, color]) => (
@@ -166,27 +168,27 @@ export default function EmotionChart({ emotions, currentTime, onSeek }: Props) {
             {currentLabel && (
               <ReferenceLine
                 x={currentLabel}
-                stroke="#ffffff90"
+                stroke="#1f2937"
                 strokeWidth={2}
                 strokeDasharray="4 3"
-                label={{ value: '▶', position: 'top', fill: '#ffffff90', fontSize: 10 }}
+                label={{ value: '|', position: 'top', fill: '#1f2937', fontSize: 10 }}
               />
             )}
           </LineChart>
         </ResponsiveContainer>
       </div>
 
-      <div className="bg-gray-900 border border-gray-800 rounded-xl p-6">
-        <h3 className="text-sm font-semibold text-gray-300 mb-4">感情の平均分布</h3>
+      <div className="bg-white border border-gray-200 rounded-lg p-6">
+        <h3 className="text-sm font-semibold tracking-tight text-gray-900 mb-4">感情の平均分布</h3>
         <ResponsiveContainer width="100%" height={200}>
           <BarChart data={avgEmotions} layout="vertical" margin={{ left: 20, right: 20 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+            <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
             <XAxis type="number" stroke="#6b7280" tick={{ fontSize: 11 }} unit="%" domain={[0, 100]} />
             <YAxis type="category" dataKey="emotion" stroke="#6b7280" tick={{ fontSize: 11 }} width={50} />
             <Tooltip
-              contentStyle={{ backgroundColor: '#111827', border: '1px solid #374151', borderRadius: '8px' }}
+              contentStyle={{ backgroundColor: '#ffffff', border: '1px solid #e5e7eb', borderRadius: '6px', color: '#111827' }}
             />
-            <Bar dataKey="value" fill="#6366f1" radius={[0, 4, 4, 0]}>
+            <Bar dataKey="value" fill="#1f2937" radius={[0, 4, 4, 0]}>
               {avgEmotions.map((entry, index) => (
                 <rect key={index} fill={entry.color} />
               ))}

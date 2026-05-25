@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useRef, useEffect } from 'react'
+import { MessageCircle, X, Sparkles } from 'lucide-react'
 
 interface Message {
   role: 'user' | 'assistant'
@@ -67,30 +68,31 @@ export default function FloatingAgentChat({ sessionId, interviewId }: Props) {
     <>
       {/* チャットパネル */}
       {open && (
-        <div className="fixed bottom-20 right-6 z-50 w-[340px] flex flex-col bg-gray-900 border border-gray-700 rounded-2xl shadow-2xl shadow-black/50 overflow-hidden"
+        <div className="fixed bottom-20 right-6 z-50 w-[340px] flex flex-col bg-white border border-gray-200 rounded-xl shadow-xl overflow-hidden"
           style={{ height: '460px' }}>
           {/* ヘッダー */}
-          <div className="flex items-center justify-between px-4 py-3 border-b border-gray-800 bg-gray-900">
+          <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 bg-white">
             <div className="flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-indigo-400 animate-pulse" />
-              <span className="text-sm font-medium text-gray-200">AI アシスタント</span>
+              <Sparkles className="w-4 h-4 text-gray-700" strokeWidth={1.75} />
+              <span className="text-sm font-semibold tracking-tight text-gray-900">AI アシスタント</span>
             </div>
             <button
               onClick={() => setOpen(false)}
-              className="text-gray-500 hover:text-gray-300 transition-colors text-lg leading-none"
+              className="text-gray-500 hover:text-gray-900 transition-colors"
+              aria-label="閉じる"
             >
-              ×
+              <X className="w-4 h-4" strokeWidth={2} />
             </button>
           </div>
 
           {/* メッセージ一覧 */}
-          <div className="flex-1 overflow-y-auto p-3 space-y-3">
+          <div className="flex-1 overflow-y-auto p-3 space-y-3 bg-gray-50">
             {messages.map((m, i) => (
               <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                <div className={`max-w-[85%] text-sm px-3 py-2 rounded-xl whitespace-pre-wrap leading-relaxed ${
+                <div className={`max-w-[85%] text-sm px-3 py-2 rounded-md whitespace-pre-wrap leading-relaxed ${
                   m.role === 'user'
-                    ? 'bg-indigo-600 text-white'
-                    : 'bg-gray-800 text-gray-200'
+                    ? 'bg-gray-900 text-white'
+                    : 'bg-white border border-gray-200 text-gray-700'
                 }`}>
                   {m.content}
                 </div>
@@ -98,11 +100,11 @@ export default function FloatingAgentChat({ sessionId, interviewId }: Props) {
             ))}
             {loading && (
               <div className="flex justify-start">
-                <div className="bg-gray-800 px-3 py-2.5 rounded-xl">
+                <div className="bg-white border border-gray-200 px-3 py-2.5 rounded-md">
                   <div className="flex gap-1">
-                    <span className="w-1.5 h-1.5 bg-gray-500 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-                    <span className="w-1.5 h-1.5 bg-gray-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-                    <span className="w-1.5 h-1.5 bg-gray-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                    <span className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                    <span className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                    <span className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
                   </div>
                 </div>
               </div>
@@ -111,19 +113,19 @@ export default function FloatingAgentChat({ sessionId, interviewId }: Props) {
           </div>
 
           {/* 入力欄 */}
-          <div className="p-3 border-t border-gray-800 flex gap-2">
+          <div className="p-3 border-t border-gray-200 flex gap-2 bg-white">
             <input
               ref={inputRef}
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && sendMessage()}
               placeholder="質問を入力..."
-              className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-indigo-500 transition-colors"
+              className="flex-1 bg-white border border-gray-300 rounded-md px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:border-gray-900 focus:ring-1 focus:ring-gray-900 focus:outline-none"
             />
             <button
               onClick={sendMessage}
               disabled={loading || !input.trim()}
-              className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 px-3 py-2 rounded-lg text-sm transition-colors flex-shrink-0"
+              className="bg-gray-900 hover:bg-gray-800 text-white disabled:opacity-50 px-3 py-2 rounded-md text-sm transition-colors flex-shrink-0"
             >
               送信
             </button>
@@ -134,25 +136,20 @@ export default function FloatingAgentChat({ sessionId, interviewId }: Props) {
       {/* フローティングボタン */}
       <button
         onClick={() => setOpen((v) => !v)}
-        className={`fixed bottom-6 right-6 z-50 flex items-center gap-2 px-4 py-3 rounded-full shadow-lg shadow-black/40 font-medium text-sm transition-all ${
+        className={`fixed bottom-6 right-6 z-50 flex items-center gap-2 px-4 py-3 rounded-full shadow-xl font-medium text-sm transition-colors ${
           open
-            ? 'bg-gray-700 hover:bg-gray-600 text-gray-200'
-            : 'bg-indigo-600 hover:bg-indigo-500 text-white'
+            ? 'bg-white hover:bg-gray-50 text-gray-700 border border-gray-200'
+            : 'bg-gray-900 hover:bg-gray-800 text-white'
         }`}
       >
         {open ? (
           <>
-            <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <line x1="18" y1="6" x2="6" y2="18" />
-              <line x1="6" y1="6" x2="18" y2="18" />
-            </svg>
+            <X className="w-4 h-4" strokeWidth={2} />
             閉じる
           </>
         ) : (
           <>
-            <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-            </svg>
+            <MessageCircle className="w-4 h-4" strokeWidth={2} />
             AI に質問
           </>
         )}
