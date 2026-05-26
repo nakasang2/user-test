@@ -122,6 +122,7 @@ export default function InterviewRoom({
   const widgetChannelRef = useRef<BroadcastChannel | null>(null)
   const [widgetBlocked, setWidgetBlocked] = useState(false)
   const serviceWinRef = useRef<Window | null>(null) // サービスタブの window 参照
+  const pipWindowRef = useRef<Window | null>(null)   // Document PiP または popup の window 参照
 
   // 音声認識サポート確認（マウント時）
   useEffect(() => {
@@ -443,6 +444,9 @@ export default function InterviewRoom({
   }
 
   // ── タスクウィジェットを開く（Document PiP 優先 → ポップアップ fallback） ──
+  // ⚠️ この関数は必ずユーザージェスチャーハンドラの中で、かつ window.open() より先に呼ぶこと
+  //    （documentPictureInPicture.requestWindow() は transient user activation を要求する。
+  //      window.open() が先に呼ばれるとトークンが消費されて PiP が失敗しポップアップに落ちる）
   async function openWidget() {
     const tasksEncoded = btoa(encodeURIComponent(JSON.stringify(tasks ?? [])))
     const url = `/interview/widget?session=${encodeURIComponent(sessionId)}&tasks=${tasksEncoded}&current=${currentTaskIndex}`
@@ -451,28 +455,34 @@ export default function InterviewRoom({
     const docPiP = (window as any).documentPictureInPicture
     if (docPiP) {
       try {
-        // Document PiP: どのタブ・ウィンドウの上にも常時浮く小窓（Chrome 116+）
-        const pipWindow: Window = await docPiP.requestWindow({ width: 400, height: 500 })
-        pipWindow.document.body.style.cssText = 'margin:0;padding:0;overflow:hidden;background:#030712;'
+        // Document PiP: どのタブ・ウィンドウの上にも常時浮く小窓（Chrome 116+ / Google Meet と同じ仕組み）
+        const pipWindow: Window = await docPiP.requestWindow({ width: 400, height: 560 })
+        pipWindow.document.body.style.cssText = 'margin:0;padding:0;overflow:hidden;background:#ffffff;'
         const iframe = pipWindow.document.createElement('iframe')
         iframe.src = url
         iframe.style.cssText = 'width:100%;height:100%;border:none;'
         pipWindow.document.body.appendChild(iframe)
+        pipWindowRef.current = pipWindow
         setWidgetBlocked(false)
+        console.info('[UserVoice] Document PiP ウィジェット: 常時最前面で起動しました')
         return
-      } catch {
+      } catch (err) {
         // PiP 拒否・未対応 → ポップアップへ fallback
+        console.warn('[UserVoice] Document PiP が失敗しました。ポップアップに切り替えます:', err)
       }
     }
-    // ポップアップ fallback
-    const popup = window.open(url, 'uservoice-widget', 'popup,width=400,height=500,top=40,left=40')
+    // ポップアップ fallback（最前面固定は不可）
+    const popup = window.open(url, 'uservoice-widget', 'popup,width=400,height=560,top=40,left=40')
+    if (popup) pipWindowRef.current = popup
     setWidgetBlocked(!popup)
   }
 
   // ── タスク完了 → 事後インタビュー開始 ─────────────────
   function completeTasksAndStartInterview() {
-    // ウィジェットを閉じる
+    // ウィジェットを閉じる（BroadcastChannel 経由 + 直接 close）
     widgetChannelRef.current?.postMessage({ type: 'session_ended' })
+    try { pipWindowRef.current?.close() } catch { /* ignore */ }
+    pipWindowRef.current = null
     if (questions.length === 0) {
       endInterview()
       return
@@ -516,15 +526,17 @@ export default function InterviewRoom({
           }
         }
       }
-      // ① サービスタブを開く
+      // ① ウィジェット（PiP or ポップアップ）を「最初に」開く
+      //    ⚠️ documentPictureInPicture.requestWindow() は transient user activation が必要。
+      //       window.open() より後に呼ぶとトークンが消費されて PiP が失敗するため、必ず先に呼ぶ。
+      void openWidget()
+      // ② サービスタブを開く（PiP の後）
       if (stimulusUrl) {
         const win = window.open(stimulusUrl, 'uservoice-service')
         if (win) serviceWinRef.current = win
       }
-      // ② サービスタブへ自動遷移
+      // ③ サービスタブへ自動遷移
       serviceWinRef.current?.focus()
-      // ③ ウィジェット（PiP or ポップアップ）を自動で表示（録画はウィジェット内で行う）
-      void openWidget()
     }
 
     await fetch(`/api/sessions/${sessionId}`, {
@@ -600,8 +612,10 @@ export default function InterviewRoom({
 
   // ── インタビュー終了 ──────────────────────────────────
   async function endInterview() {
-    // ウィジェットを閉じる
+    // ウィジェットを閉じる（BroadcastChannel 経由 + 直接 close）
     widgetChannelRef.current?.postMessage({ type: 'session_ended' })
+    try { pipWindowRef.current?.close() } catch { /* ignore */ }
+    pipWindowRef.current = null
     setPhase('ending')
     if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current)
     speechRef.current?.stop()
@@ -875,7 +889,7 @@ export default function InterviewRoom({
                       ) : (
                         <>
                           <li className="flex gap-2.5"><span className="text-gray-400 flex-shrink-0 font-medium">2.</span>
-                            <span>「開始する」を押すと<span className="text-gray-900 font-medium">サービスが新しいタブ</span>で開き、<span className="text-gray-900 font-medium">タスク用の小窓</span>が自動表示されます</span>
+                            <span>「開始する」を押すと<span className="text-gray-900 font-medium">サービスが新しいタブ</span>で開き、<span className="text-gray-900 font-medium">タスク用の小窓</span>が自動表示されます（小窓はどのタブを操作していても<span className="text-gray-900 font-medium">常に最前面</span>に表示されます）</span>
                           </li>
                           <li className="flex gap-2.5"><span className="text-gray-400 flex-shrink-0 font-medium">3.</span>
                             <span>小窓の <span className="inline-flex items-center gap-1 text-red-600 font-medium"><Monitor className="w-3 h-3 inline" strokeWidth={2} />画面録画を開始する</span> を<strong className="text-gray-900">必ず押してから</strong>操作を始めてください</span>
