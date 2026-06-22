@@ -56,6 +56,7 @@ export default function SessionDetail(props: { params: Promise<{ id: string }> }
   const { id } = use(props.params)
   const [session, setSession] = useState<Session | null>(null)
   const [processing, setProcessing] = useState(false)
+  const [transcribing, setTranscribing] = useState(false)
   const videoRef = useRef<HTMLVideoElement>(null)
   const [videoCurrentTime, setVideoCurrentTime] = useState(0)
   const [localVideoUrl, setLocalVideoUrl] = useState<string | null>(null)
@@ -157,6 +158,22 @@ export default function SessionDetail(props: { params: Promise<{ id: string }> }
     }
   }
 
+  async function transcribeFromRecording() {
+    setTranscribing(true)
+    try {
+      const res = await fetch(`/api/sessions/${id}/transcribe`, { method: 'POST' })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        alert(err.error ?? '文字起こしに失敗しました')
+        return
+      }
+      const updated = await fetch(`/api/sessions/${id}`).then((r) => r.json())
+      setSession(updated)
+    } finally {
+      setTranscribing(false)
+    }
+  }
+
   if (!session) {
     return (
       <div className="min-h-screen bg-white flex items-center justify-center">
@@ -217,6 +234,16 @@ export default function SessionDetail(props: { params: Promise<{ id: string }> }
                 CSV 出力
               </button>
             </>
+          )}
+          {session.recordingUrl && (
+            <button
+              onClick={transcribeFromRecording}
+              disabled={transcribing}
+              title="録画から Whisper で高精度に文字起こしします（話者識別は非対応）"
+              className="border border-gray-300 hover:border-gray-400 text-gray-700 hover:text-gray-900 disabled:opacity-50 px-3 py-2 rounded-md text-xs transition-colors"
+            >
+              {transcribing ? 'Whisper 実行中...' : '録画から文字起こし'}
+            </button>
           )}
           {actionButton}
           <Link

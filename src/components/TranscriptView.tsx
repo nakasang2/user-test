@@ -53,6 +53,13 @@ export default function TranscriptView({ transcript, questions }: Props) {
     return 'text-gray-500'
   }
 
+  const speakerLabel = (speaker: string) => {
+    if (speaker === 'Interviewer') return 'AI インタビュアー'
+    if (speaker === 'Participant') return '参加者'
+    if (speaker === 'Unknown') return '話者不明'
+    return speaker
+  }
+
   const sentimentLabel = (s: string | null) => {
     if (s === 'positive') return 'ポジティブ'
     if (s === 'negative') return 'ネガティブ'
@@ -105,9 +112,10 @@ export default function TranscriptView({ transcript, questions }: Props) {
               >
                 <div className="flex-shrink-0 w-28">
                   <div className={`text-xs font-medium mb-1 ${
-                    seg.speaker === 'Interviewer' ? 'text-gray-900' : 'text-emerald-700'
+                    seg.speaker === 'Interviewer' ? 'text-gray-900'
+                      : seg.speaker === 'Participant' ? 'text-emerald-700' : 'text-gray-500'
                   }`}>
-                    {seg.speaker === 'Interviewer' ? 'AI インタビュアー' : '参加者'}
+                    {speakerLabel(seg.speaker)}
                   </div>
                   <div className="text-xs text-gray-500">{formatTime(seg.startTime)}</div>
                 </div>

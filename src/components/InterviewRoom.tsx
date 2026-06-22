@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useRef, useCallback } from 'react'
+import { upload } from '@vercel/blob/client'
 import { useEmotionDetection, EmotionSnapshot } from '@/hooks/useEmotionDetection'
 import { AreaChart, Area, ResponsiveContainer, XAxis, YAxis } from 'recharts'
 import {
@@ -663,11 +664,23 @@ export default function InterviewRoom({
   }
 
   async function submitResults() {
-    // 録画停止 → ダウンロード用 URL を state に保存（サーバーアップロードは Vercel 4.5MB 制限のため断念）
+    // 録画停止 → ローカル DL 用 URL（フォールバック）＋ サーバーへ自動アップロード
     const recordingBlob = await stopMediaRecorder()
     if (recordingBlob.size > 0) {
-      const url = URL.createObjectURL(recordingBlob)
-      setRecordingDownloadUrl(url)
+      setRecordingDownloadUrl(URL.createObjectURL(recordingBlob))
+      // Vercel Blob クライアント直アップロードで関数の 4.5MB ボディ制限を回避し、非公開保存する。
+      // 認可は participantToken（clientPayload）でサーバー側が検証する。
+      try {
+        await upload(`recordings/${sessionId}.webm`, recordingBlob, {
+          access: 'private',
+          contentType: 'video/webm',
+          handleUploadUrl: `/api/sessions/${sessionId}/recording`,
+          clientPayload: participantToken ?? '',
+        })
+      } catch (e) {
+        console.error('録画のアップロードに失敗しました（ローカル保存は可能）:', e)
+        showNotice('録画のサーバー保存に失敗しました。完了画面からダウンロードして共有してください。')
+      }
     }
 
     // 画面録画も保存

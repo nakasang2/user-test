@@ -156,6 +156,9 @@ src/
 | GET | `/api/sessions/[id]` | セッション詳細（文字起こし・感情含む） |
 | PATCH | `/api/sessions/[id]` | ステータス更新（`status`, `recordingId`, `recordingUrl`） |
 | GET | `/api/sessions/[id]/recording` | 録画の署名付き URL を発行（認証＋組織所有権） |
+| POST | `/api/sessions/[id]/recording` | 録画のクライアント直アップロード用トークン発行（participantToken） |
+| POST | `/api/sessions/[id]/transcribe` | 録画から Whisper で再文字起こし＋分析（認証＋組織所有権） |
+| POST/DELETE | `/api/sessions/[id]/share` | 読み取り専用共有リンクの発行・失効（認証＋組織所有権） |
 | POST | `/api/sessions/[id]/process` | 文字起こし・指標保存・AI 分析実行（participantToken or 認証） |
 | POST | `/api/emotions` | 表情指標データ保存（participantToken・インタビュー中に呼び出し） |
 | POST | `/api/agent` | AI エージェントへの質問（認証＋組織所有権） |
@@ -187,9 +190,9 @@ src/
 
 - [ ] Google Meet 連携（現状は独自 URL のみ）
 - [ ] 表情エンゲージメント指標は表情推定ベースの補助シグナル（科学的に断定的な感情判定ではない）
-- [ ] ライブ文字起こしはブラウザ Speech Recognition 依存（Chrome/Edge 中心）。録画ベースの Whisper パイプラインは未配線
-- [ ] 話者識別は「Interviewer / Participant」の2者固定（diarization 未実装）
+- [x] ライブ文字起こしはブラウザ Speech Recognition（Chrome/Edge 中心）。録画から Whisper で再文字起こしする経路をダッシュボードに用意（`/api/sessions/[id]/transcribe`）
+- [ ] 話者識別: ライブはAI/参加者を区別。Whisper 経路は diarization 非対応のため話者は「Unknown」（高精度な話者分離には Deepgram 等が必要）
 - [ ] AI エンドポイントのレート制限は未実装（インジェクション対策・入力長制限は実装済み）
-- [ ] 録画のサーバー自動保存は未配線（現状は被験者のローカルダウンロード運用）
+- [x] 録画は Vercel Blob クライアント直アップロードで非公開保存（被験者ローカルDLはフォールバック）
 - [ ] Next.js 16 + Turbopack は開発マシンへの負荷が高い場合あり  
   → `next dev --webpack` で Webpack モードに切り替え可
