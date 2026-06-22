@@ -376,9 +376,28 @@ export default function Dashboard() {
                   {!isCollapsed && (
                     <div className="border-t border-gray-100">
                       {iv.sessions.length === 0 ? (
-                        <div className="px-4 py-4 text-sm text-gray-400 text-center">
-                          {isFiltering ? '条件に一致するセッションなし' : 'セッションがありません'}
-                        </div>
+                        isFiltering ? (
+                          <div className="px-4 py-4 text-sm text-gray-500 text-center">
+                            条件に一致するセッションなし
+                          </div>
+                        ) : (
+                          <div className="px-4 py-6 text-center">
+                            <p className="text-sm text-gray-600 mb-1">まだセッションがありません</p>
+                            <p className="text-xs text-gray-500 mb-3">
+                              参加者に招待リンクを送ると、ここにセッションが自動で表示されます
+                            </p>
+                            <button
+                              onClick={(e) => copyInviteLink(iv.id, e)}
+                              className="inline-flex items-center gap-1.5 bg-gray-900 hover:bg-gray-800 text-white px-3 py-1.5 rounded-md text-xs font-medium transition-colors"
+                            >
+                              {copiedInviteId === iv.id ? (
+                                <><Check className="w-3 h-3" strokeWidth={2.5} /> コピーしました</>
+                              ) : (
+                                <><Link2 className="w-3 h-3" strokeWidth={2} /> 招待リンクをコピー</>
+                              )}
+                            </button>
+                          </div>
+                        )
                       ) : (
                         <div className="divide-y divide-gray-100">
                           {iv.sessions.map((s) => (

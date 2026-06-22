@@ -132,6 +132,9 @@ export default function InterviewRoom({
   const [screenShareError, setScreenShareError] = useState<string | null>(null)
   const [currentTaskIndex, setCurrentTaskIndex] = useState(0)
   const [stimulusCountdown, setStimulusCountdown] = useState(0)
+  const [stimulusError, setStimulusError] = useState(false)
+  const stimulusStartedRef = useRef(false)   // カウント開始の二重起動防止
+  const stimulusProceededRef = useRef(false)  // 質問遷移の二重実行防止
   const screenMediaRecorderRef = useRef<MediaRecorder | null>(null)
   const screenRecordedChunksRef = useRef<Blob[]>([])
   const [screenRecordingDownloadUrl, setScreenRecordingDownloadUrl] = useState<string | null>(null)
@@ -616,29 +619,14 @@ export default function InterviewRoom({
       return
     }
 
-    // 印象テストの場合: stimulus フェーズを挿入
+    // 印象テストの場合: stimulus フェーズを挿入。
+    // カウントダウンは「画像の読み込み完了後」に開始する（beginStimulusCountdown）。
     if (interviewType === 'impression' && stimulusUrl) {
+      stimulusStartedRef.current = false
+      stimulusProceededRef.current = false
+      setStimulusError(false)
+      setStimulusCountdown(stimulusDuration ?? 5)
       setPhase('stimulus')
-      const duration = stimulusDuration ?? 5
-      setStimulusCountdown(duration)
-      const countdownInterval = setInterval(() => {
-        setStimulusCountdown((prev) => {
-          if (prev <= 1) { clearInterval(countdownInterval); return 0 }
-          return prev - 1
-        })
-      }, 1000)
-      setTimeout(() => {
-        setPhase('interview')
-        currentQuestionIndexRef.current = 0
-        setCurrentQuestionIndex(0)
-        setIsFollowUp(false)
-        const q = questions[0]
-        setDisplayedQuestion(q.text)
-        conversationBufferRef.current = `AI: ${q.text}`
-        speak(q.text, () => {
-          if (q.type === 'open') listenForAnswer(decideNext)
-        })
-      }, duration * 1000)
       return
     }
 
@@ -669,6 +657,37 @@ export default function InterviewRoom({
     setIsSpeaking(false)
     setLiveText('')
     moveToNextPlannedQuestion()
+  }
+
+  // ── 印象テスト: 最初の質問へ遷移（タイマー・スキップ・エラーから共用、二重実行防止）──
+  function proceedFromStimulus() {
+    if (stimulusProceededRef.current) return
+    stimulusProceededRef.current = true
+    setPhase('interview')
+    currentQuestionIndexRef.current = 0
+    setCurrentQuestionIndex(0)
+    setIsFollowUp(false)
+    const q = questions[0]
+    setDisplayedQuestion(q.text)
+    conversationBufferRef.current = `AI: ${q.text}`
+    speak(q.text, () => {
+      if (q.type === 'open') listenForAnswer(decideNext)
+    })
+  }
+
+  // 画像の読み込み完了後にカウントダウンを開始する（二重起動防止）
+  function beginStimulusCountdown() {
+    if (stimulusStartedRef.current || stimulusProceededRef.current) return
+    stimulusStartedRef.current = true
+    const duration = stimulusDuration ?? 5
+    setStimulusCountdown(duration)
+    const countdownInterval = setInterval(() => {
+      setStimulusCountdown((prev) => {
+        if (prev <= 1) { clearInterval(countdownInterval); return 0 }
+        return prev - 1
+      })
+    }, 1000)
+    setTimeout(() => proceedFromStimulus(), duration * 1000)
   }
 
   // ── インタビュー終了 ──────────────────────────────────
@@ -1039,15 +1058,42 @@ export default function InterviewRoom({
           {/* 印象テスト: 刺激表示フェーズ */}
           {phase === 'stimulus' && stimulusUrl && (
             <div className="absolute inset-0 bg-gray-50 flex items-center justify-center">
-              <img
-                src={stimulusUrl}
-                alt="stimulus"
-                className="max-w-full max-h-full object-contain"
-              />
-              {stimulusCountdown > 0 && (
-                <div className="absolute bottom-6 right-6 w-12 h-12 rounded-full bg-gray-900 text-white flex items-center justify-center text-xl font-semibold shadow-lg">
-                  {stimulusCountdown}
+              {stimulusError ? (
+                // 画像読み込み失敗時のフォールバック
+                <div className="text-center px-8">
+                  <AlertCircle className="w-6 h-6 text-gray-400 mx-auto mb-3" strokeWidth={1.75} />
+                  <p className="text-sm text-gray-700 mb-1">画像を読み込めませんでした</p>
+                  <p className="text-xs text-gray-500 mb-4">そのまま質問に進んでいただけます。</p>
+                  <button
+                    onClick={proceedFromStimulus}
+                    className="inline-flex items-center gap-1.5 bg-gray-900 hover:bg-gray-800 text-white px-4 py-2 rounded-md text-sm font-medium transition-colors"
+                  >
+                    質問に進む<ArrowRight className="w-3.5 h-3.5" strokeWidth={2} />
+                  </button>
                 </div>
+              ) : (
+                <>
+                  <img
+                    src={stimulusUrl}
+                    alt="提示画像"
+                    className="max-w-full max-h-full object-contain"
+                    // 読み込み完了後にカウント開始（それまでタイマーは走らせない）
+                    onLoad={beginStimulusCountdown}
+                    onError={() => setStimulusError(true)}
+                  />
+                  {stimulusCountdown > 0 && (
+                    <div className="absolute bottom-6 right-6 w-12 h-12 rounded-full bg-gray-900 text-white flex items-center justify-center text-xl font-semibold shadow-lg">
+                      {stimulusCountdown}
+                    </div>
+                  )}
+                  {/* 「もう見た」場合に早送りできるスキップ */}
+                  <button
+                    onClick={proceedFromStimulus}
+                    className="absolute bottom-6 left-6 text-xs text-gray-600 hover:text-gray-900 bg-white/90 border border-gray-300 hover:border-gray-400 px-3 py-1.5 rounded-md transition-colors"
+                  >
+                    質問に進む →
+                  </button>
+                </>
               )}
             </div>
           )}
