@@ -1,5 +1,6 @@
 import { cookies } from 'next/headers'
 import { NextResponse } from 'next/server'
+import { timingSafeEqual } from 'crypto'
 import { verifyToken, type TokenPayload } from './jwt'
 import { prisma } from './db'
 import { hasPermission, type Role } from './permissions'
@@ -38,6 +39,26 @@ export async function requireRole(minRole: Role): Promise<TokenPayload & { role:
   const role = member?.role ?? 'viewer'
   if (!hasPermission(role, minRole)) throw new ForbiddenError()
   return { ...payload, role }
+}
+
+/**
+ * 被験者フロー（未認証）専用の限定スコープ認可。
+ * セッション作成時に発行した participantToken と一致する場合のみ、
+ * 当該セッションへの結果送信・status 更新を許可する。
+ * 一致しなければ AuthError を投げる。
+ */
+export async function requireParticipantToken(sessionId: string, token: string | null): Promise<void> {
+  if (!token) throw new AuthError()
+  const session = await prisma.session.findUnique({
+    where: { id: sessionId },
+    select: { participantToken: true },
+  })
+  if (!session?.participantToken) throw new AuthError()
+  const expected = Buffer.from(session.participantToken)
+  const actual = Buffer.from(token)
+  if (expected.length !== actual.length || !timingSafeEqual(expected, actual)) {
+    throw new AuthError()
+  }
 }
 
 /** API ルートの共通エラーハンドラー */

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
+import { requireParticipantToken, handleApiError } from '@/lib/api-auth'
 
 function clamp(v: unknown): number {
   const n = typeof v === 'number' ? v : 0
@@ -13,6 +14,9 @@ export async function POST(req: NextRequest) {
     if (!sessionId || typeof timestamp !== 'number') {
       return NextResponse.json({ error: 'sessionId and timestamp are required' }, { status: 400 })
     }
+
+    // 被験者フロー専用: 当該セッションの participantToken を要求する
+    await requireParticipantToken(sessionId, req.headers.get('x-participant-token'))
 
     const emotion = await prisma.emotionResult.create({
       data: {
@@ -29,7 +33,7 @@ export async function POST(req: NextRequest) {
     })
 
     return NextResponse.json(emotion, { status: 201 })
-  } catch {
-    return NextResponse.json({ error: 'Invalid request' }, { status: 400 })
+  } catch (err) {
+    return handleApiError(err)
   }
 }

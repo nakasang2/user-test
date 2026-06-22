@@ -117,6 +117,9 @@ model Session {
   dailyRoomName String          @unique
   dailyRoomUrl  String
   status        String          @default("pending")
+  // 被験者フロー（未認証）から status 更新・結果送信を行うための限定スコープ秘密トークン。
+  // セッション作成時に生成し、被験者ページのサーバーコンポーネント経由でのみ受け渡す。
+  participantToken String?      @unique
   recordingId   String?
   recordingUrl  String?
   transcript    Transcript?

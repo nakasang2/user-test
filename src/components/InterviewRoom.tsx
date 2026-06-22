@@ -27,6 +27,7 @@ interface Question {
 
 interface Props {
   sessionId: string
+  participantToken?: string
   roomName: string
   dailyRoomUrl: string
   questions: Question[]
@@ -50,6 +51,7 @@ type Phase = 'guide' | 'waiting' | 'stimulus' | 'task' | 'intro' | 'interview' |
 
 export default function InterviewRoom({
   sessionId,
+  participantToken,
   questions,
   interviewTitle,
   participantName,
@@ -541,7 +543,7 @@ export default function InterviewRoom({
 
     await fetch(`/api/sessions/${sessionId}`, {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'x-participant-token': participantToken ?? '' },
       body: JSON.stringify({ status: 'active' }),
     })
 
@@ -658,7 +660,7 @@ export default function InterviewRoom({
 
     await fetch(`/api/sessions/${sessionId}`, {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'x-participant-token': participantToken ?? '' },
       body: JSON.stringify({ status: 'completed' }),
     })
     const fullText = transcriptRef.current.map((t) => `[${t.speaker}]: ${t.text}`).join('\n')
@@ -667,7 +669,7 @@ export default function InterviewRoom({
     }))
     await fetch(`/api/sessions/${sessionId}/process`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'x-participant-token': participantToken ?? '' },
       body: JSON.stringify({ transcript: fullText, segments, emotions: getSnapshots() }),
     })
   }

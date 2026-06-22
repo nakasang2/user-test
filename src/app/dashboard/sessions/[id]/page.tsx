@@ -59,6 +59,7 @@ export default function SessionDetail(props: { params: Promise<{ id: string }> }
   const videoRef = useRef<HTMLVideoElement>(null)
   const [videoCurrentTime, setVideoCurrentTime] = useState(0)
   const [localVideoUrl, setLocalVideoUrl] = useState<string | null>(null)
+  const [signedVideoUrl, setSignedVideoUrl] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const localVideoUrlRef = useRef<string | null>(null)
 
@@ -89,6 +90,17 @@ export default function SessionDetail(props: { params: Promise<{ id: string }> }
       .then((r) => r.json())
       .then(setSession)
   }, [id])
+
+  // 録画は非公開 Blob のため、認可済みエンドポイント経由で短命の署名付き URL を取得する
+  useEffect(() => {
+    if (!session?.recordingUrl) { setSignedVideoUrl(null); return }
+    let cancelled = false
+    fetch(`/api/sessions/${id}/recording`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => { if (!cancelled && data?.url) setSignedVideoUrl(data.url) })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [id, session?.recordingUrl])
 
   function exportCsv() {
     if (!session) return
@@ -142,8 +154,8 @@ export default function SessionDetail(props: { params: Promise<{ id: string }> }
 
   const roomLink = `/interview/${session.dailyRoomName}`
 
-  // Blob CDN URL のみ有効な録画とみなす
-  const serverVideoUrl = session.recordingUrl?.startsWith('https://') ? session.recordingUrl : null
+  // 録画は非公開 Blob。署名付き URL を取得できた場合のみ再生・ダウンロード可能とする
+  const serverVideoUrl = signedVideoUrl
   const videoSrc = localVideoUrl ?? serverVideoUrl ?? null
 
   const actionButton = (() => {

@@ -3,6 +3,7 @@ import { z } from 'zod'
 import { prisma } from '@/lib/db'
 import { createRoom } from '@/lib/daily'
 import { v4 as uuidv4 } from 'uuid'
+import { randomBytes } from 'crypto'
 import { handleApiError } from '@/lib/api-auth'
 
 const joinSchema = z.object({
@@ -60,8 +61,11 @@ export async function POST(
       } catch { /* Daily.co 未設定時はそのまま */ }
     }
 
+    // 被験者フロー（未認証）が自分のセッションにのみ結果送信できるよう、
+    // 高エントロピーの秘密トークンを発行する。被験者ページのサーバーコンポーネント経由でのみ渡す。
+    const participantToken = randomBytes(32).toString('base64url')
     const session = await prisma.session.create({
-      data: { interviewId, participantId: participant.id, dailyRoomName: roomName, dailyRoomUrl },
+      data: { interviewId, participantId: participant.id, dailyRoomName: roomName, dailyRoomUrl, participantToken },
     })
 
     return NextResponse.json({

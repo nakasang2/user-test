@@ -1,11 +1,31 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { analyzeTranscript } from '@/lib/ai'
+import { requireAuth, requireParticipantToken, handleApiError } from '@/lib/api-auth'
 
 export async function POST(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+ try {
   const { id } = await props.params
+
+  // 二経路認可: 被験者フローは participantToken、ダッシュボードの再分析は認証＋組織所有権
+  const participantToken = req.headers.get('x-participant-token')
+  if (participantToken) {
+    await requireParticipantToken(id, participantToken)
+  } else {
+    const { orgId } = await requireAuth()
+    const owned = await prisma.session.findFirst({
+      where: { id, interview: { organizationId: orgId } },
+      select: { id: true },
+    })
+    if (!owned) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+  }
+
   const body = await req.json()
   const { transcript: transcriptText, segments, emotions: emotionData } = body
+
+  if (typeof transcriptText !== 'string' || !Array.isArray(segments)) {
+    return NextResponse.json({ error: 'transcript and segments are required' }, { status: 400 })
+  }
 
   const session = await prisma.session.findUnique({
     where: { id },
@@ -79,4 +99,7 @@ export async function POST(req: NextRequest, props: { params: Promise<{ id: stri
   })
 
   return NextResponse.json({ transcript, ok: true })
+ } catch (err) {
+   return handleApiError(err)
+ }
 }

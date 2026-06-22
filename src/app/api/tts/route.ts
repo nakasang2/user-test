@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import OpenAI from 'openai'
+import { LIMITS } from '@/lib/llm-safety'
 
 function getClient() {
   return new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
@@ -18,6 +19,9 @@ export async function POST(req: NextRequest) {
   const body = await req.json() as { text?: string }
   const text = body.text?.trim()
   if (!text) return NextResponse.json({ error: 'text is required' }, { status: 400 })
+  if (text.length > LIMITS.ttsText) {
+    return NextResponse.json({ error: 'text is too long' }, { status: 413 })
+  }
 
   const client = getClient()
   const response = await client.audio.speech.create({
