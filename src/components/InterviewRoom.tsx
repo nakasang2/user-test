@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { upload } from '@vercel/blob/client'
+import { track } from '@/lib/analytics'
 import { useEmotionDetection, EmotionSnapshot } from '@/hooks/useEmotionDetection'
 import { AreaChart, Area, ResponsiveContainer, XAxis, YAxis } from 'recharts'
 import {
@@ -220,10 +221,11 @@ export default function InterviewRoom({
       .catch(() => {
         if (version !== speakVersionRef.current) return
         setIsSpeaking(false)
+        track('interview_tts_failed', { sessionId })
         showNotice('音声の再生に失敗しました。画面の質問テキストをご覧ください。')
         onEnd?.() // TTS 失敗時もインタビューは続行
       })
-  }, [showNotice])
+  }, [showNotice, sessionId])
 
   // ── カメラ初期化 ─────────────────────────────────────
   useEffect(() => {
@@ -699,11 +701,19 @@ export default function InterviewRoom({
     const segments = transcriptRef.current.map((t) => ({
       speaker: t.speaker, text: t.text, start: t.start, end: t.end ?? t.start + 5,
     }))
-    await fetch(`/api/sessions/${sessionId}/process`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-participant-token': participantToken ?? '' },
-      body: JSON.stringify({ transcript: fullText, segments, emotions: getSnapshots() }),
-    })
+    try {
+      const res = await fetch(`/api/sessions/${sessionId}/process`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-participant-token': participantToken ?? '' },
+        body: JSON.stringify({ transcript: fullText, segments, emotions: getSnapshots() }),
+      })
+      if (!res.ok) throw new Error(`process failed: ${res.status}`)
+      track('interview_completed', { sessionId })
+    } catch (e) {
+      console.error('結果の送信に失敗しました:', e)
+      track('interview_process_failed', { sessionId })
+      showNotice('回答の送信に失敗しました。通信環境をご確認ください。')
+    }
   }
 
   // ── 画面共有開始 ──────────────────────────────────────
@@ -794,7 +804,7 @@ export default function InterviewRoom({
           <div className="border-t border-gray-200 pt-5">
             <p className="text-xs text-gray-500 mb-3">または、テキスト入力のみで続けることもできます</p>
             <button
-              onClick={() => setTextOnlyMode(true)}
+              onClick={() => { track('interview_speech_fallback', { sessionId }); setTextOnlyMode(true) }}
               className="inline-flex items-center gap-1.5 text-sm text-gray-700 hover:text-gray-900 border border-gray-300 hover:border-gray-400 px-4 py-1.5 rounded-md transition-colors"
             >
               テキスト入力で続ける

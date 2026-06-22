@@ -2,6 +2,7 @@
 
 import { useState, useEffect, use } from 'react'
 import { useRouter } from 'next/navigation'
+import { track } from '@/lib/analytics'
 import {
   Video,
   Monitor,
@@ -34,6 +35,7 @@ export default function JoinPage(props: { params: Promise<{ interviewId: string 
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
+    track('join_viewed', { interviewId })
     fetch(`/api/join/${interviewId}`)
       .then((r) => {
         if (!r.ok) { setNotFound(true); return null }
@@ -56,6 +58,7 @@ export default function JoinPage(props: { params: Promise<{ interviewId: string 
       })
       const data = await res.json()
       if (!res.ok) { setError(data.error ?? 'エラーが発生しました'); return }
+      track('interview_started', { interviewId })
       router.push(`/interview/${data.roomName}`)
     } catch {
       setError('ネットワークエラーが発生しました')

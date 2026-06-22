@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import { track } from '@/lib/analytics'
 import {
   MessageSquare,
   Image as ImageIcon,
@@ -60,7 +61,7 @@ export default function CreateInterviewModal({ onClose, onCreated }: Props) {
     e.preventDefault()
     setLoading(true)
     try {
-      await fetch('/api/interviews', {
+      const res = await fetch('/api/interviews', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -80,6 +81,7 @@ export default function CreateInterviewModal({ onClose, onCreated }: Props) {
           topic:        (sessionType === 'interview' && autoGenerate) ? topic : undefined,
         }),
       })
+      if (res.ok) track('interview_created', { type: sessionType })
       onCreated()
     } finally {
       setLoading(false)

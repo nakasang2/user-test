@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useMemo } from 'react'
 import Link from 'next/link'
+import { track } from '@/lib/analytics'
 import CreateInterviewModal from '@/components/CreateInterviewModal'
 import StatusBadge from '@/components/StatusBadge'
 import {
@@ -116,6 +117,7 @@ export default function Dashboard() {
     e.preventDefault()
     const url = `${window.location.origin}/join/${interviewId}`
     await navigator.clipboard.writeText(url)
+    track('invite_copied', { interviewId })
     setCopiedInviteId(interviewId)
     setTimeout(() => setCopiedInviteId(null), 2000)
   }

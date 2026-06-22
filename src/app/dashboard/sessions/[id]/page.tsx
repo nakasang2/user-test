@@ -7,6 +7,7 @@ import TranscriptView from '@/components/TranscriptView'
 import FloatingAgentChat from '@/components/FloatingAgentChat'
 import StatusBadge from '@/components/StatusBadge'
 import { Video, Download, X, Folder } from 'lucide-react'
+import { track } from '@/lib/analytics'
 
 interface Segment {
   id: string
@@ -118,6 +119,7 @@ export default function SessionDetail(props: { params: Promise<{ id: string }> }
       const { shareToken } = await res.json()
       const url = `${window.location.origin}/share/${shareToken}`
       await navigator.clipboard.writeText(url)
+      track('report_shared', { sessionId: id })
       alert(`読み取り専用の共有リンクをコピーしました:\n${url}`)
     } catch {
       alert('共有リンクの発行に失敗しました')
@@ -175,6 +177,7 @@ export default function SessionDetail(props: { params: Promise<{ id: string }> }
         alert(err.error ?? '文字起こしに失敗しました')
         return
       }
+      track('recording_transcribed', { sessionId: id })
       const updated = await fetch(`/api/sessions/${id}`).then((r) => r.json())
       setSession(updated)
     } finally {

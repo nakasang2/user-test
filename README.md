@@ -195,6 +195,7 @@ src/
 - [ ] 表情エンゲージメント指標は表情推定ベースの補助シグナル（科学的に断定的な感情判定ではない）
 - [x] ライブ文字起こしはブラウザ Speech Recognition（Chrome/Edge 中心）。録画から Whisper で再文字起こしする経路をダッシュボードに用意（`/api/sessions/[id]/transcribe`）
 - [ ] 話者識別: ライブはAI/参加者を区別。Whisper 経路は diarization 非対応のため話者は「Unknown」（高精度な話者分離には Deepgram 等が必要）
+- [ ] プロダクト分析は `lib/analytics.ts` の `track()` で主要イベントを計測（被験者ファネル等）。送信先ベンダーは未選定（既定は dev で console 出力、本番 no-op。`NEXT_PUBLIC_ANALYTICS_ENABLED=1` で有効化）
 - [ ] AI エンドポイントのレート制限は未実装（インジェクション対策・入力長制限は実装済み）
 - [x] 録画は Vercel Blob クライアント直アップロードで非公開保存（被験者ローカルDLはフォールバック）
 - [ ] Next.js 16 + Turbopack は開発マシンへの負荷が高い場合あり  
