@@ -57,15 +57,24 @@ export async function GET(req: NextRequest, props: { params: Promise<{ id: strin
     }
   })
 
-  // AI に共通インサイトを生成させる
-  let commonInsights: string | null = null
-  if (interview.sessions.length >= 2) {
+  // AI に共通インサイトを生成させる（done セッション数が変わらなければキャッシュを返す）
+  const refresh = req.nextUrl.searchParams.get('refresh') === '1'
+  const doneCount = interview.sessions.length
+  let commonInsights: string | null = interview.commonInsights
+  if (doneCount >= 2 && (refresh || interview.commonInsights === null || interview.insightsCount !== doneCount)) {
     const allSummaries = sessionsWithStats
       .filter((s) => s.summary)
       .map((s, i) => `参加者${i + 1}（${s.participantName}）: ${s.summary}`)
       .join('\n')
 
     commonInsights = await generateCommonInsights(interview.title, allSummaries)
+    // 生成成功時のみキャッシュを更新
+    if (commonInsights !== null) {
+      await prisma.interview.update({
+        where: { id },
+        data: { commonInsights, insightsCount: doneCount },
+      })
+    }
   }
 
   return NextResponse.json({ interview, sessions: sessionsWithStats, commonInsights })

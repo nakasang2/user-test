@@ -102,6 +102,19 @@ export default function SessionDetail(props: { params: Promise<{ id: string }> }
     return () => { cancelled = true }
   }, [id, session?.recordingUrl])
 
+  async function shareSession() {
+    try {
+      const res = await fetch(`/api/sessions/${id}/share`, { method: 'POST' })
+      if (!res.ok) throw new Error('failed')
+      const { shareToken } = await res.json()
+      const url = `${window.location.origin}/share/${shareToken}`
+      await navigator.clipboard.writeText(url)
+      alert(`読み取り専用の共有リンクをコピーしました:\n${url}`)
+    } catch {
+      alert('共有リンクの発行に失敗しました')
+    }
+  }
+
   function exportCsv() {
     if (!session) return
     const rows: string[][] = [
@@ -190,12 +203,20 @@ export default function SessionDetail(props: { params: Promise<{ id: string }> }
         <div className="flex items-center gap-3">
           <StatusBadge status={session.status} />
           {session.transcript && (
-            <button
-              onClick={exportCsv}
-              className="border border-gray-300 hover:border-gray-400 text-gray-700 hover:text-gray-900 px-3 py-2 rounded-md text-xs transition-colors"
-            >
-              CSV 出力
-            </button>
+            <>
+              <button
+                onClick={shareSession}
+                className="border border-gray-300 hover:border-gray-400 text-gray-700 hover:text-gray-900 px-3 py-2 rounded-md text-xs transition-colors"
+              >
+                共有リンク
+              </button>
+              <button
+                onClick={exportCsv}
+                className="border border-gray-300 hover:border-gray-400 text-gray-700 hover:text-gray-900 px-3 py-2 rounded-md text-xs transition-colors"
+              >
+                CSV 出力
+              </button>
+            </>
           )}
           {actionButton}
           <Link

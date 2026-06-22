@@ -53,6 +53,13 @@ export default function TranscriptView({ transcript, questions }: Props) {
     return 'text-gray-500'
   }
 
+  const sentimentLabel = (s: string | null) => {
+    if (s === 'positive') return 'ポジティブ'
+    if (s === 'negative') return 'ネガティブ'
+    if (s === 'neutral') return 'ニュートラル'
+    return s
+  }
+
   return (
     <div className="space-y-4">
       {(transcript.summary || transcript.themes) && (
@@ -108,7 +115,7 @@ export default function TranscriptView({ transcript, questions }: Props) {
                   <p className="text-sm text-gray-700 leading-relaxed">{seg.text}</p>
                   {seg.sentiment && (
                     <span className={`text-xs mt-1 inline-block ${sentimentColor(seg.sentiment)}`}>
-                      {seg.sentiment}
+                      {sentimentLabel(seg.sentiment)}
                     </span>
                   )}
                 </div>

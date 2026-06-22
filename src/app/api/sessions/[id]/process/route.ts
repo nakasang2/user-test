@@ -39,11 +39,16 @@ export async function POST(req: NextRequest, props: { params: Promise<{ id: stri
   })
 
   const questions = session.interview.questions.map((q) => q.text)
+  // 発言の時刻 [mm:ss] を含むトランスクリプトを組み立て、AI 要約が根拠を引用できるようにする
+  const fmt = (sec: number) => `${Math.floor(sec / 60)}:${String(Math.floor(sec % 60)).padStart(2, '0')}`
+  const timestampedTranscript = (segments as { speaker: string; text: string; start: number }[])
+    .map((s) => `[${fmt(s.start ?? 0)}] ${s.speaker}: ${s.text}`)
+    .join('\n') || transcriptText
   let summary = ''
   let themes = ''
   let sentiment = 'neutral'
   try {
-    const result = await analyzeTranscript(transcriptText, questions)
+    const result = await analyzeTranscript(timestampedTranscript, questions)
     summary = result.summary
     themes = result.themes
     sentiment = result.sentiment

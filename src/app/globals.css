@@ -40,3 +40,8 @@ h1, h2, h3, h4, h5, h6 {
 ::-webkit-scrollbar-thumb:hover {
   background: #d4d4d4;
 }
+
+/* 印刷（PDF 保存）時は操作系を隠す */
+@media print {
+  .no-print { display: none !important; }
+}

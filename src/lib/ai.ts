@@ -18,8 +18,9 @@ export async function analyzeTranscript(
       {
         role: 'system',
         content: `You are an expert UX researcher analyzing user interview transcripts.
+The transcript lines are prefixed with [mm:ss] timestamps.
 Provide structured analysis in JSON format with keys: summary, themes, sentiment.
-- summary: 2-3 sentence overview of key findings
+- summary: 2-3 sentence overview of key findings. When you reference a specific finding, cite the supporting moment with its [mm:ss] timestamp so claims can be verified.
 - themes: comma-separated list of main themes
 - sentiment: overall sentiment (positive/neutral/negative) with brief explanation
 ${UNTRUSTED_DATA_GUARD}`,
