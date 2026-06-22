@@ -120,6 +120,8 @@ export default function InterviewRoom({
   const [textOnlyMode, setTextOnlyMode] = useState(false) // 非対応でも続行する場合
   const [isListening, setIsListening] = useState(false)
   const [recordingDownloadUrl, setRecordingDownloadUrl] = useState<string | null>(null)
+  // 回答送信の状態（完了画面の表示・beforeunload ガード・再送に使う）
+  const [submitState, setSubmitState] = useState<'idle' | 'saving' | 'saved' | 'failed'>('idle')
   // テキスト入力フォールバック用：listenForAnswer のコールバックを保持
   const onAnswerCallbackRef = useRef<((answer: string) => void) | null>(null)
 
@@ -265,6 +267,15 @@ export default function InterviewRoom({
 
   // 感情検出はインタビュー開始時に startInterview() 内で起動する。
   // こうすることで録画の t=0 と感情タイムスタンプの t=0 が一致する。
+
+  // ── 離脱防止ガード: インタビュー開始後、回答が保存し終わるまでは閉じる前に警告 ──
+  useEffect(() => {
+    const started = phase !== 'guide' && phase !== 'waiting'
+    if (!started || submitState === 'saved') return
+    const handler = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = '' }
+    window.addEventListener('beforeunload', handler)
+    return () => window.removeEventListener('beforeunload', handler)
+  }, [phase, submitState])
 
   // ── 進行中の文字起こしを逐次サーバー保存（途中離脱でも残す保険。AI 分析はしない）──
   function saveProgress() {
@@ -718,11 +729,19 @@ export default function InterviewRoom({
       setScreenRecordingDownloadUrl(screenUrl)
     }
 
+    await persistResults()
+  }
+
+  // ── 文字起こし・感情をサーバーへ保存（失敗時に再送可能）──
+  async function persistResults() {
+    setSubmitState('saving')
+    // status 更新はベストエフォート（失敗してもデータ保存を優先）
     await fetch(`/api/sessions/${sessionId}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json', 'x-participant-token': participantToken ?? '' },
       body: JSON.stringify({ status: 'completed' }),
-    })
+    }).catch(() => {})
+
     const fullText = transcriptRef.current.map((t) => `[${t.speaker}]: ${t.text}`).join('\n')
     const segments = transcriptRef.current.map((t) => ({
       speaker: t.speaker, text: t.text, start: t.start, end: t.end ?? t.start + 5,
@@ -735,10 +754,12 @@ export default function InterviewRoom({
       })
       if (!res.ok) throw new Error(`process failed: ${res.status}`)
       track('interview_completed', { sessionId })
+      setSubmitState('saved')
     } catch (e) {
       console.error('結果の送信に失敗しました:', e)
       track('interview_process_failed', { sessionId })
-      showNotice('回答の送信に失敗しました。通信環境をご確認ください。')
+      setSubmitState('failed')
+      showNotice('回答の送信に失敗しました。完了画面から再送信できます。')
     }
   }
 
@@ -1161,6 +1182,26 @@ export default function InterviewRoom({
                 </div>
                 <h2 className="text-xl font-semibold tracking-tight mb-2 text-gray-900">インタビュー完了</h2>
                 <p className="text-gray-600 text-sm mb-4">ご回答いただきありがとうございました。</p>
+
+                {/* 送信状態 */}
+                {submitState === 'saving' && (
+                  <p className="text-gray-500 text-xs mb-4 animate-pulse">回答を送信しています… 閉じずにお待ちください。</p>
+                )}
+                {submitState === 'saved' && (
+                  <p className="text-emerald-700 text-xs mb-4">回答の送信が完了しました。このまま閉じて構いません。</p>
+                )}
+                {submitState === 'failed' && (
+                  <div className="mb-4 flex flex-col items-center gap-2">
+                    <p className="text-red-700 text-xs">回答の送信に失敗しました。通信環境をご確認のうえ再送信してください。</p>
+                    <button
+                      onClick={() => persistResults()}
+                      className="inline-flex items-center gap-1.5 bg-gray-900 hover:bg-gray-800 text-white px-4 py-2 rounded-md text-sm font-medium transition-colors"
+                    >
+                      回答を再送信する
+                    </button>
+                  </div>
+                )}
+
                 <div className="flex flex-col gap-2 items-center">
                   {recordingDownloadUrl ? (
                     <a
