@@ -45,3 +45,11 @@ h1, h2, h3, h4, h5, h6 {
 @media print {
   .no-print { display: none !important; }
 }
+
+/* アクセシビリティ: キーボード操作時のフォーカスを全インタラクティブ要素で可視化。
+   :where() で詳細度0にし、コンポーネント側の指定を妨げない。 */
+:where(a, button, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid #111827;
+  outline-offset: 2px;
+  border-radius: 4px;
+}

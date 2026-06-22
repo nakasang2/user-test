@@ -170,9 +170,10 @@ export default function JoinPage(props: { params: Promise<{ interviewId: string 
                 checked={consent}
                 onChange={(e) => setConsent(e.target.checked)}
                 disabled={loading}
-                className="sr-only"
+                aria-label="録画・分析への同意"
+                className="peer sr-only"
               />
-              <div className={`w-[18px] h-[18px] rounded border-2 flex items-center justify-center transition-colors ${
+              <div className={`w-[18px] h-[18px] rounded border-2 flex items-center justify-center transition-colors peer-focus-visible:ring-2 peer-focus-visible:ring-gray-900 peer-focus-visible:ring-offset-2 ${
                 consent ? 'bg-gray-900 border-gray-900' : 'bg-white border-gray-300 group-hover:border-gray-500'
               }`}>
                 {consent && <span className="text-white text-[11px] font-bold leading-none">✓</span>}

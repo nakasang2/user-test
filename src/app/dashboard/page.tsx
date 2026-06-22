@@ -439,8 +439,9 @@ export default function Dashboard() {
                                 ) : (
                                   <button
                                     onClick={(e) => { e.preventDefault(); setConfirmDeleteId(s.id) }}
-                                    className="absolute top-1/2 -translate-y-1/2 right-3 opacity-0 group-hover:opacity-100 bg-white hover:bg-red-50 border border-gray-200 hover:border-red-300 p-1.5 rounded-md text-gray-400 hover:text-red-600 transition-all"
+                                    className="absolute top-1/2 -translate-y-1/2 right-3 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 bg-white hover:bg-red-50 border border-gray-200 hover:border-red-300 p-1.5 rounded-md text-gray-400 hover:text-red-600 transition-all"
                                     title="セッションを削除"
+                                    aria-label="セッションを削除"
                                   >
                                     <Trash2 className="w-3.5 h-3.5" strokeWidth={2} />
                                   </button>

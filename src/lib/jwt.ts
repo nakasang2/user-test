@@ -1,4 +1,5 @@
 import { SignJWT, jwtVerify } from 'jose'
+import { getEnv } from './env'
 
 export interface TokenPayload {
   userId: string
@@ -7,9 +8,7 @@ export interface TokenPayload {
 }
 
 function getSecret() {
-  const secret = process.env.JWT_SECRET
-  if (!secret) throw new Error('JWT_SECRET is not set')
-  return new TextEncoder().encode(secret)
+  return new TextEncoder().encode(getEnv().JWT_SECRET)
 }
 
 export async function signToken(payload: TokenPayload): Promise<string> {
