@@ -56,6 +56,7 @@ export default function TranscriptView({ transcript, questions }: Props) {
   const speakerLabel = (speaker: string) => {
     if (speaker === 'Interviewer') return 'AI インタビュアー'
     if (speaker === 'Participant') return '参加者'
+    if (speaker === 'System') return 'タスク記録'
     if (speaker === 'Unknown') return '話者不明'
     return speaker
   }

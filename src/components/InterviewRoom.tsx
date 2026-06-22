@@ -541,6 +541,34 @@ export default function InterviewRoom({
     setWidgetBlocked(!popup)
   }
 
+  // ── タスクの結果を記録して次へ（達成 / 断念）。最後のタスクなら質問フェーズへ ──
+  function recordTaskOutcome(outcome: 'completed' | 'gave_up') {
+    const idx = currentTaskIndex
+    const task = tasks?.[idx]
+    if (task) {
+      const label = outcome === 'completed' ? '達成' : '断念（たどり着けなかった）'
+      const text = `タスク${idx + 1}「${task.text}」→ ${label}`
+      const entry: TranscriptEntry = {
+        speaker: 'System',
+        text,
+        start: (Date.now() - startTimeRef.current) / 1000,
+      }
+      transcriptRef.current = [...transcriptRef.current, entry]
+      setTranscript([...transcriptRef.current])
+      conversationBufferRef.current += `\n[タスク記録] ${text}`
+      saveProgress()
+    }
+    const total = tasks?.length ?? 0
+    if (idx + 1 < total) {
+      const next = idx + 1
+      setCurrentTaskIndex(next)
+      // サービスモードの小窓へ現在タスクを同期
+      widgetChannelRef.current?.postMessage({ type: 'task_update', currentTaskIndex: next })
+    } else {
+      completeTasksAndStartInterview()
+    }
+  }
+
   // ── タスク完了 → 事後インタビュー開始 ─────────────────
   function completeTasksAndStartInterview() {
     // ウィジェットを閉じる（BroadcastChannel 経由 + 直接 close）
@@ -579,7 +607,8 @@ export default function InterviewRoom({
       const channel = new BroadcastChannel(`uservoice-widget-${sessionId}`)
       widgetChannelRef.current = channel
       channel.onmessage = (e) => {
-        if (e.data.type === 'task_complete') completeTasksAndStartInterview()
+        if (e.data.type === 'task_outcome') recordTaskOutcome(e.data.outcome === 'gave_up' ? 'gave_up' : 'completed')
+        else if (e.data.type === 'task_complete') completeTasksAndStartInterview() // 後方互換
         else if (e.data.type === 'end_session') endInterview()
         else if (e.data.type === 'recording_started') setScreenSharing(true)
         else if (e.data.type === 'screen_recording_blob') {
@@ -1157,39 +1186,43 @@ export default function InterviewRoom({
                     {widgetBlocked && (
                       <div className="flex gap-2 pt-2 border-t border-gray-200">
                         <button
-                          onClick={completeTasksAndStartInterview}
+                          onClick={() => recordTaskOutcome('completed')}
                           className="flex-1 inline-flex items-center justify-center gap-1.5 bg-gray-900 hover:bg-gray-800 text-white px-4 py-2 rounded-md text-sm font-medium transition-colors"
                         >
                           <Check className="w-3.5 h-3.5" strokeWidth={2.5} />
-                          タスク完了
-                          <ArrowRight className="w-3.5 h-3.5" strokeWidth={2} />
-                          質問へ
+                          達成して{(tasks?.length ?? 0) <= currentTaskIndex + 1 ? '質問へ' : '次へ'}
                         </button>
                         <button
-                          onClick={endInterview}
+                          onClick={() => recordTaskOutcome('gave_up')}
                           className="border border-gray-300 hover:border-gray-400 text-gray-700 hover:text-gray-900 px-4 py-2 rounded-md text-sm transition-colors"
                         >
-                          終了
+                          できなかった
                         </button>
                       </div>
                     )}
                   </div>
                 ) : (
-                  <div className="flex gap-2">
-                    <button
-                      onClick={completeTasksAndStartInterview}
-                      className="flex-1 inline-flex items-center justify-center gap-1.5 bg-gray-900 hover:bg-gray-800 text-white px-4 py-2.5 rounded-md text-sm font-medium transition-colors"
-                    >
-                      <Check className="w-3.5 h-3.5" strokeWidth={2.5} />
-                      タスク完了
-                      <ArrowRight className="w-3.5 h-3.5" strokeWidth={2} />
-                      質問へ
-                    </button>
+                  <div className="space-y-2">
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => recordTaskOutcome('completed')}
+                        className="flex-1 inline-flex items-center justify-center gap-1.5 bg-gray-900 hover:bg-gray-800 text-white px-4 py-2.5 rounded-md text-sm font-medium transition-colors"
+                      >
+                        <Check className="w-3.5 h-3.5" strokeWidth={2.5} />
+                        達成して{(tasks?.length ?? 0) <= currentTaskIndex + 1 ? '質問へ' : '次へ'}
+                      </button>
+                      <button
+                        onClick={() => recordTaskOutcome('gave_up')}
+                        className="flex-1 inline-flex items-center justify-center gap-1.5 border border-gray-300 hover:border-gray-400 text-gray-700 hover:text-gray-900 px-4 py-2.5 rounded-md text-sm transition-colors"
+                      >
+                        できなかった
+                      </button>
+                    </div>
                     <button
                       onClick={endInterview}
-                      className="border border-gray-300 hover:border-gray-400 text-gray-700 hover:text-gray-900 px-4 py-2.5 rounded-md text-sm transition-colors"
+                      className="w-full text-xs text-gray-500 hover:text-gray-800 py-1 transition-colors"
                     >
-                      終了
+                      インタビューを終了する
                     </button>
                   </div>
                 )}

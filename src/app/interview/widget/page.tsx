@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useRef, Suspense } from 'react'
 import { useSearchParams } from 'next/navigation'
-import { Monitor, Check, X, AlertTriangle, ArrowRight, CheckCircle2 } from 'lucide-react'
+import { Monitor, Check, X, AlertTriangle, CheckCircle2 } from 'lucide-react'
 
 interface Task {
   text: string
@@ -193,27 +193,31 @@ function WidgetContent() {
     } catch { /* cross-origin guard */ }
   }
 
-  /* ── タスク完了 ───────────────────────────────────────────── */
-  async function taskComplete() {
-    // 録画未開始なら警告を表示して処理を止める
+  const isLastTask = currentTaskIndex + 1 >= tasks.length
+  const pendingOutcomeRef = useRef<'completed' | 'gave_up'>('completed')
+
+  /* ── タスク結果を記録して次へ（達成 / 断念）。最後なら録画を止めて質問へ ── */
+  async function handleOutcome(outcome: 'completed' | 'gave_up') {
+    if (!isLastTask) {
+      // 途中のタスク: 結果だけ送って次へ（録画は継続）
+      channelRef.current?.postMessage({ type: 'task_outcome', outcome })
+      setCurrentTaskIndex((i) => Math.min(i + 1, tasks.length - 1))
+      return
+    }
+    // 最後のタスク: 録画必須（未開始なら警告）
     if (!isScreenRecording && screenChunksRef.current.length === 0) {
+      pendingOutcomeRef.current = outcome
       setWarnNoRecord(true)
       return
     }
+    await finalize(outcome)
+  }
+
+  async function finalize(outcome: 'completed' | 'gave_up') {
     setWarnNoRecord(false)
     focusInterviewPage()            // ① フォーカス（ユーザージェスチャー文脈）
     await stopAndSendRecording()    // ② 録画停止 & blob 送信
-    channelRef.current?.postMessage({ type: 'task_complete' })
-    setDoneMessage('インタビューページに戻ります...')
-    setWidgetPhase('done')
-  }
-
-  /* ── 録画なしで強制的にタスク完了（警告を経由） ──────────── */
-  async function forceTaskComplete() {
-    setWarnNoRecord(false)
-    focusInterviewPage()
-    await stopAndSendRecording()
-    channelRef.current?.postMessage({ type: 'task_complete' })
+    channelRef.current?.postMessage({ type: 'task_outcome', outcome })
     setDoneMessage('インタビューページに戻ります...')
     setWidgetPhase('done')
   }
@@ -321,7 +325,7 @@ function WidgetContent() {
                 録画してから完了
               </button>
               <button
-                onClick={forceTaskComplete}
+                onClick={() => finalize(pendingOutcomeRef.current)}
                 className="flex-1 bg-white border border-amber-300 hover:border-amber-500 text-amber-800 py-1.5 rounded-md text-xs transition-colors"
               >
                 このまま完了
@@ -330,16 +334,22 @@ function WidgetContent() {
           </div>
         )}
 
-        {/* タスク完了 */}
-        <button
-          onClick={taskComplete}
-          className="w-full inline-flex items-center justify-center gap-1.5 bg-gray-900 hover:bg-gray-800 active:bg-black text-white py-2.5 rounded-lg text-sm font-semibold transition-colors"
-        >
-          <Check className="w-4 h-4" strokeWidth={2.5} />
-          タスク完了
-          <ArrowRight className="w-3.5 h-3.5" strokeWidth={2} />
-          質問へ
-        </button>
+        {/* タスク結果: 達成 / できなかった */}
+        <div className="flex gap-2">
+          <button
+            onClick={() => handleOutcome('completed')}
+            className="flex-1 inline-flex items-center justify-center gap-1.5 bg-gray-900 hover:bg-gray-800 active:bg-black text-white py-2.5 rounded-lg text-sm font-semibold transition-colors"
+          >
+            <Check className="w-4 h-4" strokeWidth={2.5} />
+            達成して{isLastTask ? '質問へ' : '次へ'}
+          </button>
+          <button
+            onClick={() => handleOutcome('gave_up')}
+            className="flex-1 inline-flex items-center justify-center gap-1.5 bg-white border border-gray-300 hover:border-gray-400 text-gray-700 hover:text-gray-900 py-2.5 rounded-lg text-sm font-medium transition-colors"
+          >
+            できなかった
+          </button>
+        </div>
 
         {/* セッション終了 */}
         <button
