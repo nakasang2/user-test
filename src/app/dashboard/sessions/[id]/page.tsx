@@ -57,6 +57,7 @@ export default function SessionDetail(props: { params: Promise<{ id: string }> }
   const [session, setSession] = useState<Session | null>(null)
   const [processing, setProcessing] = useState(false)
   const [transcribing, setTranscribing] = useState(false)
+  const [loadError, setLoadError] = useState(false)
   const videoRef = useRef<HTMLVideoElement>(null)
   const [videoCurrentTime, setVideoCurrentTime] = useState(0)
   const [localVideoUrl, setLocalVideoUrl] = useState<string | null>(null)
@@ -87,9 +88,16 @@ export default function SessionDetail(props: { params: Promise<{ id: string }> }
   }
 
   useEffect(() => {
+    let cancelled = false
     fetch(`/api/sessions/${id}`)
-      .then((r) => r.json())
-      .then(setSession)
+      .then((r) => {
+        if (r.status === 401) { window.location.href = '/login'; return null }
+        if (!r.ok) throw new Error('failed')
+        return r.json()
+      })
+      .then((d) => { if (!cancelled && d) setSession(d) })
+      .catch(() => { if (!cancelled) setLoadError(true) })
+    return () => { cancelled = true }
   }, [id])
 
   // 録画は非公開 Blob のため、認可済みエンドポイント経由で短命の署名付き URL を取得する
@@ -176,8 +184,20 @@ export default function SessionDetail(props: { params: Promise<{ id: string }> }
 
   if (!session) {
     return (
-      <div className="min-h-screen bg-white flex items-center justify-center">
-        <div className="text-gray-500 text-sm">読み込み中...</div>
+      <div className="min-h-screen bg-white flex flex-col items-center justify-center gap-3">
+        {loadError ? (
+          <>
+            <div className="text-gray-700 text-sm">データの読み込みに失敗しました。</div>
+            <button
+              onClick={() => window.location.reload()}
+              className="border border-gray-300 hover:border-gray-400 text-gray-700 px-4 py-2 rounded-md text-sm transition-colors"
+            >
+              再試行
+            </button>
+          </>
+        ) : (
+          <div className="text-gray-500 text-sm">読み込み中...</div>
+        )}
       </div>
     )
   }

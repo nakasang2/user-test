@@ -78,15 +78,30 @@ export default function Dashboard() {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
   const [sortKey, setSortKey] = useState<SortKey>('date-desc')
 
+  const [loadError, setLoadError] = useState(false)
+
   useEffect(() => { fetchData() }, [])
 
   async function fetchData() {
-    const [iv, sv] = await Promise.all([
-      fetch('/api/interviews').then((r) => r.json()),
-      fetch('/api/sessions').then((r) => r.json()),
-    ])
-    setInterviews(iv)
-    setSessions(sv)
+    try {
+      const [ivRes, svRes] = await Promise.all([
+        fetch('/api/interviews'),
+        fetch('/api/sessions'),
+      ])
+      // 未認証ならログインへ
+      if (ivRes.status === 401 || svRes.status === 401) {
+        window.location.href = '/login'
+        return
+      }
+      if (!ivRes.ok || !svRes.ok) throw new Error('failed')
+      const iv = await ivRes.json()
+      const sv = await svRes.json()
+      setInterviews(Array.isArray(iv) ? iv : [])
+      setSessions(Array.isArray(sv) ? sv : [])
+      setLoadError(false)
+    } catch {
+      setLoadError(true)
+    }
   }
 
   function toggleCollapse(id: string) {
@@ -215,6 +230,17 @@ export default function Dashboard() {
       </nav>
 
       <div className="max-w-7xl mx-auto px-6 py-8">
+        {loadError && (
+          <div className="mb-6 flex items-center justify-between bg-red-50 border border-red-200 rounded-lg px-4 py-3">
+            <span className="text-sm text-red-700">データの読み込みに失敗しました。</span>
+            <button
+              onClick={() => fetchData()}
+              className="ml-4 flex-shrink-0 border border-red-300 hover:border-red-400 text-red-700 px-3 py-1.5 rounded-md text-xs font-medium transition-colors"
+            >
+              再試行
+            </button>
+          </div>
+        )}
         {/* サマリーカード */}
         <div className="grid grid-cols-3 gap-3 mb-8">
           <StatCard value={interviews.length} label="インタビューテンプレート" />

@@ -42,11 +42,19 @@ export default function InterviewComparePage(props: { params: Promise<{ id: stri
   const { id } = use(props.params)
   const [data, setData] = useState<CompareData | null>(null)
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(false)
 
   useEffect(() => {
+    let cancelled = false
     fetch(`/api/interviews/${id}/compare`)
-      .then((r) => r.json())
-      .then((d) => { setData(d); setLoading(false) })
+      .then((r) => {
+        if (r.status === 401) { window.location.href = '/login'; return null }
+        if (!r.ok) throw new Error('failed')
+        return r.json()
+      })
+      .then((d) => { if (!cancelled && d) { setData(d); setLoading(false) } })
+      .catch(() => { if (!cancelled) { setError(true); setLoading(false) } })
+    return () => { cancelled = true }
   }, [id])
 
   if (loading) {
@@ -56,7 +64,19 @@ export default function InterviewComparePage(props: { params: Promise<{ id: stri
       </div>
     )
   }
-  if (!data) return null
+  if (error || !data) {
+    return (
+      <div className="min-h-screen bg-white flex flex-col items-center justify-center gap-3">
+        <div className="text-gray-700 text-sm">データの読み込みに失敗しました。</div>
+        <button
+          onClick={() => window.location.reload()}
+          className="border border-gray-300 hover:border-gray-400 text-gray-700 px-4 py-2 rounded-md text-sm transition-colors"
+        >
+          再試行
+        </button>
+      </div>
+    )
+  }
 
   const { interview, sessions, commonInsights } = data
 

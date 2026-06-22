@@ -1,11 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import OpenAI from 'openai'
 import { LIMITS, clampText, wrapUntrusted, UNTRUSTED_DATA_GUARD } from '@/lib/llm-safety'
-
-// ビルド時のモジュール評価でエラーが出ないよう、呼び出し時に初期化する
-function getClient() {
-  return new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
-}
+import { getOpenAI } from '@/lib/openai'
 
 export interface InterviewerDecision {
   action: 'follow_up' | 'next_question' | 'wrap_up'
@@ -32,7 +27,7 @@ export async function POST(req: NextRequest) {
 
   const safeFollowUpCount = typeof followUpCount === 'number' ? followUpCount : 0
 
-  const response = await getClient().chat.completions.create({
+  const response = await getOpenAI().chat.completions.create({
     model: 'gpt-4o',
     max_tokens: 512,
     response_format: { type: 'json_object' },

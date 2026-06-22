@@ -1,11 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth, handleApiError } from '@/lib/api-auth'
 import { sanitizeMessages } from '@/lib/llm-safety'
-import OpenAI from 'openai'
-
-function getClient() {
-  return new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
-}
+import { getOpenAI } from '@/lib/openai'
 
 type Message = { role: 'user' | 'assistant'; content: string }
 
@@ -45,7 +41,7 @@ export async function POST(req: NextRequest) {
     const { action } = body as { action?: 'generate' }
     const messages: Message[] = sanitizeMessages(body.messages)
 
-    const client = getClient()
+    const client = getOpenAI()
 
     if (action === 'generate') {
       // 会話履歴からインタビュープロットを生成

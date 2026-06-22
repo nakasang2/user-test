@@ -1,16 +1,11 @@
-import OpenAI from 'openai'
+import { getOpenAI } from './openai'
 import { LIMITS, clampText, wrapUntrusted, UNTRUSTED_DATA_GUARD } from './llm-safety'
-
-// ビルド時のモジュール評価でキーエラーが出ないよう、呼び出し時に初期化する
-function getClient(): OpenAI {
-  return new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
-}
 
 export async function analyzeTranscript(
   transcript: string,
   questions: string[]
 ): Promise<{ summary: string; themes: string; sentiment: string }> {
-  const response = await getClient().chat.completions.create({
+  const response = await getOpenAI().chat.completions.create({
     model: 'gpt-4o',
     max_tokens: 2048,
     response_format: { type: 'json_object' },
@@ -55,7 +50,7 @@ export async function chatWithAgent(
   messages: Array<{ role: 'user' | 'assistant'; content: string }>,
   context: string
 ): Promise<string> {
-  const response = await getClient().chat.completions.create({
+  const response = await getOpenAI().chat.completions.create({
     model: 'gpt-4o',
     max_tokens: 1024,
     messages: [
@@ -80,7 +75,7 @@ export async function generateInterviewQuestions(
   topic: string,
   count: number = 5
 ): Promise<string[]> {
-  const response = await getClient().chat.completions.create({
+  const response = await getOpenAI().chat.completions.create({
     model: 'gpt-4o',
     max_tokens: 1024,
     messages: [
@@ -110,7 +105,7 @@ export async function generateCommonInsights(
   summaries: string
 ): Promise<string | null> {
   try {
-    const response = await getClient().chat.completions.create({
+    const response = await getOpenAI().chat.completions.create({
       model: 'gpt-4o',
       max_tokens: 1024,
       messages: [

@@ -1,9 +1,5 @@
-import OpenAI, { toFile } from 'openai'
-
-// ビルド時のモジュール評価でキーエラーが出ないよう、呼び出し時に初期化する
-function getClient(): OpenAI {
-  return new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
-}
+import { toFile } from 'openai'
+import { getOpenAI } from './openai'
 
 export interface TranscriptSegment {
   speaker: string
@@ -29,7 +25,7 @@ export async function transcribeFromUrl(audioUrl: string): Promise<{
   const buffer = Buffer.from(await response.arrayBuffer())
   const file = await toFile(buffer, 'recording.webm', { type: 'video/webm' })
 
-  const transcription = await getClient().audio.transcriptions.create({
+  const transcription = await getOpenAI().audio.transcriptions.create({
     file,
     model: 'whisper-1',
     response_format: 'verbose_json',
