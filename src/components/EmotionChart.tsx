@@ -13,7 +13,7 @@ import {
   Bar,
   ReferenceLine,
 } from 'recharts'
-import { LineChart as LineChartIcon } from 'lucide-react'
+import { LineChart as LineChartIcon, Info } from 'lucide-react'
 
 interface EmotionResult {
   timestamp: number
@@ -104,6 +104,16 @@ export default function EmotionChart({ emotions, currentTime, onSeek }: Props) {
 
   return (
     <div className="space-y-6">
+      {/* 補助指標であることの注記（表情推定の限界を明示） */}
+      <div className="flex items-start gap-2 text-xs text-gray-500 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2.5 leading-relaxed">
+        <Info className="w-3.5 h-3.5 mt-0.5 flex-shrink-0 text-gray-400" strokeWidth={2} />
+        <span>
+          以下は<strong className="text-gray-700 font-medium">カメラ映像の表情から推定したエンゲージメント指標</strong>です。
+          実際の感情とは異なる場合があり、照明・角度・個人差の影響を受けます。意思決定の補助的な参考としてご利用ください
+          （検出 {emotions.length} 件 / 約5秒間隔・顔未検出時はスキップ）。
+        </span>
+      </div>
+
       <div className="grid grid-cols-4 gap-3">
         {avgEmotions
           .sort((a, b) => b.value - a.value)
@@ -119,7 +129,7 @@ export default function EmotionChart({ emotions, currentTime, onSeek }: Props) {
       </div>
 
       <div className="bg-white border border-gray-200 rounded-lg p-4">
-        <div className="text-xs font-medium uppercase tracking-wide text-gray-500 mb-1">主要感情</div>
+        <div className="text-xs font-medium uppercase tracking-wide text-gray-500 mb-1">最も多く検出された表情</div>
         <div className="font-semibold tracking-tight" style={{ color: dominant.color }}>
           {dominant.emotion} ({dominant.value}%)
         </div>
@@ -127,7 +137,7 @@ export default function EmotionChart({ emotions, currentTime, onSeek }: Props) {
 
       <div className="bg-white border border-gray-200 rounded-lg p-6">
         <div className="flex items-center justify-between mb-4">
-          <h3 className="text-sm font-semibold tracking-tight text-gray-900">感情の推移（時系列）</h3>
+          <h3 className="text-sm font-semibold tracking-tight text-gray-900">表情推定値の推移（参考・時系列）</h3>
           {onSeek && (
             <span className="text-[10px] text-gray-500">
               グラフをクリックすると動画がその時刻にジャンプします
@@ -179,7 +189,7 @@ export default function EmotionChart({ emotions, currentTime, onSeek }: Props) {
       </div>
 
       <div className="bg-white border border-gray-200 rounded-lg p-6">
-        <h3 className="text-sm font-semibold tracking-tight text-gray-900 mb-4">感情の平均分布</h3>
+        <h3 className="text-sm font-semibold tracking-tight text-gray-900 mb-4">表情推定値の平均分布（参考）</h3>
         <ResponsiveContainer width="100%" height={200}>
           <BarChart data={avgEmotions} layout="vertical" margin={{ left: 20, right: 20 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />

@@ -93,7 +93,7 @@ export default function SessionDetail(props: { params: Promise<{ id: string }> }
 
   // 録画は非公開 Blob のため、認可済みエンドポイント経由で短命の署名付き URL を取得する
   useEffect(() => {
-    if (!session?.recordingUrl) { setSignedVideoUrl(null); return }
+    if (!session?.recordingUrl) return
     let cancelled = false
     fetch(`/api/sessions/${id}/recording`)
       .then((r) => (r.ok ? r.json() : null))
@@ -266,9 +266,9 @@ export default function SessionDetail(props: { params: Promise<{ id: string }> }
             />
           </div>
 
-          {/* 右: 感情分析 + 動画 */}
+          {/* 右: 表情エンゲージメント指標 + 動画 */}
           <div>
-            <SectionLabel>感情分析</SectionLabel>
+            <SectionLabel>表情エンゲージメント指標（参考）</SectionLabel>
 
             {/* 動画プレーヤー or ファイルピッカー */}
             {videoSrc ? (

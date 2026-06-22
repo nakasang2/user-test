@@ -1,6 +1,6 @@
 # UserVoice — ユーザーインタビュー自動化ツール
 
-インタビュアー不在でユーザーインタビューを自動実施。AI が進行・感情分析・文字起こし・分析まで一気通貫で行います。
+インタビュアー不在でユーザーインタビューを自動実施。AI が進行・表情エンゲージメント計測・文字起こし・分析まで一気通貫で行います。
 
 ---
 
@@ -11,8 +11,8 @@
 | 🎥 ビデオ会議 | URL を共有するだけで被験者がブラウザから参加 |
 | 🤖 AI インタビュアー | 設定した質問を Web Speech API (TTS) で自動読み上げ・進行 |
 | 🎙️ 音声認識 | ブラウザの Speech Recognition API でリアルタイム文字起こし |
-| 😊 表情・感情分析 | カメラ映像からリアルタイムで感情データを収集（5秒間隔） |
-| 📝 AI サマリー | Claude がインタビュー全体を要約・テーマ抽出 |
+| 😊 表情エンゲージメント指標 | カメラ映像の表情から参考指標を収集（5秒間隔・補助シグナル） |
+| 📝 AI サマリー | OpenAI gpt-4o がインタビュー全体を要約・テーマ抽出 |
 | 📊 ダッシュボード | 被験者ごとの文字起こし・感情グラフを一覧表示 |
 | 💬 AI エージェント | 「誰が最も困惑していた？」などを自然言語で質問・回答 |
 
@@ -22,11 +22,12 @@
 
 - **フレームワーク**: Next.js 16 (App Router, Turbopack)
 - **言語**: TypeScript
-- **DB**: SQLite (Prisma ORM) → 本番では PostgreSQL を推奨
+- **DB**: PostgreSQL (Prisma ORM)
 - **ビデオ**: [Daily.co](https://daily.co) REST API（オプション）
-- **AI 文字起こし**: OpenAI Whisper API（録音ファイルがある場合）
-- **AI 分析**: Anthropic Claude API (`claude-sonnet-4-6`)
-- **感情分析**: ブラウザ内でシミュレーション（本番は AWS Rekognition / Azure Face API へ差し替え可）
+- **文字起こし**: ブラウザの Speech Recognition API（ライブ）。OpenAI Whisper API は録音ファイル用のユーティリティとして同梱（現状の処理フローでは未使用）
+- **AI 分析・要約・Q&A**: OpenAI gpt-4o
+- **音声合成 (TTS)**: OpenAI tts-1
+- **表情エンゲージメント指標**: ブラウザ内 face-api（`@vladmandic/face-api`）による表情推定。実際の感情とは異なる場合がある補助シグナルであり、断定的な感情判定には用いない
 - **グラフ**: Recharts
 - **スタイル**: Tailwind CSS v4
 
@@ -45,11 +46,11 @@ cp .env.example .env
 `.env` に API キーを設定：
 
 ```env
-# 絶対パスで指定すること（Turbopack のワークスペース検出対策）
-DATABASE_URL="file:///absolute/path/to/user-interview-tool/prisma/dev.db"
-DAILY_API_KEY="your_daily_co_api_key"       # オプション（未設定でも動作）
-ANTHROPIC_API_KEY="your_anthropic_api_key"   # AI 分析・Q&A に必要
-OPENAI_API_KEY="your_openai_api_key"         # Whisper 文字起こしに必要
+DATABASE_URL="postgresql://user:password@host:5432/dbname"
+JWT_SECRET="your_long_random_secret"         # 認証トークンの署名に必要
+OPENAI_API_KEY="your_openai_api_key"         # AI 分析・要約・Q&A・TTS に必要
+DAILY_API_KEY="your_daily_co_api_key"        # オプション（未設定でも動作）
+BLOB_READ_WRITE_TOKEN="your_vercel_blob_token" # 録画の非公開保存・署名URL配信に必要
 NEXT_PUBLIC_APP_URL="http://localhost:3000"
 ```
 
@@ -102,7 +103,7 @@ http://localhost:3000 にアクセス。
 ダッシュボード → セッションをクリック：
 
 - **文字起こしタブ**: AI サマリー・テーマ・会話ログ
-- **感情分析タブ**: 時系列グラフ・平均感情分布
+- **表情エンゲージメント指標タブ**: 時系列グラフ・平均分布（参考・補助シグナル）
 - **AI に質問タブ**: チャットで分析（「主な不満点は？」等）
 
 ---
@@ -132,8 +133,12 @@ src/
 └── lib/
     ├── db.ts                            # Prisma クライアント（シングルトン）
     ├── daily.ts                         # Daily.co REST API ラッパー
-    ├── anthropic.ts                     # Claude API（分析・Q&A・質問生成）
-    └── whisper.ts                       # OpenAI Whisper（録音ファイル文字起こし）
+    ├── ai.ts                            # OpenAI gpt-4o（分析・要約・Q&A・質問生成）
+    ├── anthropic.ts                     # 互換シム（ai.ts を再エクスポート。新規利用は ai.ts を直接 import）
+    ├── llm-safety.ts                    # プロンプトインジェクション対策（入力長制限・デリミタ）
+    ├── blob.ts                          # 録画 Blob の署名付き URL 発行
+    ├── api-auth.ts                      # 認証・認可（requireAuth / requireRole / participantToken）
+    └── whisper.ts                       # OpenAI Whisper（録音ファイル文字起こし・現状未配線）
 ```
 
 ---
@@ -150,44 +155,41 @@ src/
 | POST | `/api/sessions` | セッション作成・URL 発行 |
 | GET | `/api/sessions/[id]` | セッション詳細（文字起こし・感情含む） |
 | PATCH | `/api/sessions/[id]` | ステータス更新（`status`, `recordingId`, `recordingUrl`） |
-| POST | `/api/sessions/[id]/process` | 文字起こし・感情データ保存・AI 分析実行 |
-| POST | `/api/emotions` | 感情データ保存（インタビュー中に自動呼び出し） |
-| POST | `/api/agent` | AI エージェントへの質問 |
+| GET | `/api/sessions/[id]/recording` | 録画の署名付き URL を発行（認証＋組織所有権） |
+| POST | `/api/sessions/[id]/process` | 文字起こし・指標保存・AI 分析実行（participantToken or 認証） |
+| POST | `/api/emotions` | 表情指標データ保存（participantToken・インタビュー中に呼び出し） |
+| POST | `/api/agent` | AI エージェントへの質問（認証＋組織所有権） |
+| DELETE | `/api/participants/[id]` | 被験者データの削除（DSR 対応・admin 権限） |
+
+> 認可方針: ダッシュボード系 API は認証（`requireAuth`）＋組織所有権を要求。被験者フロー（未認証）はセッション作成時に発行する `participantToken` で自分のセッションに限定。
 
 ---
 
 ## 本番環境への展開
 
 ### データベース
-SQLite → PostgreSQL へ変更：
+本番・開発ともに PostgreSQL を使用します（`prisma/schema.prisma` の `provider = "postgresql"`）。
+スキーマ変更は `prisma migrate deploy` での運用を推奨（現状 build は `prisma db push`）。
 
-```prisma
-// prisma/schema.prisma
-datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
-}
-```
+> ⚠️ `Session.participantToken` 追加など最近のスキーマ変更を反映するため、デプロイ時にマイグレーションが必要です。
 
-### ビデオ録画（Daily.co）
-`DAILY_API_KEY` を設定すると：
-- クラウド録画が自動で有効化
-- 録画完了後に `/api/sessions/[id]/process` を Webhook で呼び出し、Whisper で文字起こし
+### ビデオ録画（Daily.co / Vercel Blob）
+- `DAILY_API_KEY` を設定するとクラウド録画が有効化されます。
+- 録画は Vercel Blob に**非公開（private）**で保存し、ダッシュボードからは短命の署名付き URL 経由でのみ再生します（`BLOB_READ_WRITE_TOKEN` が必要）。
 
-### 感情分析の精度向上
-`InterviewRoom.tsx` の `simulateEmotionDetection()` を以下に差し替え：
-- **AWS Rekognition**: `DetectFaces` API でフレームごとに解析
-- **Azure Face API**: `Face - Detect` API
-- **face-api.js**: ブラウザ内 ML（サーバー不要・プライバシー重視の場合）
+### 表情エンゲージメント指標
+ブラウザ内 face-api（`@vladmandic/face-api`）で表情を推定します。実際の感情とは異なる場合がある補助シグナルであり、
+より高精度・サーバー側解析が必要な場合は AWS Rekognition / Azure Face API への差し替えを検討してください。
 
 ---
 
 ## 既知の制限・今後の課題
 
 - [ ] Google Meet 連携（現状は独自 URL のみ）
-- [ ] 感情分析は現状シミュレーション → 本番 API への差し替えが必要
-- [ ] Whisper 文字起こしは Daily.co の録音ファイルダウンロード後に動作
+- [ ] 表情エンゲージメント指標は表情推定ベースの補助シグナル（科学的に断定的な感情判定ではない）
+- [ ] ライブ文字起こしはブラウザ Speech Recognition 依存（Chrome/Edge 中心）。録画ベースの Whisper パイプラインは未配線
 - [ ] 話者識別は「Interviewer / Participant」の2者固定（diarization 未実装）
-- [ ] 認証・アクセス制御なし（本番前に要追加）
+- [ ] AI エンドポイントのレート制限は未実装（インジェクション対策・入力長制限は実装済み）
+- [ ] 録画のサーバー自動保存は未配線（現状は被験者のローカルダウンロード運用）
 - [ ] Next.js 16 + Turbopack は開発マシンへの負荷が高い場合あり  
   → `next dev --webpack` で Webpack モードに切り替え可

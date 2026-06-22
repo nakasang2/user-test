@@ -98,6 +98,9 @@ export default function InterviewRoom({
   const [isSpeaking, setIsSpeaking] = useState(false)
   const [liveText, setLiveText] = useState('')
   const [cameraError, setCameraError] = useState(false)
+  // 一時的な通知（TTS 失敗・通信エラーなど。被験者に状況を伝える）
+  const [notice, setNotice] = useState<string | null>(null)
+  const noticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [aiThinking, setAiThinking] = useState(false)
   const [ratingValue, setRatingValue] = useState<number | null>(null) // Feature 5: 評価質問用
   const [textInput, setTextInput] = useState('')
@@ -131,6 +134,29 @@ export default function InterviewRoom({
     if (typeof window !== 'undefined') {
       const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition // eslint-disable-line @typescript-eslint/no-explicit-any
       setSpeechSupported(!!SR)
+    }
+  }, [])
+
+  // ── 一時通知トースト ──────────────────────────────────
+  const showNotice = useCallback((msg: string) => {
+    if (noticeTimerRef.current) clearTimeout(noticeTimerRef.current)
+    setNotice(msg)
+    noticeTimerRef.current = setTimeout(() => setNotice(null), 6000)
+  }, [])
+
+  // ── カメラ初期化（マウント時・再試行時に呼ぶ）────────
+  const initCamera = useCallback(async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+      streamRef.current = stream
+      setCameraError(false)
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream
+        // ビデオが再生可能になったら感情検出を開始できる状態にする
+        videoRef.current.addEventListener('loadeddata', () => setCameraReady(true), { once: true })
+      }
+    } catch {
+      setCameraError(true)
     }
   }, [])
 
@@ -186,31 +212,22 @@ export default function InterviewRoom({
         }
         audio.play().catch(() => {
           setIsSpeaking(false)
+          showNotice('音声の再生に失敗しました。画面の質問テキストをご覧ください。')
           if (version === speakVersionRef.current) onEnd?.()
         })
       })
       .catch(() => {
         if (version !== speakVersionRef.current) return
         setIsSpeaking(false)
+        showNotice('音声の再生に失敗しました。画面の質問テキストをご覧ください。')
         onEnd?.() // TTS 失敗時もインタビューは続行
       })
-  }, [])
+  }, [showNotice])
 
   // ── カメラ初期化 ─────────────────────────────────────
   useEffect(() => {
-    async function initCamera() {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true })
-        streamRef.current = stream
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream
-          // ビデオが再生可能になったら感情検出を開始できる状態にする
-          videoRef.current.addEventListener('loadeddata', () => setCameraReady(true), { once: true })
-        }
-      } catch {
-        setCameraError(true)
-      }
-    }
+    // initCamera() 内の setState は await 後に実行されるため同期 setState ではない
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     initCamera()
     return () => {
       streamRef.current?.getTracks().forEach((t) => t.stop())
@@ -229,6 +246,7 @@ export default function InterviewRoom({
       // service モード BroadcastChannel cleanup
       widgetChannelRef.current?.close()
       widgetChannelRef.current = null
+      if (noticeTimerRef.current) clearTimeout(noticeTimerRef.current)
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -282,7 +300,7 @@ export default function InterviewRoom({
     let finalText = ''
     const startTime = (Date.now() - startTimeRef.current) / 1000
 
-    // 沈黙タイムアウト開始（30秒）
+    // 沈黙タイムアウト開始（60秒）— 考える時間・沈黙して内省する時間を確保する
     if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current)
     silenceTimerRef.current = setTimeout(() => {
       recognition.stop()
@@ -298,7 +316,7 @@ export default function InterviewRoom({
           onAnswer('')
         })
       }
-    }, 30000)
+    }, 60000)
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     recognition.onresult = (event: any) => {
@@ -396,6 +414,7 @@ export default function InterviewRoom({
     } catch {
       setAiThinking(false)
       setPhase('interview')
+      showNotice('通信エラーのため、次の質問に進みます。')
       moveToNextPlannedQuestion()
     }
   }
@@ -776,6 +795,13 @@ export default function InterviewRoom({
 
   return (
     <div className="h-screen bg-white text-gray-900 flex flex-col overflow-hidden">
+      {/* 一時通知トースト（TTS 失敗・通信エラーなど） */}
+      {notice && (
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 bg-gray-900 text-white text-sm px-4 py-2.5 rounded-lg shadow-lg max-w-md">
+          <AlertCircle className="w-4 h-4 flex-shrink-0" strokeWidth={2} />
+          <span>{notice}</span>
+        </div>
+      )}
       {/* ヘッダー */}
       <div className="border-b border-gray-200 px-6 py-3 flex items-center justify-between flex-shrink-0">
         <div className="flex items-center gap-2.5">
@@ -797,8 +823,19 @@ export default function InterviewRoom({
 
           {/* カメラ映像：左カラム全体を覆う */}
           {cameraError ? (
-            <div className="absolute inset-0 flex items-center justify-center bg-gray-100">
-              <span className="text-gray-500 text-sm">カメラが利用できません</span>
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-gray-100 px-6 text-center">
+              <AlertCircle className="w-6 h-6 text-gray-400" strokeWidth={1.75} />
+              <p className="text-gray-700 text-sm font-medium">カメラ・マイクが利用できません</p>
+              <p className="text-gray-500 text-xs leading-relaxed max-w-xs">
+                ブラウザのアドレスバーのカメラアイコンから「許可」を選択し、再試行してください。
+                他のアプリがカメラを使用している場合は終了してください。
+              </p>
+              <button
+                onClick={() => initCamera()}
+                className="mt-1 inline-flex items-center gap-1.5 bg-gray-900 hover:bg-gray-800 text-white px-4 py-2 rounded-md text-sm font-medium transition-colors"
+              >
+                カメラを許可して再試行
+              </button>
             </div>
           ) : (
             <video
