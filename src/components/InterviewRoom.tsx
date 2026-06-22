@@ -88,8 +88,17 @@ export default function InterviewRoom({
   useEffect(() => {
     if (lastEmotion) {
       setEmotionHistory((prev) => [...prev, lastEmotion].slice(-30))
+      // 途中離脱でも残るよう、感情スナップショットを逐次サーバー保存（失敗は無視）。
+      // 最終的には submitResults→/process が全件で上書きする。
+      if (participantToken) {
+        fetch('/api/emotions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-participant-token': participantToken },
+          body: JSON.stringify({ sessionId, ...lastEmotion }),
+        }).catch(() => {})
+      }
     }
-  }, [lastEmotion])
+  }, [lastEmotion, sessionId, participantToken])
 
   const [phase, setPhase] = useState<Phase>('guide') // Feature 6: 初期フェーズを guide に
   const [displayedQuestion, setDisplayedQuestion] = useState('')
@@ -257,6 +266,20 @@ export default function InterviewRoom({
   // 感情検出はインタビュー開始時に startInterview() 内で起動する。
   // こうすることで録画の t=0 と感情タイムスタンプの t=0 が一致する。
 
+  // ── 進行中の文字起こしを逐次サーバー保存（途中離脱でも残す保険。AI 分析はしない）──
+  function saveProgress() {
+    if (!participantToken) return
+    const fullText = transcriptRef.current.map((t) => `[${t.speaker}]: ${t.text}`).join('\n')
+    const segments = transcriptRef.current.map((t) => ({
+      speaker: t.speaker, text: t.text, start: t.start, end: t.end ?? t.start,
+    }))
+    fetch(`/api/sessions/${sessionId}/progress`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-participant-token': participantToken },
+      body: JSON.stringify({ transcript: fullText, segments }),
+    }).catch(() => {})
+  }
+
   // ── テキスト入力で回答を送信 ──────────────────────────
   function submitTextAnswer() {
     const text = textInput.trim()
@@ -278,6 +301,7 @@ export default function InterviewRoom({
     conversationBufferRef.current += `\n参加者: ${text}`
 
     setTextInput('')
+    saveProgress()
     const callback = onAnswerCallbackRef.current
     onAnswerCallbackRef.current = null
     callback(text)
@@ -351,6 +375,7 @@ export default function InterviewRoom({
         transcriptRef.current = [...transcriptRef.current, entry]
         setTranscript([...transcriptRef.current])
         conversationBufferRef.current += `\n参加者: ${finalText.trim()}`
+        saveProgress()
         onAnswer(finalText.trim())
       }
     }
@@ -373,6 +398,7 @@ export default function InterviewRoom({
     setTranscript([...transcriptRef.current])
     conversationBufferRef.current += `\n参加者: ${answerText}`
     setRatingValue(null)
+    saveProgress()
 
     // 評価質問は AI 深掘りなし → 次へ
     if (q.type === 'nps' || q.type === 'rating') {

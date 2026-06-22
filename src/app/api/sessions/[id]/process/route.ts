@@ -57,28 +57,23 @@ export async function POST(req: NextRequest, props: { params: Promise<{ id: stri
     summary = '分析に失敗しました。'
   }
 
+  // インクリメンタル保存で既にトランスクリプトが存在し得るため、upsert 後に
+  // セグメントを常に「全置換」して最終結果（sentiment 付き）を確実に反映する。
   const transcript = await prisma.transcript.upsert({
     where: { sessionId: id },
-    create: {
-      sessionId: id,
-      fullText: transcriptText,
-      summary,
-      themes,
-      segments: {
-        create: segments.map((seg: { speaker: string; text: string; start: number; end: number; sentiment?: string }) => ({
-          speaker: seg.speaker,
-          text: seg.text,
-          startTime: seg.start,
-          endTime: seg.end,
-          sentiment: seg.sentiment ?? sentiment,
-        })),
-      },
-    },
-    update: {
-      fullText: transcriptText,
-      summary,
-      themes,
-    },
+    create: { sessionId: id, fullText: transcriptText, summary, themes },
+    update: { fullText: transcriptText, summary, themes },
+  })
+  await prisma.transcriptSegment.deleteMany({ where: { transcriptId: transcript.id } })
+  await prisma.transcriptSegment.createMany({
+    data: (segments as { speaker: string; text: string; start: number; end: number; sentiment?: string }[]).map((seg) => ({
+      transcriptId: transcript.id,
+      speaker: seg.speaker,
+      text: seg.text,
+      startTime: seg.start,
+      endTime: seg.end,
+      sentiment: seg.sentiment ?? sentiment,
+    })),
   })
 
   if (emotionData && emotionData.length > 0) {

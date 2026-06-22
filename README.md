@@ -78,6 +78,20 @@ npm run dev
 
 http://localhost:3000 にアクセス。
 
+### 5. データ捕捉の結合テスト（任意）
+
+被験者フロー（逐次保存 `progress` / 感情 `emotions` / 最終保存 `process`）でデータが確実に
+永続化され、`participantToken` の認可が効いていることを検証します。dev サーバー起動中に別シェルで:
+
+```bash
+npm run test:data
+# プレビュー環境に対して実行する場合:
+# BASE_URL=https://your-preview.vercel.app npm run test:data
+```
+
+PostgreSQL（サーバーと同じ DB）と最新スキーマ（`prisma db push` 済み）が前提です。
+OPENAI_API_KEY 未設定でも実行可（AI 要約は失敗扱いでも文字起こし・感情は保存されます）。
+
 ---
 
 ## 使い方

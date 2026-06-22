@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "prisma db push && next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test:data": "node scripts/test-data-capture.mjs"
   },
   "dependencies": {
     "@daily-co/daily-js": "^0.90.0",
