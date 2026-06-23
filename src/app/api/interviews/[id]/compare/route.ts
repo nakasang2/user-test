@@ -12,14 +12,14 @@ export async function GET(req: NextRequest, props: { params: Promise<{ id: strin
     where: { id, organizationId: orgId },
     include: {
       questions: { orderBy: { order: 'asc' } },
+      // 一覧表示のため全ステータスのセッションを返す（分析・レーダーは done のみで算出）
       sessions: {
-        where: { status: 'done' },
         include: {
           participant: true,
           transcript: { include: { segments: true } },
           emotions: true,
         },
-        orderBy: { createdAt: 'asc' },
+        orderBy: { createdAt: 'desc' },
       },
     },
   })
@@ -59,7 +59,7 @@ export async function GET(req: NextRequest, props: { params: Promise<{ id: strin
 
   // AI に共通インサイトを生成させる（done セッション数が変わらなければキャッシュを返す）
   const refresh = req.nextUrl.searchParams.get('refresh') === '1'
-  const doneCount = interview.sessions.length
+  const doneCount = sessionsWithStats.filter((s) => s.status === 'done' && s.summary).length
   let commonInsights: string | null = interview.commonInsights
   if (doneCount >= 2 && (refresh || interview.commonInsights === null || interview.insightsCount !== doneCount)) {
     const allSummaries = sessionsWithStats
