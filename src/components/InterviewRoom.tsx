@@ -137,6 +137,8 @@ export default function InterviewRoom({
   const stimulusProceededRef = useRef(false)  // 質問遷移の二重実行防止
   const screenMediaRecorderRef = useRef<MediaRecorder | null>(null)
   const screenRecordedChunksRef = useRef<Blob[]>([])
+  const screenDrawRafRef = useRef<number>(0)        // 合成描画ループの RAF
+  const screenBlobRef = useRef<Blob | null>(null)   // サービスモードで小窓から届く合成 Blob を保持
   const [screenRecordingDownloadUrl, setScreenRecordingDownloadUrl] = useState<string | null>(null)
 
   // フローティングウィジェット (service モード)
@@ -264,6 +266,7 @@ export default function InterviewRoom({
       widgetChannelRef.current?.close()
       widgetChannelRef.current = null
       if (noticeTimerRef.current) clearTimeout(noticeTimerRef.current)
+      cancelAnimationFrame(screenDrawRafRef.current)
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -614,8 +617,8 @@ export default function InterviewRoom({
         else if (e.data.type === 'screen_recording_blob') {
           const blob: Blob = e.data.blob
           if (blob.size > 0) {
-            const url = URL.createObjectURL(blob)
-            setScreenRecordingDownloadUrl(url)
+            screenBlobRef.current = blob
+            setScreenRecordingDownloadUrl(URL.createObjectURL(blob))
           }
         }
       }
@@ -751,14 +754,24 @@ export default function InterviewRoom({
   }
 
   async function submitResults() {
-    // 録画停止 → ローカル DL 用 URL（フォールバック）＋ サーバーへ自動アップロード
-    const recordingBlob = await stopMediaRecorder()
-    if (recordingBlob.size > 0) {
-      setRecordingDownloadUrl(URL.createObjectURL(recordingBlob))
-      // Vercel Blob クライアント直アップロードで関数の 4.5MB ボディ制限を回避し、非公開保存する。
-      // 認可は participantToken（clientPayload）でサーバー側が検証する。
+    const isUsability = interviewType === 'usability'
+    const faceBlob = await stopMediaRecorder()          // 顔＋音声
+    const screenComposite = await stopScreenRecorder()  // プロトタイプ: 画面＋顔＋音声の合成
+    // サービスモードは小窓から届いた合成 Blob を使う
+    const compositeBlob = screenComposite.size > 0 ? screenComposite : screenBlobRef.current
+
+    // ローカル DL 用 URL
+    if (!isUsability && faceBlob.size > 0) setRecordingDownloadUrl(URL.createObjectURL(faceBlob))
+    if (compositeBlob && compositeBlob.size > 0) setScreenRecordingDownloadUrl(URL.createObjectURL(compositeBlob))
+
+    // サーバー保存: ユーザビリティは「画面＋顔＋音声」の合成、それ以外は顔録画。
+    // Vercel Blob クライアント直アップロードで関数の 4.5MB ボディ制限を回避し、非公開保存する。
+    const uploadBlob = isUsability
+      ? (compositeBlob && compositeBlob.size > 0 ? compositeBlob : (faceBlob.size > 0 ? faceBlob : null))
+      : (faceBlob.size > 0 ? faceBlob : null)
+    if (uploadBlob) {
       try {
-        await upload(`recordings/${sessionId}.webm`, recordingBlob, {
+        await upload(`recordings/${sessionId}.webm`, uploadBlob, {
           access: 'private',
           contentType: 'video/webm',
           handleUploadUrl: `/api/sessions/${sessionId}/recording`,
@@ -768,13 +781,6 @@ export default function InterviewRoom({
         console.error('録画のアップロードに失敗しました（ローカル保存は可能）:', e)
         showNotice('録画のサーバー保存に失敗しました。完了画面からダウンロードして共有してください。')
       }
-    }
-
-    // 画面録画も保存
-    const screenBlob = await stopScreenRecorder()
-    if (screenBlob.size > 0) {
-      const screenUrl = URL.createObjectURL(screenBlob)
-      setScreenRecordingDownloadUrl(screenUrl)
     }
 
     await persistResults()
@@ -820,18 +826,56 @@ export default function InterviewRoom({
       if (usabilityMode === 'service' && screenVideoRef.current) {
         screenVideoRef.current.srcObject = stream
       }
-      // Record the screen stream
+
+      // 画面に顔(PiP)を重ね、マイク音声も載せて「画面＋顔＋音声」を1ファイルに合成する
+      const screenVid = document.createElement('video')
+      screenVid.srcObject = stream
+      screenVid.muted = true
+      await new Promise<void>((resolve) => {
+        screenVid.onloadedmetadata = () => screenVid.play().then(resolve).catch(() => resolve())
+      })
+
+      const W = Math.min(screenVid.videoWidth || 1280, 1920)
+      const H = Math.min(screenVid.videoHeight || 720, 1080)
+      const canvas = document.createElement('canvas')
+      canvas.width = W
+      canvas.height = H
+      const ctx = canvas.getContext('2d')!
+      const webcamVid = videoRef.current
+
+      const draw = () => {
+        ctx.drawImage(screenVid, 0, 0, W, H)
+        if (webcamVid && webcamVid.readyState >= 2 && webcamVid.videoWidth) {
+          const pipW = Math.round(W * 0.18)
+          const pipH = Math.round(pipW * (webcamVid.videoHeight / webcamVid.videoWidth))
+          const x = W - pipW - 16
+          const y = H - pipH - 16
+          ctx.drawImage(webcamVid, x, y, pipW, pipH)
+          ctx.strokeStyle = 'rgba(255,255,255,0.85)'
+          ctx.lineWidth = 2
+          ctx.strokeRect(x, y, pipW, pipH)
+        }
+        screenDrawRafRef.current = requestAnimationFrame(draw)
+      }
+      draw()
+
+      const canvasStream = canvas.captureStream(25)
+      // マイク音声（顔ストリームの音声トラック）を合成に追加
+      const micTrack = streamRef.current?.getAudioTracks?.()[0]
+      if (micTrack) canvasStream.addTrack(micTrack)
+
       screenRecordedChunksRef.current = []
-      const mimeType = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm'].find(
+      const mimeType = ['video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm'].find(
         (t) => MediaRecorder.isTypeSupported(t)
       ) ?? ''
-      const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : {})
+      const recorder = new MediaRecorder(canvasStream, mimeType ? { mimeType } : {})
       recorder.ondataavailable = (e) => { if (e.data.size > 0) screenRecordedChunksRef.current.push(e.data) }
       recorder.start(1000)
       screenMediaRecorderRef.current = recorder
       setScreenSharing(true)
       stream.getVideoTracks()[0].onended = () => {
         setScreenSharing(false)
+        cancelAnimationFrame(screenDrawRafRef.current)
         screenStreamRef.current = null
       }
     } catch {
@@ -842,6 +886,7 @@ export default function InterviewRoom({
   // ── 画面録画停止 → Blob を返す ────────────────────────
   function stopScreenRecorder(): Promise<Blob> {
     return new Promise((resolve) => {
+      cancelAnimationFrame(screenDrawRafRef.current)
       const recorder = screenMediaRecorderRef.current
       if (!recorder || recorder.state === 'inactive') {
         resolve(new Blob([], { type: 'video/webm' }))
@@ -1282,27 +1327,31 @@ export default function InterviewRoom({
                 )}
 
                 <div className="flex flex-col gap-2 items-center">
-                  {recordingDownloadUrl ? (
+                  {interviewType === 'usability' ? (
+                    // ユーザビリティ: 画面＋顔＋音声を合成した1ファイル
+                    screenRecordingDownloadUrl ? (
+                      <a
+                        href={screenRecordingDownloadUrl}
+                        download={`recording-${sessionId.slice(0, 8)}.webm`}
+                        className="inline-flex items-center gap-1.5 bg-gray-900 hover:bg-gray-800 text-white px-4 py-2 rounded-md text-sm font-medium transition-colors"
+                      >
+                        <Monitor className="w-3.5 h-3.5" strokeWidth={2} />
+                        録画（画面＋顔＋音声）をダウンロード
+                      </a>
+                    ) : (
+                      <p className="text-gray-500 text-xs">このページを閉じていただいて構いません。</p>
+                    )
+                  ) : recordingDownloadUrl ? (
                     <a
                       href={recordingDownloadUrl}
                       download={`interview-${sessionId.slice(0, 8)}.webm`}
                       className="inline-flex items-center gap-1.5 bg-gray-900 hover:bg-gray-800 text-white px-4 py-2 rounded-md text-sm font-medium transition-colors"
                     >
                       <Video className="w-3.5 h-3.5" strokeWidth={2} />
-                      顔録画をダウンロード
+                      録画をダウンロード
                     </a>
                   ) : (
                     <p className="text-gray-500 text-xs">このページを閉じていただいて構いません。</p>
-                  )}
-                  {screenRecordingDownloadUrl && (
-                    <a
-                      href={screenRecordingDownloadUrl}
-                      download={`screen-${sessionId.slice(0, 8)}.webm`}
-                      className="inline-flex items-center gap-1.5 border border-gray-300 hover:border-gray-400 text-gray-700 hover:text-gray-900 px-4 py-2 rounded-md text-sm font-medium transition-colors"
-                    >
-                      <Monitor className="w-3.5 h-3.5" strokeWidth={2} />
-                      操作録画（顔合成）をダウンロード
-                    </a>
                   )}
                 </div>
               </div>

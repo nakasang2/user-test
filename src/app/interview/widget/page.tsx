@@ -52,8 +52,8 @@ function WidgetContent() {
       }
     }
 
-    // ウェブカメラ（表示のみ、録音なし）
-    navigator.mediaDevices.getUserMedia({ video: true, audio: false })
+    // ウェブカメラ（表示＋音声。音声は合成録画に載せる）
+    navigator.mediaDevices.getUserMedia({ video: true, audio: true })
       .then((stream) => {
         webcamStreamRef.current = stream
         if (webcamVideoRef.current) {
@@ -133,7 +133,10 @@ function WidgetContent() {
 
       // Canvas ストリームを録画
       const canvasStream = canvas.captureStream(25)
-      const mimeType = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm']
+      // マイク音声（ウェブカメラ取得時の音声トラック）を合成に追加
+      const micTrack = webcamStreamRef.current?.getAudioTracks?.()[0]
+      if (micTrack) canvasStream.addTrack(micTrack)
+      const mimeType = ['video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm']
         .find((t) => MediaRecorder.isTypeSupported(t)) ?? ''
       const recorder = new MediaRecorder(canvasStream, mimeType ? { mimeType } : {})
       recorder.ondataavailable = (e) => { if (e.data.size > 0) screenChunksRef.current.push(e.data) }
