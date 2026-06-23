@@ -194,9 +194,15 @@ src/
 
 ### データベース
 本番・開発ともに PostgreSQL を使用します（`prisma/schema.prisma` の `provider = "postgresql"`）。
-スキーマ変更は `prisma migrate deploy` での運用を推奨（現状 build は `prisma db push`）。
 
-> ⚠️ `Session.participantToken` 追加など最近のスキーマ変更を反映するため、デプロイ時にマイグレーションが必要です。
+ビルド（`npm run build`）は **`prisma generate && next build`** で、**DB に接続しません**
+（ビルド時に `db push` を実行すると Supabase プーラで `P1017 Server has closed the connection` を起こすため）。
+
+> ⚠️ **スキーマを変更したら、デプロイ前に手動でスキーマ同期が必要です**：
+> ```bash
+> DATABASE_URL="<Session pooler 5432 の接続文字列>" npm run db:push
+> ```
+> （`Session pooler 5432` を使うこと。Transaction pooler 6543 は DDL に不向き。）
 
 ### ビデオ録画（Daily.co / Vercel Blob）
 - `DAILY_API_KEY` を設定するとクラウド録画が有効化されます。

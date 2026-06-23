@@ -4,7 +4,8 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "prisma db push && next build",
+    "build": "prisma generate && next build",
+    "db:push": "prisma db push",
     "start": "next start",
     "lint": "eslint",
     "test:data": "node --env-file-if-exists=.env scripts/test-data-capture.mjs"
