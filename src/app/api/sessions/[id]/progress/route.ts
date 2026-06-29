@@ -19,26 +19,35 @@ export async function POST(req: NextRequest, props: { params: Promise<{ id: stri
       return NextResponse.json({ error: 'transcript and segments are required' }, { status: 400 })
     }
 
+    // 既に最終処理(processing)・分析済み(done)・完了(completed)のセッションには触れない。
+    // 遅延した /progress が /process の最終結果を上書き／status を巻き戻すのを防ぐ。
+    const current = await prisma.session.findUnique({ where: { id }, select: { status: true } })
+    if (current && ['processing', 'done', 'completed'].includes(current.status)) {
+      return NextResponse.json({ ok: true, skipped: true })
+    }
+
     const transcript = await prisma.transcript.upsert({
       where: { sessionId: id },
       create: { sessionId: id, fullText: transcriptText },
       update: { fullText: transcriptText },
     })
 
-    // セグメントを全置換（AI 分析・sentiment は付与しない）
-    await prisma.transcriptSegment.deleteMany({ where: { transcriptId: transcript.id } })
-    await prisma.transcriptSegment.createMany({
-      data: (segments as { speaker: string; text: string; start: number; end: number }[]).map((seg) => ({
-        transcriptId: transcript.id,
-        speaker: seg.speaker,
-        text: seg.text,
-        startTime: seg.start,
-        endTime: seg.end ?? seg.start,
-      })),
-    })
+    // セグメントを原子的に全置換（AI 分析・sentiment は付与しない）
+    await prisma.$transaction([
+      prisma.transcriptSegment.deleteMany({ where: { transcriptId: transcript.id } }),
+      prisma.transcriptSegment.createMany({
+        data: (segments as { speaker: string; text: string; start: number; end: number }[]).map((seg) => ({
+          transcriptId: transcript.id,
+          speaker: seg.speaker,
+          text: seg.text,
+          startTime: seg.start,
+          endTime: seg.end ?? seg.start,
+        })),
+      }),
+    ])
 
-    // 進行中であることを記録（pending のままにしない）
-    await prisma.session.update({ where: { id }, data: { status: 'active' } }).catch(() => {})
+    // pending のときだけ active にする（done/completed を巻き戻さない）
+    await prisma.session.updateMany({ where: { id, status: 'pending' }, data: { status: 'active' } })
 
     return NextResponse.json({ ok: true })
   } catch (err) {

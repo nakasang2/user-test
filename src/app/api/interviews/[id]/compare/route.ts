@@ -8,28 +8,47 @@ export async function GET(req: NextRequest, props: { params: Promise<{ id: strin
   const { orgId } = await requireAuth()
   const { id } = await props.params
 
+  // 秘密フィールド（participantToken/shareToken/recordingUrl）と PII（participant.email）を
+  // 露出しないよう、必要なフィールドのみ select で取得する。
   const interview = await prisma.interview.findFirst({
     where: { id, organizationId: orgId },
-    include: {
-      questions: { orderBy: { order: 'asc' } },
+    select: {
+      id: true,
+      title: true,
+      description: true,
+      commonInsights: true,
+      insightsCount: true,
+      questions: { orderBy: { order: 'asc' }, select: { id: true, text: true, order: true, type: true } },
       // 一覧表示のため全ステータスのセッションを返す（分析・レーダーは done のみで算出）
       sessions: {
-        include: {
-          participant: true,
-          transcript: { include: { segments: true } },
-          emotions: true,
-        },
         orderBy: { createdAt: 'desc' },
+        select: {
+          id: true,
+          status: true,
+          createdAt: true,
+          participant: { select: { name: true } },
+          transcript: { select: { summary: true, themes: true, _count: { select: { segments: true } } } },
+          emotions: { select: { happy: true, neutral: true, sad: true, surprised: true } },
+        },
       },
     },
   })
 
   if (!interview) return NextResponse.json({ error: 'Not found' }, { status: 404 })
-  if (interview.sessions.length === 0) {
-    return NextResponse.json({ interview, sessions: [], commonInsights: null })
+
+  // クライアントへ返す interview は機密を含まない最小フィールドのみ
+  const safeInterview = {
+    id: interview.id,
+    title: interview.title,
+    description: interview.description,
+    questions: interview.questions,
   }
 
-  // 感情の平均を計算
+  if (interview.sessions.length === 0) {
+    return NextResponse.json({ interview: safeInterview, sessions: [], commonInsights: null })
+  }
+
+  // 感情の平均を計算（感情データがあるセッションのみ）
   const sessionsWithStats = interview.sessions.map((s) => {
     const avgEmotion = s.emotions.length > 0
       ? {
@@ -53,17 +72,17 @@ export async function GET(req: NextRequest, props: { params: Promise<{ id: strin
       themes: s.transcript?.themes ?? null,
       avgEmotion,
       dominantEmotion,
-      segmentCount: s.transcript?.segments.length ?? 0,
+      segmentCount: s.transcript?._count.segments ?? 0,
     }
   })
 
-  // AI に共通インサイトを生成させる（done セッション数が変わらなければキャッシュを返す）
+  // AI に共通インサイトを生成させる（分析済み=done のみが対象。done 件数が変わらなければキャッシュ）
   const refresh = req.nextUrl.searchParams.get('refresh') === '1'
-  const doneCount = sessionsWithStats.filter((s) => s.status === 'done' && s.summary).length
+  const doneStats = sessionsWithStats.filter((s) => s.status === 'done' && s.summary)
+  const doneCount = doneStats.length
   let commonInsights: string | null = interview.commonInsights
   if (doneCount >= 2 && (refresh || interview.commonInsights === null || interview.insightsCount !== doneCount)) {
-    const allSummaries = sessionsWithStats
-      .filter((s) => s.summary)
+    const allSummaries = doneStats
       .map((s, i) => `参加者${i + 1}（${s.participantName}）: ${s.summary}`)
       .join('\n')
 
@@ -77,7 +96,7 @@ export async function GET(req: NextRequest, props: { params: Promise<{ id: strin
     }
   }
 
-  return NextResponse.json({ interview, sessions: sessionsWithStats, commonInsights })
+  return NextResponse.json({ interview: safeInterview, sessions: sessionsWithStats, commonInsights })
   } catch (err) {
     return handleApiError(err)
   }

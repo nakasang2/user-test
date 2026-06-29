@@ -54,17 +54,26 @@ export async function POST(_req: NextRequest, props: { params: Promise<{ id: str
       update: { fullText, summary, themes },
     })
 
-    // 既存セグメントを Whisper の結果で置き換える
-    await prisma.transcriptSegment.deleteMany({ where: { transcriptId: transcript.id } })
-    await prisma.transcriptSegment.createMany({
-      data: segments.map((seg) => ({
-        transcriptId: transcript.id,
-        speaker: seg.speaker,
-        text: seg.text,
-        startTime: seg.start,
-        endTime: seg.end,
-      })),
-    })
+    // 既存セグメントを Whisper の結果で原子的に置き換える
+    await prisma.$transaction([
+      prisma.transcriptSegment.deleteMany({ where: { transcriptId: transcript.id } }),
+      prisma.transcriptSegment.createMany({
+        data: segments.map((seg) => ({
+          transcriptId: transcript.id,
+          speaker: seg.speaker,
+          text: seg.text,
+          startTime: seg.start,
+          endTime: seg.end,
+        })),
+      }),
+    ])
+
+    // process と挙動を揃える: 分析済みにし、比較インサイトのキャッシュを無効化
+    await prisma.session.update({ where: { id }, data: { status: 'done' } })
+    await prisma.interview.update({
+      where: { id: session.interview.id },
+      data: { commonInsights: null, insightsCount: null },
+    }).catch(() => {})
 
     return NextResponse.json({ ok: true })
   } catch (err) {

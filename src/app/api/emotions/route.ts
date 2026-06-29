@@ -18,6 +18,12 @@ export async function POST(req: NextRequest) {
     // 被験者フロー専用: 当該セッションの participantToken を要求する
     await requireParticipantToken(sessionId, req.headers.get('x-participant-token'))
 
+    // 最終処理後（process が感情を全置換した後）の遅延書き込みは弾く
+    const current = await prisma.session.findUnique({ where: { id: sessionId }, select: { status: true } })
+    if (current && ['processing', 'done', 'completed'].includes(current.status)) {
+      return NextResponse.json({ ok: true, skipped: true }, { status: 202 })
+    }
+
     const emotion = await prisma.emotionResult.create({
       data: {
         sessionId,

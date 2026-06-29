@@ -17,7 +17,10 @@ export async function GET(_req: NextRequest, props: { params: Promise<{ id: stri
       },
     })
     if (!session) return NextResponse.json({ error: 'Not found' }, { status: 404 })
-    return NextResponse.json(session)
+    // 被験者フローの書き込み資格情報・共有トークンはダッシュボードに返さない
+    const { participantToken: _pt, shareToken: _st, ...safe } = session
+    void _pt; void _st
+    return NextResponse.json(safe)
   } catch (err) {
     return handleApiError(err)
   }

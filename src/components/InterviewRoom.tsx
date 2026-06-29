@@ -131,10 +131,16 @@ export default function InterviewRoom({
   const [screenSharing, setScreenSharing] = useState(false)
   const [screenShareError, setScreenShareError] = useState<string | null>(null)
   const [currentTaskIndex, setCurrentTaskIndex] = useState(0)
+  // BroadcastChannel の onmessage は startInterview 時のクロージャを保持するため、
+  // 最新のタスク番号は ref で参照する（state だけだと陳腐化して複数タスクで進めない）
+  const currentTaskIndexRef = useRef(0)
+  function gotoTask(idx: number) { currentTaskIndexRef.current = idx; setCurrentTaskIndex(idx) }
   const [stimulusCountdown, setStimulusCountdown] = useState(0)
   const [stimulusError, setStimulusError] = useState(false)
   const stimulusStartedRef = useRef(false)   // カウント開始の二重起動防止
   const stimulusProceededRef = useRef(false)  // 質問遷移の二重実行防止
+  const stimulusIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const stimulusTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const screenMediaRecorderRef = useRef<MediaRecorder | null>(null)
   const screenRecordedChunksRef = useRef<Blob[]>([])
   const screenDrawRafRef = useRef<number>(0)        // 合成描画ループの RAF
@@ -267,6 +273,8 @@ export default function InterviewRoom({
       widgetChannelRef.current = null
       if (noticeTimerRef.current) clearTimeout(noticeTimerRef.current)
       cancelAnimationFrame(screenDrawRafRef.current)
+      if (stimulusIntervalRef.current) clearInterval(stimulusIntervalRef.current)
+      if (stimulusTimeoutRef.current) clearTimeout(stimulusTimeoutRef.current)
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -546,7 +554,7 @@ export default function InterviewRoom({
 
   // ── タスクの結果を記録して次へ（達成 / 断念）。最後のタスクなら質問フェーズへ ──
   function recordTaskOutcome(outcome: 'completed' | 'gave_up') {
-    const idx = currentTaskIndex
+    const idx = currentTaskIndexRef.current
     const task = tasks?.[idx]
     if (task) {
       const label = outcome === 'completed' ? '達成' : '断念（たどり着けなかった）'
@@ -564,7 +572,7 @@ export default function InterviewRoom({
     const total = tasks?.length ?? 0
     if (idx + 1 < total) {
       const next = idx + 1
-      setCurrentTaskIndex(next)
+      gotoTask(next)
       // サービスモードの小窓へ現在タスクを同期
       widgetChannelRef.current?.postMessage({ type: 'task_update', currentTaskIndex: next })
     } else {
@@ -695,6 +703,8 @@ export default function InterviewRoom({
   function proceedFromStimulus() {
     if (stimulusProceededRef.current) return
     stimulusProceededRef.current = true
+    if (stimulusIntervalRef.current) clearInterval(stimulusIntervalRef.current)
+    if (stimulusTimeoutRef.current) clearTimeout(stimulusTimeoutRef.current)
     setPhase('interview')
     currentQuestionIndexRef.current = 0
     setCurrentQuestionIndex(0)
@@ -713,13 +723,13 @@ export default function InterviewRoom({
     stimulusStartedRef.current = true
     const duration = stimulusDuration ?? 5
     setStimulusCountdown(duration)
-    const countdownInterval = setInterval(() => {
+    stimulusIntervalRef.current = setInterval(() => {
       setStimulusCountdown((prev) => {
-        if (prev <= 1) { clearInterval(countdownInterval); return 0 }
+        if (prev <= 1) { if (stimulusIntervalRef.current) clearInterval(stimulusIntervalRef.current); return 0 }
         return prev - 1
       })
     }, 1000)
-    setTimeout(() => proceedFromStimulus(), duration * 1000)
+    stimulusTimeoutRef.current = setTimeout(() => proceedFromStimulus(), duration * 1000)
   }
 
   // ── インタビュー終了 ──────────────────────────────────
@@ -1369,7 +1379,7 @@ export default function InterviewRoom({
                 {tasks.map((task, i) => (
                   <div
                     key={i}
-                    onClick={() => setCurrentTaskIndex(i)}
+                    onClick={() => gotoTask(i)}
                     className={`flex gap-2 items-start cursor-pointer rounded-md px-2 py-1.5 text-xs transition-colors ${
                       currentTaskIndex === i ? 'bg-gray-900 text-white' : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
                     }`}

@@ -27,10 +27,11 @@ export function clampText(value: unknown, max: number): string {
 
 /**
  * ユーザー由来テキストをデリミタで囲み、データとして提示する。
- * テキスト内に紛れ込んだ閉じデリミタは除去してデリミタ偽装を防ぐ。
+ * テキスト内に "untrusted_data" を含む山括弧トークンを広く除去し、
+ * 断片注入による閉じタグ再構成（デリミタ偽装）を防ぐ。
  */
 export function wrapUntrusted(value: unknown, max: number): string {
-  const cleaned = clampText(value, max).replace(/<\/?untrusted_data>/gi, '')
+  const cleaned = clampText(value, max).replace(/<[^>]*untrusted_data[^>]*>/gi, '')
   return `<untrusted_data>\n${cleaned}\n</untrusted_data>`
 }
 

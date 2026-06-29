@@ -37,12 +37,13 @@ Analyze this interview and return a JSON object.`,
   try {
     const parsed = JSON.parse(text)
     return {
-      summary: typeof parsed.summary === 'string' ? parsed.summary : text,
-      themes: typeof parsed.themes === 'string' ? parsed.themes : '',
+      // 型不一致時はモデル生出力をそのまま保存せず、固定の失敗メッセージにフォールバック
+      summary: typeof parsed.summary === 'string' ? clampText(parsed.summary, 4000) : '分析結果を取得できませんでした。',
+      themes: typeof parsed.themes === 'string' ? clampText(parsed.themes, 1000) : '',
       sentiment: typeof parsed.sentiment === 'string' ? parsed.sentiment : 'neutral',
     }
   } catch {
-    return { summary: text, themes: '', sentiment: 'neutral' }
+    return { summary: '分析結果を取得できませんでした。', themes: '', sentiment: 'neutral' }
   }
 }
 
@@ -81,7 +82,9 @@ export async function generateInterviewQuestions(
     messages: [
       {
         role: 'user',
-        content: `Generate ${count} open-ended user interview questions about: "${topic}"
+        content: `${UNTRUSTED_DATA_GUARD}
+Generate ${count} open-ended user interview questions about the following topic.
+Topic: ${wrapUntrusted(topic, LIMITS.topic)}
 Return ONLY a JSON array of strings. No explanation.`,
       },
     ],
@@ -91,7 +94,11 @@ Return ONLY a JSON array of strings. No explanation.`,
   const jsonMatch = text.match(/\[[\s\S]*\]/)
   if (jsonMatch) {
     try {
-      return JSON.parse(jsonMatch[0])
+      const arr = JSON.parse(jsonMatch[0])
+      // 文字列要素のみ採用し、長さも制限する
+      if (Array.isArray(arr)) {
+        return arr.filter((q): q is string => typeof q === 'string').map((q) => clampText(q, LIMITS.question))
+      }
     } catch {
       // ignore
     }

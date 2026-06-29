@@ -64,17 +64,19 @@ export async function POST(req: NextRequest, props: { params: Promise<{ id: stri
     create: { sessionId: id, fullText: transcriptText, summary, themes },
     update: { fullText: transcriptText, summary, themes },
   })
-  await prisma.transcriptSegment.deleteMany({ where: { transcriptId: transcript.id } })
-  await prisma.transcriptSegment.createMany({
-    data: (segments as { speaker: string; text: string; start: number; end: number; sentiment?: string }[]).map((seg) => ({
-      transcriptId: transcript.id,
-      speaker: seg.speaker,
-      text: seg.text,
-      startTime: seg.start,
-      endTime: seg.end,
-      sentiment: seg.sentiment ?? sentiment,
-    })),
-  })
+  await prisma.$transaction([
+    prisma.transcriptSegment.deleteMany({ where: { transcriptId: transcript.id } }),
+    prisma.transcriptSegment.createMany({
+      data: (segments as { speaker: string; text: string; start: number; end: number; sentiment?: string }[]).map((seg) => ({
+        transcriptId: transcript.id,
+        speaker: seg.speaker,
+        text: seg.text,
+        startTime: seg.start,
+        endTime: seg.end,
+        sentiment: seg.sentiment ?? sentiment,
+      })),
+    }),
+  ])
 
   if (emotionData && emotionData.length > 0) {
     await prisma.emotionResult.deleteMany({ where: { sessionId: id } })

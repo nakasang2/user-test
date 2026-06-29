@@ -6,7 +6,7 @@ import { z } from 'zod'
  */
 const schema = z.object({
   DATABASE_URL: z.string().min(1, 'DATABASE_URL is required'),
-  JWT_SECRET: z.string().min(1, 'JWT_SECRET is required'),
+  JWT_SECRET: z.string().min(32, 'JWT_SECRET must be at least 32 characters'),
   OPENAI_API_KEY: z.string().optional(),
   DAILY_API_KEY: z.string().optional(),
   BLOB_READ_WRITE_TOKEN: z.string().optional(),

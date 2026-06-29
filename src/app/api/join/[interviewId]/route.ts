@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { prisma } from '@/lib/db'
 import { createRoom } from '@/lib/daily'
-import { v4 as uuidv4 } from 'uuid'
 import { randomBytes } from 'crypto'
 import { handleApiError } from '@/lib/api-auth'
 
@@ -50,7 +49,9 @@ export async function POST(
       data: { name, email: email || null },
     })
 
-    const roomName = `interview-${uuidv4().slice(0, 8)}`
+    // roomName を知るだけで /interview/[roomName] から participantToken を取得できるため、
+    // 列挙されないよう十分なエントロピー（96bit）を持たせる
+    const roomName = `interview-${randomBytes(12).toString('hex')}`
     const origin = process.env.NEXT_PUBLIC_APP_URL ?? new URL(req.url).origin
     let dailyRoomUrl = `${origin}/interview/${roomName}`
 
