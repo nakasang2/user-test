@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth, handleApiError } from '@/lib/api-auth'
 import { sanitizeMessages } from '@/lib/llm-safety'
 import { getOpenAI } from '@/lib/openai'
+import { rateLimit } from '@/lib/ratelimit'
 
 type Message = { role: 'user' | 'assistant'; content: string }
 
@@ -36,7 +37,10 @@ const GENERATE_SYSTEM = `あなたはUXリサーチの専門家です。
 
 export async function POST(req: NextRequest) {
   try {
-    await requireAuth()
+    const { orgId } = await requireAuth()
+    if (!(await rateLimit(`design:${orgId}`, 20, 60))) {
+      return NextResponse.json({ error: 'Too many requests' }, { status: 429 })
+    }
     const body = await req.json()
     const { action } = body as { action?: 'generate' }
     const messages: Message[] = sanitizeMessages(body.messages)

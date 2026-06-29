@@ -3,10 +3,14 @@ import { prisma } from '@/lib/db'
 import { chatWithAgent } from '@/lib/ai'
 import { requireAuth, handleApiError } from '@/lib/api-auth'
 import { sanitizeMessages } from '@/lib/llm-safety'
+import { rateLimit } from '@/lib/ratelimit'
 
 export async function POST(req: NextRequest) {
   try {
   const { orgId } = await requireAuth()
+  if (!(await rateLimit(`agent:${orgId}`, 30, 60))) {
+    return NextResponse.json({ error: 'Too many requests' }, { status: 429 })
+  }
   const body = await req.json()
   const { messages, sessionId, interviewId } = body
 

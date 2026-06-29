@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { requireParticipantToken, handleApiError } from '@/lib/api-auth'
+import { rateLimit, getClientIp } from '@/lib/ratelimit'
 
 /**
  * POST /api/sessions/[id]/progress — インタビュー進行中の逐次保存（被験者フロー）。
@@ -11,6 +12,9 @@ import { requireParticipantToken, handleApiError } from '@/lib/api-auth'
 export async function POST(req: NextRequest, props: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await props.params
+    if (!(await rateLimit(`progress:${id}:${getClientIp(req)}`, 120, 60))) {
+      return NextResponse.json({ error: 'Too many requests' }, { status: 429 })
+    }
     await requireParticipantToken(id, req.headers.get('x-participant-token'))
 
     const body = await req.json()

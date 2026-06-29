@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { requireParticipantToken, handleApiError } from '@/lib/api-auth'
+import { rateLimit, getClientIp } from '@/lib/ratelimit'
 
 function clamp(v: unknown): number {
   const n = typeof v === 'number' ? v : 0
@@ -13,6 +14,9 @@ export async function POST(req: NextRequest) {
     const { sessionId, timestamp } = body
     if (!sessionId || typeof timestamp !== 'number') {
       return NextResponse.json({ error: 'sessionId and timestamp are required' }, { status: 400 })
+    }
+    if (!(await rateLimit(`emotions:${sessionId}:${getClientIp(req)}`, 90, 60))) {
+      return NextResponse.json({ error: 'Too many requests' }, { status: 429 })
     }
 
     // 被験者フロー専用: 当該セッションの participantToken を要求する

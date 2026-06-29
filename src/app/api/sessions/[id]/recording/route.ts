@@ -3,6 +3,7 @@ import { handleUpload, type HandleUploadBody } from '@vercel/blob/client'
 import { prisma } from '@/lib/db'
 import { requireAuth, requireParticipantToken, handleApiError } from '@/lib/api-auth'
 import { createSignedBlobUrl } from '@/lib/blob'
+import { rateLimit, getClientIp } from '@/lib/ratelimit'
 
 export const runtime = 'nodejs'
 
@@ -40,6 +41,9 @@ export async function POST(
 ) {
   try {
     const { id } = await props.params
+    if (!(await rateLimit(`recording:${id}:${getClientIp(request)}`, 20, 60))) {
+      return NextResponse.json({ error: 'Too many requests' }, { status: 429 })
+    }
     const body = (await request.json()) as HandleUploadBody
 
     const json = await handleUpload({

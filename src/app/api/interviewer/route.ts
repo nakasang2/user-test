@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { LIMITS, clampText, wrapUntrusted, UNTRUSTED_DATA_GUARD } from '@/lib/llm-safety'
 import { getOpenAI } from '@/lib/openai'
+import { rateLimit, getClientIp } from '@/lib/ratelimit'
 
 export interface InterviewerDecision {
   action: 'follow_up' | 'next_question' | 'wrap_up'
@@ -9,6 +10,10 @@ export interface InterviewerDecision {
 }
 
 export async function POST(req: NextRequest) {
+  // 未認証エンドポイント。gpt-4o 課金の枯渇/DoS を防ぐため IP 単位でレート制限
+  if (!(await rateLimit(`interviewer:${getClientIp(req)}`, 30, 60))) {
+    return NextResponse.json({ error: 'Too many requests' }, { status: 429 })
+  }
   const body = await req.json()
   const {
     plannedQuestion,   // 現在の設定質問

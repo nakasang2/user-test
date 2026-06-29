@@ -10,6 +10,8 @@ const schema = z.object({
   OPENAI_API_KEY: z.string().optional(),
   DAILY_API_KEY: z.string().optional(),
   BLOB_READ_WRITE_TOKEN: z.string().optional(),
+  UPSTASH_REDIS_REST_URL: z.string().optional(),
+  UPSTASH_REDIS_REST_TOKEN: z.string().optional(),
   NEXT_PUBLIC_APP_URL: z.string().optional(),
 })
 
@@ -37,5 +39,8 @@ export function validateEnv(): void {
   if (!process.env.OPENAI_API_KEY) missing.push('OPENAI_API_KEY（AI 分析・要約・TTS・Whisper が無効）')
   if (!process.env.BLOB_READ_WRITE_TOKEN) missing.push('BLOB_READ_WRITE_TOKEN（録画の保存・配信が無効）')
   if (!process.env.DAILY_API_KEY) missing.push('DAILY_API_KEY（Daily.co クラウド録画が無効）')
+  if (!process.env.UPSTASH_REDIS_REST_URL || !process.env.UPSTASH_REDIS_REST_TOKEN) {
+    missing.push('UPSTASH_REDIS_REST_URL/TOKEN（レート制限がインメモリ＝サーバーレスでは不完全）')
+  }
   if (missing.length) console.warn('[env] 任意の環境変数が未設定:', missing.join(' / '))
 }

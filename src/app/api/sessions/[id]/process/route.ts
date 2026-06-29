@@ -2,10 +2,14 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { analyzeTranscript } from '@/lib/ai'
 import { requireAuth, requireParticipantToken, handleApiError } from '@/lib/api-auth'
+import { rateLimit, getClientIp } from '@/lib/ratelimit'
 
 export async function POST(req: NextRequest, props: { params: Promise<{ id: string }> }) {
  try {
   const { id } = await props.params
+  if (!(await rateLimit(`process:${id}:${getClientIp(req)}`, 10, 60))) {
+    return NextResponse.json({ error: 'Too many requests' }, { status: 429 })
+  }
 
   // 二経路認可: 被験者フローは participantToken、ダッシュボードの再分析は認証＋組織所有権
   const participantToken = req.headers.get('x-participant-token')
