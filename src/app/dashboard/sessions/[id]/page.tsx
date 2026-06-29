@@ -42,6 +42,7 @@ interface Session {
   dailyRoomName: string
   dailyRoomUrl: string
   recordingUrl: string | null
+  shareEnabled?: boolean
   createdAt: string
   interview: {
     id: string
@@ -120,9 +121,22 @@ export default function SessionDetail(props: { params: Promise<{ id: string }> }
       const url = `${window.location.origin}/share/${shareToken}`
       await navigator.clipboard.writeText(url)
       track('report_shared', { sessionId: id })
+      setSession((prev) => (prev ? { ...prev, shareEnabled: true } : prev))
       alert(`読み取り専用の共有リンクをコピーしました:\n${url}`)
     } catch {
       alert('共有リンクの発行に失敗しました')
+    }
+  }
+
+  async function revokeShare() {
+    if (!confirm('共有リンクを停止します。停止後、このリンクからは閲覧できなくなります。よろしいですか？')) return
+    try {
+      const res = await fetch(`/api/sessions/${id}/share`, { method: 'DELETE' })
+      if (!res.ok) throw new Error('failed')
+      setSession((prev) => (prev ? { ...prev, shareEnabled: false } : prev))
+      alert('共有リンクを停止しました')
+    } catch {
+      alert('共有の停止に失敗しました')
     }
   }
 
@@ -246,10 +260,19 @@ export default function SessionDetail(props: { params: Promise<{ id: string }> }
             <>
               <button
                 onClick={shareSession}
+                title={session.shareEnabled ? '共有リンクをコピー（共有は有効中）' : '読み取り専用の共有リンクを発行'}
                 className="border border-gray-300 hover:border-gray-400 text-gray-700 hover:text-gray-900 px-3 py-2 rounded-md text-xs transition-colors"
               >
-                共有リンク
+                {session.shareEnabled ? '共有リンクをコピー' : '共有リンク'}
               </button>
+              {session.shareEnabled && (
+                <button
+                  onClick={revokeShare}
+                  className="border border-red-200 hover:border-red-300 text-red-600 hover:text-red-700 px-3 py-2 rounded-md text-xs transition-colors"
+                >
+                  共有を停止
+                </button>
+              )}
               <button
                 onClick={exportCsv}
                 className="border border-gray-300 hover:border-gray-400 text-gray-700 hover:text-gray-900 px-3 py-2 rounded-md text-xs transition-colors"
