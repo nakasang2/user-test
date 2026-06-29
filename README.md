@@ -195,14 +195,16 @@ src/
 ### データベース
 本番・開発ともに PostgreSQL を使用します（`prisma/schema.prisma` の `provider = "postgresql"`）。
 
-ビルド（`npm run build`）は **`prisma generate && next build`** で、**DB に接続しません**
-（ビルド時に `db push` を実行すると Supabase プーラで `P1017 Server has closed the connection` を起こすため）。
+ビルド（`npm run build = prisma db push && next build`）で**デプロイ時にスキーマを自動同期**します。
+`db push` は **直結（非プール）接続**を使う必要があるため、接続先を分離しています:
 
-> ⚠️ **スキーマを変更したら、デプロイ前に手動でスキーマ同期が必要です**：
-> ```bash
-> DATABASE_URL="<Session pooler 5432 の接続文字列>" npm run db:push
-> ```
-> （`Session pooler 5432` を使うこと。Transaction pooler 6543 は DDL に不向き。）
+- **実行時** → `DATABASE_URL`（プール接続）
+- **db push / migration** → `prisma.config.ts` の `directUrl`＝**`DATABASE_URL_UNPOOLED`**（直結）。
+  未設定なら `DATABASE_URL` にフォールバック。
+
+> プール接続で `db push` すると `P1017 Server has closed the connection` になるため、必ず直結を使う。
+> **Neon（Vercel 連携）は `DATABASE_URL` と `DATABASE_URL_UNPOOLED` を自動設定する**ので、
+> Vercel 側は環境変数を用意するだけでデプロイ時に自動同期される。
 
 ### ビデオ録画（Daily.co / Vercel Blob）
 - `DAILY_API_KEY` を設定するとクラウド録画が有効化されます。

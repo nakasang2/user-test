@@ -4,6 +4,9 @@ generator client {
 
 datasource db {
   provider = "postgresql"
+  // 実行時はプール接続（DATABASE_URL）。
+  // db push/migration 用の直結 URL は prisma.config.ts の directUrl で指定する
+  // （Neon の DATABASE_URL_UNPOOLED を使い、未設定時は DATABASE_URL にフォールバック）。
   url      = env("DATABASE_URL")
 }
 
