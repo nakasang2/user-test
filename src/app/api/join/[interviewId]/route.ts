@@ -6,8 +6,9 @@ import { v4 as uuidv4 } from 'uuid'
 import { handleApiError } from '@/lib/api-auth'
 
 const joinSchema = z.object({
-  name:  z.string().min(1, '名前を入力してください').max(100),
-  email: z.string().email().optional().or(z.literal('')),
+  name:    z.string().min(1, '名前を入力してください').max(100),
+  email:   z.string().email().optional().or(z.literal('')),
+  consent: z.boolean().optional(),
 })
 
 /** GET /api/join/[interviewId] — インタビュータイトルなど公開情報を返す（認証不要） */
@@ -19,7 +20,8 @@ export async function GET(
     const { interviewId } = await props.params
     const interview = await prisma.interview.findUnique({
       where: { id: interviewId },
-      select: { id: true, title: true, description: true },
+      // type はユーザビリティテストで「画面操作も録画されます」の注意書きを出すために必要
+      select: { id: true, title: true, description: true, type: true },
     })
     if (!interview) return NextResponse.json({ error: 'Not found' }, { status: 404 })
     return NextResponse.json(interview)
@@ -40,13 +42,18 @@ export async function POST(
     if (!parsed.success) {
       return NextResponse.json({ error: parsed.error.issues[0]?.message }, { status: 400 })
     }
-    const { name, email } = parsed.data
+    const { name, email, consent } = parsed.data
+
+    // 録画・分析への同意は必須。同意日時を DB に記録する（研究データの取扱い要件）
+    if (!consent) {
+      return NextResponse.json({ error: '録画・分析への同意が必要です' }, { status: 400 })
+    }
 
     const interview = await prisma.interview.findUnique({ where: { id: interviewId } })
     if (!interview) return NextResponse.json({ error: 'インタビューが見つかりません' }, { status: 404 })
 
     const participant = await prisma.participant.create({
-      data: { name, email: email || null },
+      data: { name, email: email || null, consentedAt: new Date() },
     })
 
     const roomName = `interview-${uuidv4().slice(0, 8)}`

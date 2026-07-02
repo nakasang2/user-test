@@ -260,6 +260,9 @@ export default function InterviewRoom({
       currentAudioRef.current = null
       if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current)
       if (draftSaveTimerRef.current) clearTimeout(draftSaveTimerRef.current)
+      const speech = speechRef.current
+      speechRef.current = null // onend の自動再起動を止めてから停止
+      speech?.stop()
       stopDetection()
       if (screenMediaRecorderRef.current?.state !== 'inactive') {
         screenMediaRecorderRef.current?.stop()
@@ -295,6 +298,7 @@ export default function InterviewRoom({
 
     if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current)
     speechRef.current?.stop()
+    speechRef.current = null // onend の自動再起動を止める
     setLiveText('')
     setIsListening(false)
 
@@ -316,6 +320,8 @@ export default function InterviewRoom({
   }
 
   // ── Feature 1: 沈黙タイムアウト付き音声認識 ──────────
+  // 認識が回答なしに終了した場合（no-speech エラー等）は自動で聞き直し、
+  // マイク拒否など復旧不能なエラーはテキスト入力へ誘導する。
   function listenForAnswer(onAnswer: (answer: string) => void, silenceRetry = false) {
     // テキスト入力フォールバック用にコールバックを保存
     onAnswerCallbackRef.current = onAnswer
@@ -325,71 +331,119 @@ export default function InterviewRoom({
     const SR = ((window as any).SpeechRecognition || (window as any).webkitSpeechRecognition) as (new () => any) | undefined
     if (!SR) return // テキスト入力フォールバックで対応
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const recognition: any = new SR()
-    recognition.lang = 'ja-JP'
-    recognition.continuous = true
-    recognition.interimResults = true
-    speechRef.current = recognition
-
-    let finalText = ''
     const startTime = (Date.now() - startTimeRef.current) / 1000
 
-    // 沈黙タイムアウト開始（30秒）
-    if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current)
-    silenceTimerRef.current = setTimeout(() => {
-      recognition.stop()
-      setLiveText('')
-      if (!silenceRetry) {
-        // 1回目のタイムアウト：促す
-        speak('もう少し聞かせていただけますか？', () => {
-          listenForAnswer(onAnswer, true)
-        })
-      } else {
-        // 2回目のタイムアウト：次の質問へ
-        speak('ありがとうございます。次の質問に移ります。', () => {
-          onAnswer('')
-        })
-      }
-    }, 30000)
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    recognition.onresult = (event: any) => {
-      // 何か話し始めたらタイマーリセット
+    // 沈黙タイムアウト（30秒）。認識の自動再起動では延長しない
+    const armSilenceTimer = () => {
       if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current)
-      let interim = ''
-      for (let i = event.resultIndex; i < event.results.length; i++) {
-        if (event.results[i].isFinal) {
-          finalText += event.results[i][0].transcript
+      silenceTimerRef.current = setTimeout(() => {
+        speechRef.current?.stop()
+        speechRef.current = null // onend の自動再起動を止める
+        setLiveText('')
+        setIsListening(false)
+        if (!silenceRetry) {
+          // 1回目のタイムアウト：促す
+          speak('もう少し聞かせていただけますか？', () => {
+            listenForAnswer(onAnswer, true)
+          })
         } else {
-          interim = event.results[i][0].transcript
+          // 2回目のタイムアウト：次の質問へ
+          speak('ありがとうございます。次の質問に移ります。', () => {
+            onAnswer('')
+          })
         }
-      }
-      setLiveText(finalText + interim)
+      }, 30000)
     }
+    armSilenceTimer()
 
-    recognition.onspeechend = () => {
+    const deliver = (text: string) => {
       if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current)
-      recognition.stop()
       setLiveText('')
       setIsListening(false)
-      if (finalText.trim()) {
-        const entry: TranscriptEntry = {
-          speaker: 'Participant',
-          text: finalText.trim(),
-          start: startTime,
-          end: (Date.now() - startTimeRef.current) / 1000,
-        }
-        transcriptRef.current = [...transcriptRef.current, entry]
-        setTranscript([...transcriptRef.current])
-        conversationBufferRef.current += `\n参加者: ${finalText.trim()}`
-        scheduleDraftSave()
-        onAnswer(finalText.trim())
+      const entry: TranscriptEntry = {
+        speaker: 'Participant',
+        text,
+        start: startTime,
+        end: (Date.now() - startTimeRef.current) / 1000,
       }
+      transcriptRef.current = [...transcriptRef.current, entry]
+      setTranscript([...transcriptRef.current])
+      conversationBufferRef.current += `\n参加者: ${text}`
+      scheduleDraftSave()
+      onAnswer(text)
     }
 
-    recognition.start()
-    setIsListening(true)
+    const startRecognition = () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const recognition: any = new SR()
+      recognition.lang = 'ja-JP'
+      recognition.continuous = true
+      recognition.interimResults = true
+
+      let finalText = ''
+      let answered = false
+      let fatalError = false
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      recognition.onresult = (event: any) => {
+        // 何か話し始めたらタイマー解除（回答の途中で打ち切らないため）
+        if (silenceTimerRef.current) {
+          clearTimeout(silenceTimerRef.current)
+          silenceTimerRef.current = null
+        }
+        let interim = ''
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          if (event.results[i].isFinal) {
+            finalText += event.results[i][0].transcript
+          } else {
+            interim = event.results[i][0].transcript
+          }
+        }
+        setLiveText(finalText + interim)
+      }
+
+      recognition.onspeechend = () => {
+        recognition.stop()
+        if (finalText.trim()) {
+          answered = true
+          deliver(finalText.trim())
+        }
+        // finalText が空（interim のみ等）の場合は onend の自動再起動に任せる
+      }
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      recognition.onerror = (event: any) => {
+        // マイク拒否などの復旧不能なエラー → 再起動せずテキスト入力へ誘導
+        if (['not-allowed', 'service-not-allowed', 'audio-capture'].includes(event?.error)) {
+          fatalError = true
+          if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current)
+          setSpeechSupported(false) // 入力欄に「音声認識不可 — テキストで入力してください」が出る
+          setLiveText('')
+          setIsListening(false)
+        }
+        // no-speech / network 等の一時的なエラーは onend の自動再起動で回復する
+      }
+
+      recognition.onend = () => {
+        if (answered || fatalError) return
+        if (speechRef.current !== recognition) return // 手動停止（テキスト送信・次へ・終了）
+        if (finalText.trim()) {
+          // onspeechend を経ずに確定テキストを持ったまま終了したケース
+          answered = true
+          deliver(finalText.trim())
+          return
+        }
+        // 回答が取れないまま認識が終了 → 自動で聞き直す
+        if (!silenceTimerRef.current) armSilenceTimer()
+        startRecognition()
+      }
+
+      speechRef.current = recognition
+      recognition.start()
+      setIsListening(true)
+    }
+
+    startRecognition()
   }
 
   // ── Feature 5: 評価質問の回答送信 ────────────────────
@@ -562,9 +616,12 @@ export default function InterviewRoom({
 
   // ── インタビュー開始 ──────────────────────────────────
   async function startInterview() {
-    setIsRecording(true)
-    startMediaRecorder()
-    if (videoRef.current) startDetection(videoRef.current)
+    // カメラなし（拒否時のフォールバック）では録画・感情検出をスキップする
+    if (streamRef.current) {
+      setIsRecording(true)
+      startMediaRecorder()
+      if (videoRef.current) startDetection(videoRef.current)
+    }
 
     // service モード: ウィンドウ系は await より前に呼ぶ（ユーザージェスチャー文脈を維持）
     if (interviewType === 'usability' && usabilityMode === 'service') {
@@ -575,6 +632,10 @@ export default function InterviewRoom({
         if (e.data.type === 'task_complete') completeTasksAndStartInterview()
         else if (e.data.type === 'end_session') endInterview()
         else if (e.data.type === 'recording_started') setScreenSharing(true)
+        else if (e.data.type === 'task_update' && typeof e.data.currentTaskIndex === 'number') {
+          // ウィジェット側で「次のタスクへ」が押された → メイン画面のタスクリストを追従
+          setCurrentTaskIndex(e.data.currentTaskIndex)
+        }
         else if (e.data.type === 'screen_recording_blob') {
           const blob: Blob = e.data.blob
           if (blob.size > 0) {
@@ -624,6 +685,7 @@ export default function InterviewRoom({
         })
       }, 1000)
       setTimeout(() => {
+        if (questions.length === 0) { endInterview(); return }
         setPhase('interview')
         currentQuestionIndexRef.current = 0
         setCurrentQuestionIndex(0)
@@ -639,6 +701,7 @@ export default function InterviewRoom({
     }
 
     // 通常インタビュー
+    if (questions.length === 0) { endInterview(); return }
     setPhase('intro')
     const intro = `こんにちは${participantName ? `、${participantName}さん` : ''}。本日はインタビューにご参加いただきありがとうございます。「${interviewTitle}」についてお聞きします。`
     speak(intro, () => {
@@ -659,6 +722,7 @@ export default function InterviewRoom({
   function manualNext() {
     if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current)
     speechRef.current?.stop()    // 音声認識停止
+    speechRef.current = null     // onend の自動再起動を止める
     speakVersionRef.current++    // 再生中の TTS をキャンセル
     currentAudioRef.current?.pause()
     currentAudioRef.current = null
@@ -676,6 +740,7 @@ export default function InterviewRoom({
     setPhase('ending')
     if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current)
     speechRef.current?.stop()
+    speechRef.current = null // onend の自動再起動を止める
     speak('ご回答いただきありがとうございました。本日のインタビューはこれで終了です。貴重なお時間をありがとうございました。', async () => {
       await submitResults()
       setPhase('done')
@@ -986,15 +1051,41 @@ export default function InterviewRoom({
                     <p>・表情・音声・操作内容が録画・分析されます</p>
                   </div>
                 </div>
-                <button
-                  onClick={startInterview}
-                  disabled={!cameraReady || emotionStatus === 'loading'}
-                  className="inline-flex items-center gap-1.5 bg-gray-900 hover:bg-gray-800 text-white disabled:opacity-50 disabled:cursor-wait px-6 py-2.5 rounded-md font-medium text-sm transition-colors"
-                >
-                  {!cameraReady || emotionStatus === 'loading' ? '準備中...' : (<>インタビューを開始する<ArrowRight className="w-4 h-4" strokeWidth={2} /></>)}
-                </button>
-                {(!cameraReady || emotionStatus === 'loading') && (
-                  <p className="text-xs text-gray-500 mt-2 animate-pulse">カメラと解析モデルを初期化中</p>
+                {cameraError ? (
+                  <div className="space-y-3">
+                    <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 text-left text-xs text-amber-800 leading-relaxed">
+                      カメラ・マイクを利用できませんでした。ブラウザのアドレスバー横の設定から
+                      カメラとマイクを<span className="font-semibold">許可</span>して、ページを再読み込みしてください。
+                    </div>
+                    <div className="flex gap-2 justify-center">
+                      <button
+                        onClick={() => window.location.reload()}
+                        className="inline-flex items-center gap-1.5 bg-gray-900 hover:bg-gray-800 text-white px-4 py-2 rounded-md font-medium text-sm transition-colors"
+                      >
+                        再読み込み
+                      </button>
+                      <button
+                        onClick={startInterview}
+                        className="inline-flex items-center gap-1.5 border border-gray-300 hover:border-gray-400 text-gray-700 hover:text-gray-900 px-4 py-2 rounded-md text-sm transition-colors"
+                      >
+                        カメラなしで続ける（テキスト回答）
+                      </button>
+                    </div>
+                    <p className="text-xs text-gray-500">カメラなしの場合、録画・感情分析は行われません。</p>
+                  </div>
+                ) : (
+                  <>
+                    <button
+                      onClick={startInterview}
+                      disabled={!cameraReady || emotionStatus === 'loading'}
+                      className="inline-flex items-center gap-1.5 bg-gray-900 hover:bg-gray-800 text-white disabled:opacity-50 disabled:cursor-wait px-6 py-2.5 rounded-md font-medium text-sm transition-colors"
+                    >
+                      {!cameraReady || emotionStatus === 'loading' ? '準備中...' : (<>インタビューを開始する<ArrowRight className="w-4 h-4" strokeWidth={2} /></>)}
+                    </button>
+                    {(!cameraReady || emotionStatus === 'loading') && (
+                      <p className="text-xs text-gray-500 mt-2 animate-pulse">カメラと解析モデルを初期化中</p>
+                    )}
+                  </>
                 )}
               </div>
             </div>
@@ -1208,7 +1299,11 @@ export default function InterviewRoom({
                 {tasks.map((task, i) => (
                   <div
                     key={i}
-                    onClick={() => setCurrentTaskIndex(i)}
+                    onClick={() => {
+                      setCurrentTaskIndex(i)
+                      // service モード：ウィジェットの表示タスクも同期する
+                      widgetChannelRef.current?.postMessage({ type: 'task_update', currentTaskIndex: i })
+                    }}
                     className={`flex gap-2 items-start cursor-pointer rounded-md px-2 py-1.5 text-xs transition-colors ${
                       currentTaskIndex === i ? 'bg-gray-900 text-white' : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
                     }`}

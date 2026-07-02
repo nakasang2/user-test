@@ -23,14 +23,23 @@ export class ForbiddenError extends Error {
   }
 }
 
-/** 保護された API ルートで認証済みユーザー情報を取得する */
-export async function requireAuth(): Promise<TokenPayload> {
+/**
+ * 保護された API ルートで認証済みユーザー情報を取得する。
+ * Member レコードの実在も確認するため、組織から削除されたユーザーの
+ * トークンは（有効期限内でも）即時失効する。
+ */
+export async function requireAuth(): Promise<TokenPayload & { role: string }> {
   const cookieStore = await cookies()
   const token = cookieStore.get('token')?.value
   if (!token) throw new AuthError()
   const payload = await verifyToken(token)
   if (!payload) throw new AuthError()
-  return payload
+  const member = await prisma.member.findUnique({
+    where: { userId_organizationId: { userId: payload.userId, organizationId: payload.orgId } },
+    select: { role: true },
+  })
+  if (!member) throw new AuthError()
+  return { ...payload, role: member.role }
 }
 
 /**
@@ -52,13 +61,8 @@ export async function requireParticipant(
 /** 認証 + 権限チェック。指定ロール未満なら ForbiddenError を投げる */
 export async function requireRole(minRole: Role): Promise<TokenPayload & { role: string }> {
   const payload = await requireAuth()
-  const member = await prisma.member.findUnique({
-    where: { userId_organizationId: { userId: payload.userId, organizationId: payload.orgId } },
-    select: { role: true },
-  })
-  const role = member?.role ?? 'viewer'
-  if (!hasPermission(role, minRole)) throw new ForbiddenError()
-  return { ...payload, role }
+  if (!hasPermission(payload.role, minRole)) throw new ForbiddenError()
+  return payload
 }
 
 /** API ルートの共通エラーハンドラー */

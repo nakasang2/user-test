@@ -40,11 +40,6 @@ export async function POST(req: NextRequest) {
       await tx.member.create({
         data: { userId: user.id, organizationId: org.id, role: 'owner' },
       })
-      // 既存の未所属インタビューをこの組織に割り当て（初回登録時の自動マイグレーション）
-      await tx.interview.updateMany({
-        where: { organizationId: null },
-        data: { organizationId: org.id },
-      })
       return { org, user }
     })
 

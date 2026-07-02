@@ -52,7 +52,7 @@ export default function JoinPage(props: { params: Promise<{ interviewId: string 
       const res = await fetch(`/api/join/${interviewId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: name.trim(), email: email.trim() || undefined }),
+        body: JSON.stringify({ name: name.trim(), email: email.trim() || undefined, consent }),
       })
       const data = await res.json()
       if (!res.ok) { setError(data.error ?? 'エラーが発生しました'); return }

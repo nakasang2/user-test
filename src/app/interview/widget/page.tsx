@@ -193,6 +193,14 @@ function WidgetContent() {
     } catch { /* cross-origin guard */ }
   }
 
+  /* ── 次のタスクへ（最終タスク以外） ───────────────────────── */
+  function nextTask() {
+    const next = Math.min(currentTaskIndex + 1, tasks.length - 1)
+    setCurrentTaskIndex(next)
+    // メインページのタスクリスト表示も追従させる
+    channelRef.current?.postMessage({ type: 'task_update', currentTaskIndex: next })
+  }
+
   /* ── タスク完了 ───────────────────────────────────────────── */
   async function taskComplete() {
     // 録画未開始なら警告を表示して処理を止める
@@ -330,16 +338,36 @@ function WidgetContent() {
           </div>
         )}
 
-        {/* タスク完了 */}
-        <button
-          onClick={taskComplete}
-          className="w-full inline-flex items-center justify-center gap-1.5 bg-gray-900 hover:bg-gray-800 active:bg-black text-white py-2.5 rounded-lg text-sm font-semibold transition-colors"
-        >
-          <Check className="w-4 h-4" strokeWidth={2.5} />
-          タスク完了
-          <ArrowRight className="w-3.5 h-3.5" strokeWidth={2} />
-          質問へ
-        </button>
+        {/* 次のタスクへ（残タスクあり） / タスク完了（最終タスク） */}
+        {currentTaskIndex < tasks.length - 1 ? (
+          <>
+            <button
+              onClick={nextTask}
+              className="w-full inline-flex items-center justify-center gap-1.5 bg-gray-900 hover:bg-gray-800 active:bg-black text-white py-2.5 rounded-lg text-sm font-semibold transition-colors"
+            >
+              <Check className="w-4 h-4" strokeWidth={2.5} />
+              このタスクを完了
+              <ArrowRight className="w-3.5 h-3.5" strokeWidth={2} />
+              次のタスクへ
+            </button>
+            <button
+              onClick={taskComplete}
+              className="w-full inline-flex items-center justify-center gap-1 text-gray-500 hover:text-gray-900 py-1 text-xs underline underline-offset-2 transition-colors"
+            >
+              すべてのタスクを終えて質問へ進む
+            </button>
+          </>
+        ) : (
+          <button
+            onClick={taskComplete}
+            className="w-full inline-flex items-center justify-center gap-1.5 bg-gray-900 hover:bg-gray-800 active:bg-black text-white py-2.5 rounded-lg text-sm font-semibold transition-colors"
+          >
+            <Check className="w-4 h-4" strokeWidth={2.5} />
+            タスク完了
+            <ArrowRight className="w-3.5 h-3.5" strokeWidth={2} />
+            質問へ
+          </button>
+        )}
 
         {/* セッション終了 */}
         <button

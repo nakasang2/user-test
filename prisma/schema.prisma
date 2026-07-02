@@ -103,11 +103,12 @@ model Task {
 }
 
 model Participant {
-  id        String    @id @default(cuid())
-  name      String
-  email     String?
-  sessions  Session[]
-  createdAt DateTime  @default(now())
+  id          String    @id @default(cuid())
+  name        String
+  email       String?
+  consentedAt DateTime? // 録画・AI 分析への同意日時（join フォームで取得）
+  sessions    Session[]
+  createdAt   DateTime  @default(now())
 }
 
 model Session {
