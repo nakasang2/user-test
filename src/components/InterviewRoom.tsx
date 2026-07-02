@@ -151,6 +151,13 @@ export default function InterviewRoom({
   const [stimulusError, setStimulusError] = useState(false)
   // テキスト入力フォールバック用：listenForAnswer のコールバックを保持
   const onAnswerCallbackRef = useRef<((answer: string) => void) | null>(null)
+  // 回答確定前の猶予ウィンドウ：発話が途切れてもすぐ確定せず、続きを数秒待つ
+  const answerGraceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [answerGrace, setAnswerGrace] = useState(false)
+  // 確定待ちの発話内容（手動操作時に失われないよう ref で保持）
+  const pendingAnswerRef = useRef('')
+  // セッション終了後に visibilitychange 等の遅延コールバックが再開しないようにするフラグ
+  const endedRef = useRef(false)
 
   // usability / prototype 用：画面共有
   const screenVideoRef = useRef<HTMLVideoElement>(null)
@@ -264,6 +271,7 @@ export default function InterviewRoom({
     }
     initCamera()
     return () => {
+      endedRef.current = true // 遅延コールバック（visibilitychange 等）の再開を防ぐ
       streamRef.current?.getTracks().forEach((t) => t.stop())
       screenStreamRef.current?.getTracks().forEach((t) => t.stop())
       speakVersionRef.current++ // 再生中の speak を無効化
@@ -271,6 +279,7 @@ export default function InterviewRoom({
       currentAudioRef.current = null
       if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current)
       if (draftSaveTimerRef.current) clearTimeout(draftSaveTimerRef.current)
+      if (answerGraceTimerRef.current) clearTimeout(answerGraceTimerRef.current)
       const speech = speechRef.current
       speechRef.current = null // onend の自動再起動を止めてから停止
       speech?.stop()
@@ -302,16 +311,44 @@ export default function InterviewRoom({
     return () => window.removeEventListener('beforeunload', handler)
   }, [phase])
 
+  // ── 回答確定猶予タイマーの解除 ────────────────────────
+  function clearAnswerGrace() {
+    if (answerGraceTimerRef.current) {
+      clearTimeout(answerGraceTimerRef.current)
+      answerGraceTimerRef.current = null
+    }
+    setAnswerGrace(false)
+  }
+
+  // ── 確定待ちの発話を会話ログに退避（手動で次へ進む時などに回答を失わないため） ──
+  function flushPendingAnswer() {
+    const pending = pendingAnswerRef.current.trim()
+    pendingAnswerRef.current = ''
+    if (!pending) return
+    const now = (Date.now() - startTimeRef.current) / 1000
+    const entry: TranscriptEntry = { speaker: 'Participant', text: pending, start: now, end: now }
+    transcriptRef.current = [...transcriptRef.current, entry]
+    setTranscript([...transcriptRef.current])
+    conversationBufferRef.current += `\n参加者: ${pending}`
+    scheduleDraftSave()
+  }
+
   // ── テキスト入力で回答を送信 ──────────────────────────
   function submitTextAnswer() {
-    const text = textInput.trim()
-    if (!text || !onAnswerCallbackRef.current) return
+    const typed = textInput.trim()
+    if (!typed || !onAnswerCallbackRef.current) return
 
     if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current)
+    clearAnswerGrace()
     speechRef.current?.stop()
     speechRef.current = null // onend の自動再起動を止める
     setLiveText('')
     setIsListening(false)
+
+    // 確定待ちの発話があれば、テキスト回答の前につなげて1つの回答にする
+    const spoken = pendingAnswerRef.current.trim()
+    pendingAnswerRef.current = ''
+    const text = spoken ? `${spoken} ${typed}` : typed
 
     const entry: TranscriptEntry = {
       speaker: 'Participant',
@@ -331,8 +368,11 @@ export default function InterviewRoom({
   }
 
   // ── Feature 1: 沈黙タイムアウト付き音声認識 ──────────
-  // 認識が回答なしに終了した場合（no-speech エラー等）は自動で聞き直し、
-  // マイク拒否など復旧不能なエラーはテキスト入力へ誘導する。
+  // ・発話が途切れてもすぐ確定せず、猶予時間（ANSWER_GRACE_MS）だけ「続き」を待つ。
+  //   息継ぎや考え込みで回答が途中で切られるのを防ぐ。猶予中も認識は動き続ける。
+  // ・認識が回答なしに終了した場合（no-speech エラー等）は自動で聞き直す。
+  // ・マイク拒否など復旧不能なエラーはテキスト入力へ誘導する。
+  const ANSWER_GRACE_MS = 4000
   function listenForAnswer(onAnswer: (answer: string) => void, silenceRetry = false) {
     // テキスト入力フォールバック用にコールバックを保存
     onAnswerCallbackRef.current = onAnswer
@@ -343,6 +383,8 @@ export default function InterviewRoom({
     if (!SR) return // テキスト入力フォールバックで対応
 
     const startTime = (Date.now() - startTimeRef.current) / 1000
+    // 認識インスタンスの再起動をまたいで蓄積する確定テキスト
+    let capturedText = ''
 
     // 沈黙タイムアウト（30秒）。認識の自動再起動では延長しない
     const armSilenceTimer = () => {
@@ -369,6 +411,8 @@ export default function InterviewRoom({
 
     const deliver = (text: string) => {
       if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current)
+      clearAnswerGrace()
+      pendingAnswerRef.current = ''
       setLiveText('')
       setIsListening(false)
       const entry: TranscriptEntry = {
@@ -384,6 +428,19 @@ export default function InterviewRoom({
       onAnswer(text)
     }
 
+    // 発話が途切れた → 猶予時間だけ続きを待ち、来なければ確定する
+    const armGraceTimer = () => {
+      if (answerGraceTimerRef.current) clearTimeout(answerGraceTimerRef.current)
+      setAnswerGrace(true)
+      answerGraceTimerRef.current = setTimeout(() => {
+        answerGraceTimerRef.current = null
+        setAnswerGrace(false)
+        speechRef.current?.stop()
+        speechRef.current = null // onend の自動再起動を止める
+        deliver(capturedText.trim())
+      }, ANSWER_GRACE_MS)
+    }
+
     const startRecognition = () => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const recognition: any = new SR()
@@ -391,61 +448,68 @@ export default function InterviewRoom({
       recognition.continuous = true
       recognition.interimResults = true
 
-      let finalText = ''
-      let answered = false
       let fatalError = false
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       recognition.onresult = (event: any) => {
-        // 何か話し始めたらタイマー解除（回答の途中で打ち切らないため）
+        // 話し始めたら沈黙タイマー解除（回答の途中で打ち切らないため）
         if (silenceTimerRef.current) {
           clearTimeout(silenceTimerRef.current)
           silenceTimerRef.current = null
         }
+        // 続きを話し始めたら確定猶予も解除
+        if (answerGraceTimerRef.current) {
+          clearTimeout(answerGraceTimerRef.current)
+          answerGraceTimerRef.current = null
+          setAnswerGrace(false)
+        }
         let interim = ''
         for (let i = event.resultIndex; i < event.results.length; i++) {
           if (event.results[i].isFinal) {
-            finalText += event.results[i][0].transcript
+            capturedText += event.results[i][0].transcript
           } else {
             interim = event.results[i][0].transcript
           }
         }
-        setLiveText(finalText + interim)
+        pendingAnswerRef.current = capturedText
+        setLiveText(capturedText + interim)
       }
 
       recognition.onspeechend = () => {
+        // 確定はせず onend の猶予判定に任せる（続きを待つ）
         recognition.stop()
-        if (finalText.trim()) {
-          answered = true
-          deliver(finalText.trim())
-        }
-        // finalText が空（interim のみ等）の場合は onend の自動再起動に任せる
       }
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       recognition.onerror = (event: any) => {
-        // マイク拒否などの復旧不能なエラー → 再起動せずテキスト入力へ誘導
+        // マイク拒否などの復旧不能なエラー
         if (['not-allowed', 'service-not-allowed', 'audio-capture'].includes(event?.error)) {
           fatalError = true
           if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current)
-          setSpeechSupported(false) // 入力欄に「音声認識不可 — テキストで入力してください」が出る
-          setLiveText('')
-          setIsListening(false)
+          clearAnswerGrace()
+          if (capturedText.trim()) {
+            // ここまでの発話は回答として確定して先へ進む
+            speechRef.current = null
+            deliver(capturedText.trim())
+          } else {
+            setSpeechSupported(false) // 入力欄に「音声認識不可 — テキストで入力してください」が出る
+            setLiveText('')
+            setIsListening(false)
+          }
         }
         // no-speech / network 等の一時的なエラーは onend の自動再起動で回復する
       }
 
       recognition.onend = () => {
-        if (answered || fatalError) return
-        if (speechRef.current !== recognition) return // 手動停止（テキスト送信・次へ・終了）
-        if (finalText.trim()) {
-          // onspeechend を経ずに確定テキストを持ったまま終了したケース
-          answered = true
-          deliver(finalText.trim())
-          return
+        if (fatalError) return
+        if (speechRef.current !== recognition) return // 手動停止 or 猶予タイマーで確定済み
+        if (capturedText.trim()) {
+          // 回答は取れている → 猶予を待ちつつ、続きに備えて聞き続ける
+          if (!answerGraceTimerRef.current) armGraceTimer()
+        } else {
+          // 回答が取れないまま認識が終了 → 自動で聞き直す
+          if (!silenceTimerRef.current) armSilenceTimer()
         }
-        // 回答が取れないまま認識が終了 → 自動で聞き直す
-        if (!silenceTimerRef.current) armSilenceTimer()
         startRecognition()
       }
 
@@ -601,28 +665,44 @@ export default function InterviewRoom({
 
   // ── タスク完了 → 事後インタビュー開始 ─────────────────
   function completeTasksAndStartInterview() {
-    // ウィジェットを閉じる（BroadcastChannel 経由 + 直接 close）
-    widgetChannelRef.current?.postMessage({ type: 'session_ended' })
-    try { pipWindowRef.current?.close() } catch { /* ignore */ }
-    pipWindowRef.current = null
-    if (questions.length === 0) {
-      endInterview()
+    const begin = () => {
+      if (endedRef.current) return // 待機中に別経路で終了した場合は何もしない
+      // ウィジェットを閉じる（BroadcastChannel 経由 + 直接 close）
+      widgetChannelRef.current?.postMessage({ type: 'session_ended' })
+      try { pipWindowRef.current?.close() } catch { /* ignore */ }
+      pipWindowRef.current = null
+      if (questions.length === 0) {
+        endInterview()
+        return
+      }
+      setPhase('intro')
+      const intro = `お疲れ様でした。続いて、操作を通じて感じたことをいくつかお聞きします。`
+      speak(intro, () => {
+        setPhase('interview')
+        currentQuestionIndexRef.current = 0
+        setCurrentQuestionIndex(0)
+        setIsFollowUp(false)
+        const q = questions[0]
+        setDisplayedQuestion(q.text)
+        conversationBufferRef.current = `AI: ${q.text}`
+        speak(q.text, () => {
+          if (q.type === 'open') listenForAnswer(decideNext)
+        })
+      })
+    }
+
+    // 被験者がまだサービスタブにいる（このタブが非表示）なら、戻ってくるまで質問開始を待つ。
+    // その間ウィジェットは「元のタブに戻ってください」を表示し続ける。
+    if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
+      const onVisible = () => {
+        if (document.visibilityState !== 'visible') return
+        document.removeEventListener('visibilitychange', onVisible)
+        begin()
+      }
+      document.addEventListener('visibilitychange', onVisible)
       return
     }
-    setPhase('intro')
-    const intro = `お疲れ様でした。続いて、操作を通じて感じたことをいくつかお聞きします。`
-    speak(intro, () => {
-      setPhase('interview')
-      currentQuestionIndexRef.current = 0
-      setCurrentQuestionIndex(0)
-      setIsFollowUp(false)
-      const q = questions[0]
-      setDisplayedQuestion(q.text)
-      conversationBufferRef.current = `AI: ${q.text}`
-      speak(q.text, () => {
-        if (q.type === 'open') listenForAnswer(decideNext)
-      })
-    })
+    begin()
   }
 
   // ── インタビュー開始 ──────────────────────────────────
@@ -740,8 +820,10 @@ export default function InterviewRoom({
     if (!text || isSpeaking || aiThinking) return
     // 再生音をマイクが拾わないよう認識を止め、読み上げ後に聞き直しから再開する
     if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current)
+    clearAnswerGrace()
     speechRef.current?.stop()
     speechRef.current = null
+    flushPendingAnswer() // 話しかけの内容は会話ログに残す
     setLiveText('')
     setIsListening(false)
     speak(text, () => listenForAnswer(decideNext), false)
@@ -750,8 +832,10 @@ export default function InterviewRoom({
   // ── 手動で次へ ────────────────────────────────────────
   function manualNext() {
     if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current)
+    clearAnswerGrace()
     speechRef.current?.stop()    // 音声認識停止
     speechRef.current = null     // onend の自動再起動を止める
+    flushPendingAnswer()         // 確定待ちの発話を回答として残してから次へ
     speakVersionRef.current++    // 再生中の TTS をキャンセル
     currentAudioRef.current?.pause()
     currentAudioRef.current = null
@@ -762,14 +846,17 @@ export default function InterviewRoom({
 
   // ── インタビュー終了 ──────────────────────────────────
   async function endInterview() {
+    endedRef.current = true
     // ウィジェットを閉じる（BroadcastChannel 経由 + 直接 close）
     widgetChannelRef.current?.postMessage({ type: 'session_ended' })
     try { pipWindowRef.current?.close() } catch { /* ignore */ }
     pipWindowRef.current = null
     setPhase('ending')
     if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current)
+    clearAnswerGrace()
     speechRef.current?.stop()
     speechRef.current = null // onend の自動再起動を止める
+    flushPendingAnswer() // 確定待ちの発話も最終データに含める
     speak('ご回答いただきありがとうございました。本日のインタビューはこれで終了です。貴重なお時間をありがとうございました。', async () => {
       await submitResults()
       setPhase('done')
@@ -957,9 +1044,10 @@ export default function InterviewRoom({
         )}
       </div>
 
-      <div className="flex-1 flex overflow-hidden">
+      {/* md 未満は縦積み（カメラ上 / パネル下）、md 以上は従来の横並び */}
+      <div className="flex-1 flex flex-col md:flex-row overflow-hidden">
         {/* 左：カメラ（左カラムいっぱいに表示、絶対配置で高さ変動なし） */}
-        <div className="flex-1 relative overflow-hidden bg-gray-900">
+        <div className="flex-1 min-h-0 relative overflow-hidden bg-gray-900">
 
           {/* カメラ映像：左カラム全体を覆う */}
           {cameraError ? (
@@ -1024,10 +1112,11 @@ export default function InterviewRoom({
             </div>
           )}
 
-          {/* 案内フェーズ（オーバーレイ） */}
+          {/* 案内フェーズ（オーバーレイ）。カードが画面より高い場合はスクロール可能 */}
           {phase === 'guide' && (
-            <div className="absolute inset-0 bg-gray-950/40 backdrop-blur-sm flex items-center justify-center p-8">
-              <div className="text-center max-w-lg w-full bg-white rounded-2xl border border-gray-200 shadow-xl p-8">
+            <div className="absolute inset-0 bg-gray-950/40 backdrop-blur-sm overflow-y-auto">
+              <div className="min-h-full flex items-center justify-center p-4 md:p-8">
+              <div className="text-center max-w-lg w-full bg-white rounded-2xl border border-gray-200 shadow-xl p-6 md:p-8">
                 <div className="w-12 h-12 mx-auto mb-4 rounded-xl bg-gray-100 flex items-center justify-center text-gray-700">
                   {interviewType === 'impression' ? <ImageIcon className="w-5 h-5" strokeWidth={1.75} />
                     : interviewType === 'usability' && usabilityMode === 'prototype' ? <Palette className="w-5 h-5" strokeWidth={1.75} />
@@ -1043,7 +1132,7 @@ export default function InterviewRoom({
                 <h1 className="text-xl font-semibold tracking-tight mb-4 text-gray-900">{interviewTitle}</h1>
                 {/* 小さい画面（スマホ等）への注意。md 以上では非表示 */}
                 <div className="md:hidden mb-4 bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-800 text-left leading-relaxed">
-                  画面の小さい端末では正しく動作しない場合があります。
+                  スマートフォンでも回答できますが、画面共有・タスク用小窓などの一部機能は PC のみ対応です。
                   <span className="font-semibold">PC の Chrome / Edge</span> での参加を推奨します。
                 </div>
                 <div className="bg-gray-50 border border-gray-200 rounded-lg p-5 text-left mb-5 space-y-3">
@@ -1140,6 +1229,7 @@ export default function InterviewRoom({
                     )}
                   </>
                 )}
+              </div>
               </div>
             </div>
           )}
@@ -1282,12 +1372,12 @@ export default function InterviewRoom({
               声で答えるインタビューの主役は質問文なので、自分の顔しか映らない
               メイン画面に「いま何をすべきか」を大きく表示する */}
           {(phase === 'interview' || phase === 'thinking') && currentQ?.type === 'open' && (
-            <div className="absolute top-6 inset-x-0 flex justify-center px-6 z-10 pointer-events-none">
-              <div className="bg-white/95 border border-gray-200 rounded-xl shadow-lg px-6 py-4 max-w-2xl w-full">
+            <div className="absolute top-3 md:top-6 inset-x-0 flex justify-center px-3 md:px-6 z-10 pointer-events-none">
+              <div className="bg-white/95 border border-gray-200 rounded-xl shadow-lg px-4 py-3 md:px-6 md:py-4 max-w-2xl w-full">
                 <p className="text-[10px] text-gray-500 uppercase tracking-wide font-medium mb-1">
                   {isFollowUp ? `質問 ${currentQuestionIndex + 1}（深掘り）` : `質問 ${currentQuestionIndex + 1} / ${questions.length}`}
                 </p>
-                <p className="text-base font-medium text-gray-900 leading-relaxed">
+                <p className="text-sm md:text-base font-medium text-gray-900 leading-relaxed">
                   {displayedQuestion || currentQ?.text}
                 </p>
                 <div className="mt-2 text-xs">
@@ -1295,6 +1385,11 @@ export default function InterviewRoom({
                     <span className="text-gray-500">AI が質問を読み上げています…</span>
                   ) : aiThinking || phase === 'thinking' ? (
                     <span className="text-amber-700">AI が次の質問を考えています…</span>
+                  ) : answerGrace ? (
+                    <span className="inline-flex items-center gap-1.5 text-emerald-700 font-medium">
+                      <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                      回答を受け付けました — 続きがあればそのまま話してください
+                    </span>
                   ) : isListening ? (
                     <span className="inline-flex items-center gap-1.5 text-emerald-700 font-medium">
                       <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
@@ -1317,8 +1412,8 @@ export default function InterviewRoom({
 
           {/* 評価質問（オーバーレイ） */}
           {phase === 'interview' && !isSpeaking && currentQ?.type === 'rating' && (
-            <div className="absolute inset-0 bg-gray-950/40 backdrop-blur-sm flex items-center justify-center p-8">
-              <div className="bg-white rounded-xl border border-gray-200 shadow-xl p-8">
+            <div className="absolute inset-0 bg-gray-950/40 backdrop-blur-sm flex items-center justify-center p-4 md:p-8">
+              <div className="bg-white rounded-xl border border-gray-200 shadow-xl p-6 md:p-8">
                 <RatingQuestion
                   question={currentQ.text}
                   onSubmit={(v) => submitRating(v, `${v} / 5`)}
@@ -1327,8 +1422,8 @@ export default function InterviewRoom({
             </div>
           )}
           {phase === 'interview' && !isSpeaking && currentQ?.type === 'nps' && (
-            <div className="absolute inset-0 bg-gray-950/40 backdrop-blur-sm flex items-center justify-center p-8">
-              <div className="bg-white rounded-xl border border-gray-200 shadow-xl p-8">
+            <div className="absolute inset-0 bg-gray-950/40 backdrop-blur-sm flex items-center justify-center p-4 md:p-8">
+              <div className="bg-white rounded-xl border border-gray-200 shadow-xl p-6 md:p-8">
                 <NpsQuestion
                   question={currentQ.text}
                   onSubmit={(v) => submitRating(v, `${v} / 10`)}
@@ -1403,8 +1498,8 @@ export default function InterviewRoom({
           )}
         </div>
 
-        {/* 右：質問パネル + 会話ログ（スクロール独立） */}
-        <div className="w-96 border-l border-gray-200 bg-gray-50 flex flex-col overflow-hidden">
+        {/* 右：質問パネル + 会話ログ（スクロール独立）。md 未満では下段 45vh */}
+        <div className="w-full md:w-96 h-[45vh] md:h-auto flex-shrink-0 border-t md:border-t-0 md:border-l border-gray-200 bg-gray-50 flex flex-col overflow-hidden">
           {/* タスクリスト (usability) */}
           {interviewType === 'usability' && tasks && tasks.length > 0 && (phase === 'waiting' || phase === 'task' || phase === 'interview' || phase === 'thinking' || phase === 'intro') && (
             <div className="p-4 border-b border-gray-200 flex-shrink-0 bg-white">

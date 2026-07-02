@@ -130,8 +130,8 @@ export default function JoinPage(props: { params: Promise<{ interviewId: string 
           </ul>
           {/* 小さい画面（スマホ等）への注意。md 以上では非表示 */}
           <div className="md:hidden bg-amber-50 border border-amber-200 rounded-md p-3 text-xs text-amber-800 leading-relaxed">
-            このインタビューは <span className="font-semibold">PC の Chrome / Edge</span> での参加を推奨します。
-            画面の小さい端末では正しく動作しない場合があります。
+            スマートフォンでも参加できますが、<span className="font-semibold">PC の Chrome / Edge</span> での参加を推奨します
+            （画面共有などの一部機能は PC のみ対応です）。
           </div>
         </div>
 
