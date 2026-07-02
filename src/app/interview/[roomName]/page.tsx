@@ -1,4 +1,5 @@
 import { prisma } from '@/lib/db'
+import { signParticipantToken } from '@/lib/jwt'
 import { notFound } from 'next/navigation'
 import InterviewRoom from '@/components/InterviewRoom'
 
@@ -20,9 +21,13 @@ export default async function InterviewPage(props: { params: Promise<{ roomName:
 
   if (!session) notFound()
 
+  // 被験者向け API（TTS・深掘り判断・結果送信など）の認証に使うセッション限定トークン
+  const sessionToken = await signParticipantToken(session.id)
+
   return (
     <InterviewRoom
       sessionId={session.id}
+      sessionToken={sessionToken}
       roomName={roomName}
       dailyRoomUrl={session.dailyRoomUrl}
       questions={session.interview.questions.map((q) => ({

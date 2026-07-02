@@ -27,6 +27,8 @@ interface Question {
 
 interface Props {
   sessionId: string
+  /** 被験者向け API の認証に使うセッション限定トークン（サーバーコンポーネントで発行） */
+  sessionToken: string
   roomName: string
   dailyRoomUrl: string
   questions: Question[]
@@ -50,6 +52,7 @@ type Phase = 'guide' | 'waiting' | 'stimulus' | 'task' | 'intro' | 'interview' |
 
 export default function InterviewRoom({
   sessionId,
+  sessionToken,
   questions,
   interviewTitle,
   participantName,
@@ -76,6 +79,33 @@ export default function InterviewRoom({
   const followUpCountRef = useRef(0)
   const conversationBufferRef = useRef('')
 
+  // 被験者向け API 共通の認証ヘッダー
+  const authHeaders: Record<string, string> = {
+    'Content-Type': 'application/json',
+    'x-session-token': sessionToken,
+  }
+
+  // ── 文字起こしの逐次保存（途中離脱・クラッシュ対策） ──
+  // 発言が追加されるたびに 2 秒デバウンスでドラフトを保存する。失敗しても進行は止めない。
+  const draftSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const scheduleDraftSave = useCallback(() => {
+    if (draftSaveTimerRef.current) clearTimeout(draftSaveTimerRef.current)
+    draftSaveTimerRef.current = setTimeout(() => {
+      const entries = transcriptRef.current
+      if (entries.length === 0) return
+      fetch(`/api/sessions/${sessionId}/transcript`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-session-token': sessionToken },
+        body: JSON.stringify({
+          transcript: entries.map((t) => `[${t.speaker}]: ${t.text}`).join('\n'),
+          segments: entries.map((t) => ({
+            speaker: t.speaker, text: t.text, start: t.start, end: t.end ?? t.start + 5,
+          })),
+        }),
+      }).catch(() => { /* ドラフト保存失敗は無視（最終送信で確定する） */ })
+    }, 2000)
+  }, [sessionId, sessionToken])
+
   // 実感情検出フック
   const { status: emotionStatus, lastEmotion, startDetection, stopDetection, getSnapshots } = useEmotionDetection(5000)
   const [cameraReady, setCameraReady] = useState(false)
@@ -84,7 +114,14 @@ export default function InterviewRoom({
   useEffect(() => {
     if (lastEmotion) {
       setEmotionHistory((prev) => [...prev, lastEmotion].slice(-30))
+      // 感情データも逐次保存（途中離脱してもそれまでの分は残る）
+      fetch('/api/emotions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-session-token': sessionToken },
+        body: JSON.stringify({ sessionId, ...lastEmotion }),
+      }).catch(() => { /* 逐次保存失敗は無視（最終送信で確定する） */ })
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lastEmotion])
 
   const [phase, setPhase] = useState<Phase>('guide') // Feature 6: 初期フェーズを guide に
@@ -104,6 +141,10 @@ export default function InterviewRoom({
   const [textOnlyMode, setTextOnlyMode] = useState(false) // 非対応でも続行する場合
   const [isListening, setIsListening] = useState(false)
   const [recordingDownloadUrl, setRecordingDownloadUrl] = useState<string | null>(null)
+  // 録画のサーバー送信状況（done 画面の文言出し分けに使用）
+  const [recordingUpload, setRecordingUpload] = useState<'none' | 'uploading' | 'done' | 'failed'>('none')
+  // 終了処理（録画アップロード + AI 分析リクエスト）中の表示
+  const [submitting, setSubmitting] = useState(false)
   // テキスト入力フォールバック用：listenForAnswer のコールバックを保持
   const onAnswerCallbackRef = useRef<((answer: string) => void) | null>(null)
 
@@ -153,10 +194,11 @@ export default function InterviewRoom({
     }
     transcriptRef.current = [...transcriptRef.current, entry]
     setTranscript([...transcriptRef.current])
+    scheduleDraftSave()
 
     fetch('/api/tts', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'x-session-token': sessionToken },
       body: JSON.stringify({ text }),
     })
       .then((res) => {
@@ -192,7 +234,7 @@ export default function InterviewRoom({
         setIsSpeaking(false)
         onEnd?.() // TTS 失敗時もインタビューは続行
       })
-  }, [])
+  }, [sessionToken, scheduleDraftSave])
 
   // ── カメラ初期化 ─────────────────────────────────────
   useEffect(() => {
@@ -217,6 +259,7 @@ export default function InterviewRoom({
       currentAudioRef.current?.pause()
       currentAudioRef.current = null
       if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current)
+      if (draftSaveTimerRef.current) clearTimeout(draftSaveTimerRef.current)
       stopDetection()
       if (screenMediaRecorderRef.current?.state !== 'inactive') {
         screenMediaRecorderRef.current?.stop()
@@ -233,6 +276,17 @@ export default function InterviewRoom({
 
   // 感情検出はインタビュー開始時に startInterview() 内で起動する。
   // こうすることで録画の t=0 と感情タイムスタンプの t=0 が一致する。
+
+  // ── インタビュー中の誤離脱防止 ────────────────────────
+  useEffect(() => {
+    if (phase === 'guide' || phase === 'done') return
+    const handler = (e: BeforeUnloadEvent) => {
+      e.preventDefault()
+      e.returnValue = '' // ブラウザ標準の確認ダイアログを表示
+    }
+    window.addEventListener('beforeunload', handler)
+    return () => window.removeEventListener('beforeunload', handler)
+  }, [phase])
 
   // ── テキスト入力で回答を送信 ──────────────────────────
   function submitTextAnswer() {
@@ -253,6 +307,7 @@ export default function InterviewRoom({
     transcriptRef.current = [...transcriptRef.current, entry]
     setTranscript([...transcriptRef.current])
     conversationBufferRef.current += `\n参加者: ${text}`
+    scheduleDraftSave()
 
     setTextInput('')
     const callback = onAnswerCallbackRef.current
@@ -328,6 +383,7 @@ export default function InterviewRoom({
         transcriptRef.current = [...transcriptRef.current, entry]
         setTranscript([...transcriptRef.current])
         conversationBufferRef.current += `\n参加者: ${finalText.trim()}`
+        scheduleDraftSave()
         onAnswer(finalText.trim())
       }
     }
@@ -349,6 +405,7 @@ export default function InterviewRoom({
     transcriptRef.current = [...transcriptRef.current, entry]
     setTranscript([...transcriptRef.current])
     conversationBufferRef.current += `\n参加者: ${answerText}`
+    scheduleDraftSave()
     setRatingValue(null)
 
     // 評価質問は AI 深掘りなし → 次へ
@@ -370,7 +427,7 @@ export default function InterviewRoom({
     try {
       const res = await fetch('/api/interviewer', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: authHeaders,
         body: JSON.stringify({
           plannedQuestion: questions[currentQuestionIndexRef.current].text,
           participantAnswer,
@@ -541,7 +598,7 @@ export default function InterviewRoom({
 
     await fetch(`/api/sessions/${sessionId}`, {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authHeaders,
       body: JSON.stringify({ status: 'active' }),
     })
 
@@ -642,14 +699,30 @@ export default function InterviewRoom({
   }
 
   async function submitResults() {
-    // 録画停止 → ダウンロード用 URL を state に保存（サーバーアップロードは Vercel 4.5MB 制限のため断念）
+    setSubmitting(true)
+    // 保留中のドラフト保存はキャンセル（この後の最終送信で確定する）
+    if (draftSaveTimerRef.current) clearTimeout(draftSaveTimerRef.current)
+
+    // 録画停止 → サーバーへアップロード。失敗時はローカルダウンロードにフォールバック
     const recordingBlob = await stopMediaRecorder()
     if (recordingBlob.size > 0) {
-      const url = URL.createObjectURL(recordingBlob)
-      setRecordingDownloadUrl(url)
+      setRecordingUpload('uploading')
+      try {
+        const res = await fetch(`/api/sessions/${sessionId}/recording`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'video/webm', 'x-session-token': sessionToken },
+          body: recordingBlob,
+        })
+        if (!res.ok) throw new Error(`upload failed: ${res.status}`)
+        setRecordingUpload('done')
+      } catch {
+        setRecordingUpload('failed')
+        // アップロードできなかった場合のみ、被験者に手動ダウンロードを依頼する
+        setRecordingDownloadUrl(URL.createObjectURL(recordingBlob))
+      }
     }
 
-    // 画面録画も保存
+    // 画面録画（usability）はサーバー保存先が未実装のため、従来どおりローカル保存
     const screenBlob = await stopScreenRecorder()
     if (screenBlob.size > 0) {
       const screenUrl = URL.createObjectURL(screenBlob)
@@ -658,18 +731,19 @@ export default function InterviewRoom({
 
     await fetch(`/api/sessions/${sessionId}`, {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authHeaders,
       body: JSON.stringify({ status: 'completed' }),
-    })
+    }).catch(() => {})
     const fullText = transcriptRef.current.map((t) => `[${t.speaker}]: ${t.text}`).join('\n')
     const segments = transcriptRef.current.map((t) => ({
       speaker: t.speaker, text: t.text, start: t.start, end: t.end ?? t.start + 5,
     }))
     await fetch(`/api/sessions/${sessionId}/process`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authHeaders,
       body: JSON.stringify({ transcript: fullText, segments, emotions: getSnapshots() }),
-    })
+    }).catch(() => {})
+    setSubmitting(false)
   }
 
   // ── 画面共有開始 ──────────────────────────────────────
@@ -1064,6 +1138,16 @@ export default function InterviewRoom({
             </div>
           )}
 
+          {/* 終了処理中（録画アップロード + 分析リクエスト） */}
+          {phase === 'ending' && submitting && (
+            <div className="absolute inset-0 bg-gray-950/40 backdrop-blur-sm flex items-center justify-center z-10">
+              <div className="bg-white rounded-xl border border-gray-200 shadow-xl px-8 py-6 text-center">
+                <p className="text-sm font-medium text-gray-900 mb-1 animate-pulse">結果を送信しています...</p>
+                <p className="text-xs text-gray-500">録画データの送信中はこのページを閉じないでください</p>
+              </div>
+            </div>
+          )}
+
           {/* 完了画面（オーバーレイ）— ダッシュボードボタンなし */}
           {phase === 'done' && (
             <div className="absolute inset-0 bg-gray-950/40 backdrop-blur-sm flex items-center justify-center">
@@ -1074,16 +1158,28 @@ export default function InterviewRoom({
                 <h2 className="text-xl font-semibold tracking-tight mb-2 text-gray-900">インタビュー完了</h2>
                 <p className="text-gray-600 text-sm mb-4">ご回答いただきありがとうございました。</p>
                 <div className="flex flex-col gap-2 items-center">
-                  {recordingDownloadUrl ? (
-                    <a
-                      href={recordingDownloadUrl}
-                      download={`interview-${sessionId.slice(0, 8)}.webm`}
-                      className="inline-flex items-center gap-1.5 bg-gray-900 hover:bg-gray-800 text-white px-4 py-2 rounded-md text-sm font-medium transition-colors"
-                    >
-                      <Video className="w-3.5 h-3.5" strokeWidth={2} />
-                      顔録画をダウンロード
-                    </a>
-                  ) : (
+                  {recordingUpload === 'done' && (
+                    <p className="text-gray-500 text-xs">
+                      録画と回答データは自動的に送信されました。このページを閉じていただいて構いません。
+                    </p>
+                  )}
+                  {recordingUpload === 'failed' && recordingDownloadUrl && (
+                    <>
+                      <p className="text-amber-700 text-xs leading-relaxed max-w-xs">
+                        録画の自動送信に失敗しました。お手数ですが下のボタンから録画をダウンロードし、
+                        担当者にお送りください。
+                      </p>
+                      <a
+                        href={recordingDownloadUrl}
+                        download={`interview-${sessionId.slice(0, 8)}.webm`}
+                        className="inline-flex items-center gap-1.5 bg-gray-900 hover:bg-gray-800 text-white px-4 py-2 rounded-md text-sm font-medium transition-colors"
+                      >
+                        <Video className="w-3.5 h-3.5" strokeWidth={2} />
+                        顔録画をダウンロード
+                      </a>
+                    </>
+                  )}
+                  {(recordingUpload === 'none' || recordingUpload === 'uploading') && (
                     <p className="text-gray-500 text-xs">このページを閉じていただいて構いません。</p>
                   )}
                   {screenRecordingDownloadUrl && (

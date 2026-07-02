@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import OpenAI from 'openai'
+import { requireParticipant, handleApiError } from '@/lib/api-auth'
 
 // ビルド時のモジュール評価でエラーが出ないよう、呼び出し時に初期化する
 function getClient() {
@@ -13,6 +14,9 @@ export interface InterviewerDecision {
 }
 
 export async function POST(req: NextRequest) {
+  try {
+  await requireParticipant(req)
+
   const body = await req.json()
   const {
     plannedQuestion,   // 現在の設定質問
@@ -78,5 +82,8 @@ ${participantAnswer}
     return NextResponse.json(decision)
   } catch {
     return NextResponse.json<InterviewerDecision>({ action: 'next_question', reason: 'parse error' })
+  }
+  } catch (err) {
+    return handleApiError(err)
   }
 }

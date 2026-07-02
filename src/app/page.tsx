@@ -1,6 +1,4 @@
 import Link from 'next/link'
-import { prisma } from '@/lib/db'
-import StatusBadge from '@/components/StatusBadge'
 import {
   Video,
   Sparkles,
@@ -11,20 +9,9 @@ import {
   ArrowRight,
 } from 'lucide-react'
 
-export const dynamic = 'force-dynamic'
+// トップページは未認証で誰でも見られるため、DB のデータ（セッション数・参加者名など）は表示しない
 
-export default async function Home() {
-  const [interviewCount, sessionCount] = await Promise.all([
-    prisma.interview.count(),
-    prisma.session.count(),
-  ])
-
-  const recentSessions = await prisma.session.findMany({
-    take: 5,
-    orderBy: { createdAt: 'desc' },
-    include: { interview: { select: { title: true } }, participant: true },
-  })
-
+export default function Home() {
   return (
     <main className="min-h-screen bg-white text-gray-900">
       <nav className="border-b border-gray-200 px-6 py-3.5 flex items-center justify-between">
@@ -67,16 +54,7 @@ export default async function Home() {
           </div>
         </div>
 
-        <div className="grid grid-cols-3 gap-3 mb-20">
-          <StatCard value={interviewCount} label="インタビューテンプレート" />
-          <StatCard value={sessionCount} label="実施済みセッション" />
-          <StatCard
-            value={recentSessions.filter((s) => s.status === 'done').length}
-            label="分析完了"
-          />
-        </div>
-
-        <div className="grid grid-cols-3 gap-3 mb-20">
+        <div className="grid grid-cols-3 gap-3">
           <FeatureCard
             icon={<Video className="w-5 h-5" strokeWidth={1.5} />}
             title="ビデオ会議"
@@ -108,41 +86,8 @@ export default async function Home() {
             desc="「どのユーザーが最も困惑した？」などと質問するだけ"
           />
         </div>
-
-        {recentSessions.length > 0 && (
-          <div>
-            <h2 className="text-sm font-medium text-gray-500 uppercase tracking-wide mb-3">
-              最近のセッション
-            </h2>
-            <div className="border border-gray-200 rounded-lg overflow-hidden divide-y divide-gray-100">
-              {recentSessions.map((s) => (
-                <Link
-                  key={s.id}
-                  href={`/dashboard/sessions/${s.id}`}
-                  className="flex items-center justify-between px-4 py-3 hover:bg-gray-50 transition-colors"
-                >
-                  <div className="min-w-0 flex-1">
-                    <span className="font-medium text-gray-900">{s.participant?.name ?? 'Anonymous'}</span>
-                    <span className="text-gray-300 mx-2">·</span>
-                    <span className="text-gray-500 text-sm">{s.interview.title}</span>
-                  </div>
-                  <StatusBadge status={s.status} />
-                </Link>
-              ))}
-            </div>
-          </div>
-        )}
       </div>
     </main>
-  )
-}
-
-function StatCard({ value, label }: { value: number; label: string }) {
-  return (
-    <div className="bg-white border border-gray-200 rounded-lg p-5">
-      <div className="text-3xl font-semibold text-gray-900 mb-0.5 tracking-tight">{value}</div>
-      <div className="text-gray-500 text-xs">{label}</div>
-    </div>
   )
 }
 

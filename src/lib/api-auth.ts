@@ -1,6 +1,11 @@
 import { cookies } from 'next/headers'
-import { NextResponse } from 'next/server'
-import { verifyToken, type TokenPayload } from './jwt'
+import { NextRequest, NextResponse } from 'next/server'
+import {
+  verifyToken,
+  verifyParticipantToken,
+  type TokenPayload,
+  type ParticipantTokenPayload,
+} from './jwt'
 import { prisma } from './db'
 import { hasPermission, type Role } from './permissions'
 
@@ -25,6 +30,22 @@ export async function requireAuth(): Promise<TokenPayload> {
   if (!token) throw new AuthError()
   const payload = await verifyToken(token)
   if (!payload) throw new AuthError()
+  return payload
+}
+
+/**
+ * 被験者向け API の認証。x-session-token ヘッダーの署名付きトークンを検証する。
+ * sessionId を渡すと、トークンがそのセッション専用であることも検証する。
+ */
+export async function requireParticipant(
+  req: NextRequest,
+  sessionId?: string,
+): Promise<ParticipantTokenPayload> {
+  const token = req.headers.get('x-session-token')
+  if (!token) throw new AuthError()
+  const payload = await verifyParticipantToken(token)
+  if (!payload) throw new AuthError()
+  if (sessionId && payload.sessionId !== sessionId) throw new ForbiddenError()
   return payload
 }
 

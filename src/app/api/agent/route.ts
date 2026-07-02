@@ -5,15 +5,16 @@ import { requireAuth, handleApiError } from '@/lib/api-auth'
 
 export async function POST(req: NextRequest) {
   try {
-  await requireAuth()
+  const { orgId } = await requireAuth()
   const body = await req.json()
   const { messages, sessionId, interviewId } = body
 
   let context = ''
 
   if (sessionId) {
-    const session = await prisma.session.findUnique({
-      where: { id: sessionId },
+    // 自組織のセッションのみ AI コンテキストに載せる（IDOR 対策）
+    const session = await prisma.session.findFirst({
+      where: { id: sessionId, interview: { organizationId: orgId } },
       include: {
         interview: { include: { questions: true } },
         participant: true,
@@ -26,8 +27,8 @@ export async function POST(req: NextRequest) {
       context = buildSessionContext(session)
     }
   } else if (interviewId) {
-    const interview = await prisma.interview.findUnique({
-      where: { id: interviewId },
+    const interview = await prisma.interview.findFirst({
+      where: { id: interviewId, organizationId: orgId },
       include: {
         questions: true,
         sessions: {

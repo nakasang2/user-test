@@ -1,9 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import OpenAI from 'openai'
+import { requireParticipant, handleApiError } from '@/lib/api-auth'
 
 function getClient() {
   return new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
 }
+
+// TTS で読み上げる質問文の想定上限。API キー課金の踏み台化を防ぐ
+const MAX_TTS_LENGTH = 1_000
 
 /**
  * POST /api/tts
@@ -15,26 +19,35 @@ function getClient() {
  * 他の選択肢: shimmer（穏やか）/ alloy（中性）/ onyx（低め男性）
  */
 export async function POST(req: NextRequest) {
-  const body = await req.json() as { text?: string }
-  const text = body.text?.trim()
-  if (!text) return NextResponse.json({ error: 'text is required' }, { status: 400 })
+  try {
+    await requireParticipant(req)
 
-  const client = getClient()
-  const response = await client.audio.speech.create({
-    model: 'tts-1',
-    voice: 'nova',
-    input: text,
-    response_format: 'mp3',
-    speed: 0.95,  // わずかにゆっくり（インタビュー向け）
-  })
+    const body = await req.json() as { text?: string }
+    const text = body.text?.trim()
+    if (!text) return NextResponse.json({ error: 'text is required' }, { status: 400 })
+    if (text.length > MAX_TTS_LENGTH) {
+      return NextResponse.json({ error: 'text is too long' }, { status: 400 })
+    }
 
-  const buffer = Buffer.from(await response.arrayBuffer())
+    const client = getClient()
+    const response = await client.audio.speech.create({
+      model: 'tts-1',
+      voice: 'nova',
+      input: text,
+      response_format: 'mp3',
+      speed: 0.95,  // わずかにゆっくり（インタビュー向け）
+    })
 
-  return new Response(buffer, {
-    headers: {
-      'Content-Type': 'audio/mpeg',
-      'Content-Length': String(buffer.byteLength),
-      'Cache-Control': 'no-store',
-    },
-  })
+    const buffer = Buffer.from(await response.arrayBuffer())
+
+    return new Response(buffer, {
+      headers: {
+        'Content-Type': 'audio/mpeg',
+        'Content-Length': String(buffer.byteLength),
+        'Cache-Control': 'no-store',
+      },
+    })
+  } catch (err) {
+    return handleApiError(err)
+  }
 }
