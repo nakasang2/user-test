@@ -19,6 +19,7 @@ import {
   Sparkles,
   AlertCircle,
   Copy,
+  Volume2,
 } from 'lucide-react'
 
 interface Question {
@@ -144,6 +145,10 @@ export default function InterviewRoom({
   const [recordingUpload, setRecordingUpload] = useState<'none' | 'uploading' | 'done' | 'failed'>('none')
   // 終了処理（録画アップロード + AI 分析リクエスト）中の表示
   const [submitting, setSubmitting] = useState(false)
+  // TTS が再生できない場合の案内表示（質問はテキストで確認できることを伝える）
+  const [ttsFailed, setTtsFailed] = useState(false)
+  // 印象テスト: 刺激画像の読み込み失敗
+  const [stimulusError, setStimulusError] = useState(false)
   // テキスト入力フォールバック用：listenForAnswer のコールバックを保持
   const onAnswerCallbackRef = useRef<((answer: string) => void) | null>(null)
 
@@ -173,7 +178,8 @@ export default function InterviewRoom({
   }, [])
 
   // ── TTS（OpenAI tts-1）────────────────────────────────
-  const speak = useCallback((text: string, onEnd?: () => void) => {
+  // logEntry: false で「聞き直し」再生（会話ログに重複追加しない）
+  const speak = useCallback((text: string, onEnd?: () => void, logEntry = true) => {
     if (typeof window === 'undefined') return
 
     // 再生中の音声をキャンセル
@@ -185,15 +191,17 @@ export default function InterviewRoom({
 
     setIsSpeaking(true)
 
-    // 文字起こしログへ即時追加（音声再生前に表示）
-    const entry: TranscriptEntry = {
-      speaker: 'Interviewer',
-      text,
-      start: (Date.now() - startTimeRef.current) / 1000,
+    if (logEntry) {
+      // 文字起こしログへ即時追加（音声再生前に表示）
+      const entry: TranscriptEntry = {
+        speaker: 'Interviewer',
+        text,
+        start: (Date.now() - startTimeRef.current) / 1000,
+      }
+      transcriptRef.current = [...transcriptRef.current, entry]
+      setTranscript([...transcriptRef.current])
+      scheduleDraftSave()
     }
-    transcriptRef.current = [...transcriptRef.current, entry]
-    setTranscript([...transcriptRef.current])
-    scheduleDraftSave()
 
     fetch('/api/tts', {
       method: 'POST',
@@ -213,6 +221,7 @@ export default function InterviewRoom({
           URL.revokeObjectURL(url)
           currentAudioRef.current = null
           if (version !== speakVersionRef.current) return
+          setTtsFailed(false) // 正常再生できたら案内を消す
           setIsSpeaking(false)
           onEnd?.()
         }
@@ -220,16 +229,19 @@ export default function InterviewRoom({
           URL.revokeObjectURL(url)
           currentAudioRef.current = null
           if (version !== speakVersionRef.current) return
+          setTtsFailed(true)
           setIsSpeaking(false)
           onEnd?.()
         }
         audio.play().catch(() => {
+          setTtsFailed(true) // 自動再生ブロック等
           setIsSpeaking(false)
           if (version === speakVersionRef.current) onEnd?.()
         })
       })
       .catch(() => {
         if (version !== speakVersionRef.current) return
+        setTtsFailed(true)
         setIsSpeaking(false)
         onEnd?.() // TTS 失敗時もインタビューは続行
       })
@@ -342,7 +354,7 @@ export default function InterviewRoom({
         setIsListening(false)
         if (!silenceRetry) {
           // 1回目のタイムアウト：促す
-          speak('もう少し聞かせていただけますか？', () => {
+          speak('準備ができましたら、お話しください。テキストで入力することもできます。', () => {
             listenForAnswer(onAnswer, true)
           })
         } else {
@@ -722,6 +734,19 @@ export default function InterviewRoom({
     })
   }
 
+  // ── 質問の聞き直し ────────────────────────────────────
+  function replayQuestion() {
+    const text = displayedQuestion || currentQ?.text
+    if (!text || isSpeaking || aiThinking) return
+    // 再生音をマイクが拾わないよう認識を止め、読み上げ後に聞き直しから再開する
+    if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current)
+    speechRef.current?.stop()
+    speechRef.current = null
+    setLiveText('')
+    setIsListening(false)
+    speak(text, () => listenForAnswer(decideNext), false)
+  }
+
   // ── 手動で次へ ────────────────────────────────────────
   function manualNext() {
     if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current)
@@ -1016,6 +1041,11 @@ export default function InterviewRoom({
                     : 'インタビュー'}
                 </span>
                 <h1 className="text-xl font-semibold tracking-tight mb-4 text-gray-900">{interviewTitle}</h1>
+                {/* 小さい画面（スマホ等）への注意。md 以上では非表示 */}
+                <div className="md:hidden mb-4 bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-800 text-left leading-relaxed">
+                  画面の小さい端末では正しく動作しない場合があります。
+                  <span className="font-semibold">PC の Chrome / Edge</span> での参加を推奨します。
+                </div>
                 <div className="bg-gray-50 border border-gray-200 rounded-lg p-5 text-left mb-5 space-y-3">
                   <p className="text-xs text-gray-500 font-medium uppercase tracking-wide">
                     {interviewType === 'usability' ? 'テストの流れ' : 'インタビューの流れ'}
@@ -1025,9 +1055,12 @@ export default function InterviewRoom({
                       <li className="flex gap-2.5"><span className="text-gray-400 flex-shrink-0 font-medium">1.</span>カメラ・マイクを許可してください</li>
                       {usabilityMode === 'prototype' ? (
                         <>
-                          <li className="flex gap-2.5"><span className="text-gray-400 flex-shrink-0 font-medium">2.</span>画面にプロトタイプが表示されます。タスクに沿って操作してください</li>
-                          <li className="flex gap-2.5"><span className="text-gray-400 flex-shrink-0 font-medium">3.</span>気づいたこと・感じたことを声に出しながら操作してください（シンクアラウド）</li>
-                          <li className="flex gap-2.5"><span className="text-gray-400 flex-shrink-0 font-medium">4.</span>操作が終わったら「タスク完了」を押してください。その後、簡単な質問があります</li>
+                          <li className="flex gap-2.5"><span className="text-gray-400 flex-shrink-0 font-medium">2.</span>
+                            <span>開始直後に画面共有の確認が表示されます。<span className="text-gray-900 font-medium">「このタブ」を選択</span>して共有してください</span>
+                          </li>
+                          <li className="flex gap-2.5"><span className="text-gray-400 flex-shrink-0 font-medium">3.</span>画面にプロトタイプが表示されます。タスクに沿って操作してください</li>
+                          <li className="flex gap-2.5"><span className="text-gray-400 flex-shrink-0 font-medium">4.</span>気づいたこと・感じたことを声に出しながら操作してください（シンクアラウド）</li>
+                          <li className="flex gap-2.5"><span className="text-gray-400 flex-shrink-0 font-medium">5.</span>操作が終わったら「タスク完了」を押してください。その後、簡単な質問があります</li>
                         </>
                       ) : (
                         <>
@@ -1041,6 +1074,15 @@ export default function InterviewRoom({
                           <li className="flex gap-2.5"><span className="text-gray-400 flex-shrink-0 font-medium">5.</span>操作が終わったら小窓の「タスク完了 → 質問へ」を押してください</li>
                         </>
                       )}
+                    </ul>
+                  ) : interviewType === 'impression' ? (
+                    <ul className="space-y-2 text-sm text-gray-700">
+                      <li className="flex gap-2.5"><span className="text-gray-400 flex-shrink-0 font-medium">1.</span>カメラ・マイクを許可してください</li>
+                      <li className="flex gap-2.5"><span className="text-gray-400 flex-shrink-0 font-medium">2.</span>
+                        <span>開始すると<span className="text-gray-900 font-medium">画像が {stimulusDuration ?? 5} 秒間表示</span>されます。第一印象を意識してご覧ください</span>
+                      </li>
+                      <li className="flex gap-2.5"><span className="text-gray-400 flex-shrink-0 font-medium">3.</span>その後、AI が感想を音声で質問します（{questions.length} 問 + 深掘り）</li>
+                      <li className="flex gap-2.5"><span className="text-gray-400 flex-shrink-0 font-medium">4.</span>マイクに向かって自由に話してください</li>
                     </ul>
                   ) : (
                     <ul className="space-y-2 text-sm text-gray-700">
@@ -1087,7 +1129,14 @@ export default function InterviewRoom({
                       {!cameraReady || emotionStatus === 'loading' ? '準備中...' : (<>インタビューを開始する<ArrowRight className="w-4 h-4" strokeWidth={2} /></>)}
                     </button>
                     {(!cameraReady || emotionStatus === 'loading') && (
-                      <p className="text-xs text-gray-500 mt-2 animate-pulse">カメラと解析モデルを初期化中</p>
+                      <div className="mt-2 space-y-1">
+                        <p className="text-xs text-gray-500 animate-pulse">カメラと解析モデルを初期化中</p>
+                        {!cameraReady && (
+                          <p className="text-xs text-amber-700">
+                            ブラウザにカメラ・マイクの許可ダイアログが表示されている場合は「許可」を押してください
+                          </p>
+                        )}
+                      </div>
                     )}
                   </>
                 )}
@@ -1099,11 +1148,23 @@ export default function InterviewRoom({
           {/* 印象テスト: 刺激表示フェーズ */}
           {phase === 'stimulus' && stimulusUrl && (
             <div className="absolute inset-0 bg-gray-50 flex items-center justify-center">
-              <img
-                src={stimulusUrl}
-                alt="stimulus"
-                className="max-w-full max-h-full object-contain"
-              />
+              {stimulusError ? (
+                <p className="text-sm text-gray-500 px-8 text-center">
+                  画像を読み込めませんでした。このまま質問に進みます。
+                </p>
+              ) : (
+                <img
+                  src={stimulusUrl}
+                  alt="stimulus"
+                  onError={() => setStimulusError(true)}
+                  className="max-w-full max-h-full object-contain"
+                />
+              )}
+              <div className="absolute top-6 inset-x-0 flex justify-center pointer-events-none">
+                <span className="bg-gray-900/80 text-white text-sm px-4 py-1.5 rounded-full shadow-lg">
+                  この画像をご覧ください
+                </span>
+              </div>
               {stimulusCountdown > 0 && (
                 <div className="absolute bottom-6 right-6 w-12 h-12 rounded-full bg-gray-900 text-white flex items-center justify-center text-xl font-semibold shadow-lg">
                   {stimulusCountdown}
@@ -1112,10 +1173,16 @@ export default function InterviewRoom({
             </div>
           )}
 
-          {/* ユーザビリティテスト: タスクフェーズオーバーレイ */}
+          {/* ユーザビリティテスト: タスクフェーズオーバーレイ
+              prototype モードは背後の iframe を操作するため、暗幕なし・クリック透過にする
+              （service モードは背後がカメラ映像のみなので従来の暗幕つき） */}
           {phase === 'task' && interviewType === 'usability' && (
-            <div className="absolute inset-0 bg-gray-950/40 backdrop-blur-sm flex items-end justify-center pb-8 z-10">
-              <div className="bg-white border border-gray-200 rounded-xl shadow-xl p-5 max-w-md w-full mx-4 space-y-4">
+            <div className={
+              usabilityMode === 'prototype'
+                ? 'absolute inset-x-0 bottom-0 flex items-end justify-center pb-8 z-10 pointer-events-none'
+                : 'absolute inset-0 bg-gray-950/40 backdrop-blur-sm flex items-end justify-center pb-8 z-10'
+            }>
+              <div className="bg-white border border-gray-200 rounded-xl shadow-xl p-5 max-w-md w-full mx-4 space-y-4 pointer-events-auto">
                 {tasks && tasks.length > 0 && (
                   <div>
                     <p className="text-[10px] text-gray-500 mb-1 uppercase tracking-wide font-medium">
@@ -1211,6 +1278,43 @@ export default function InterviewRoom({
             </div>
           )}
 
+          {/* 現在の質問と回答状態（メインエリア上部・クリック透過）
+              声で答えるインタビューの主役は質問文なので、自分の顔しか映らない
+              メイン画面に「いま何をすべきか」を大きく表示する */}
+          {(phase === 'interview' || phase === 'thinking') && currentQ?.type === 'open' && (
+            <div className="absolute top-6 inset-x-0 flex justify-center px-6 z-10 pointer-events-none">
+              <div className="bg-white/95 border border-gray-200 rounded-xl shadow-lg px-6 py-4 max-w-2xl w-full">
+                <p className="text-[10px] text-gray-500 uppercase tracking-wide font-medium mb-1">
+                  {isFollowUp ? `質問 ${currentQuestionIndex + 1}（深掘り）` : `質問 ${currentQuestionIndex + 1} / ${questions.length}`}
+                </p>
+                <p className="text-base font-medium text-gray-900 leading-relaxed">
+                  {displayedQuestion || currentQ?.text}
+                </p>
+                <div className="mt-2 text-xs">
+                  {isSpeaking ? (
+                    <span className="text-gray-500">AI が質問を読み上げています…</span>
+                  ) : aiThinking || phase === 'thinking' ? (
+                    <span className="text-amber-700">AI が次の質問を考えています…</span>
+                  ) : isListening ? (
+                    <span className="inline-flex items-center gap-1.5 text-emerald-700 font-medium">
+                      <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                      どうぞお話しください — 自動で文字起こしされます
+                    </span>
+                  ) : (
+                    <span className="text-gray-500">右のパネルからテキストでも回答できます</span>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* TTS が再生できない場合の案内（下部中央・質問カードと重ならない位置） */}
+          {ttsFailed && phase !== 'guide' && phase !== 'done' && (
+            <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-30 bg-amber-50 border border-amber-200 text-amber-800 text-xs px-3 py-1.5 rounded-md shadow-sm pointer-events-none whitespace-nowrap">
+              音声を再生できません — 質問は画面のテキストでご確認ください
+            </div>
+          )}
+
           {/* 評価質問（オーバーレイ） */}
           {phase === 'interview' && !isSpeaking && currentQ?.type === 'rating' && (
             <div className="absolute inset-0 bg-gray-950/40 backdrop-blur-sm flex items-center justify-center p-8">
@@ -1278,14 +1382,20 @@ export default function InterviewRoom({
                     <p className="text-gray-500 text-xs">このページを閉じていただいて構いません。</p>
                   )}
                   {screenRecordingDownloadUrl && (
-                    <a
-                      href={screenRecordingDownloadUrl}
-                      download={`screen-${sessionId.slice(0, 8)}.webm`}
-                      className="inline-flex items-center gap-1.5 border border-gray-300 hover:border-gray-400 text-gray-700 hover:text-gray-900 px-4 py-2 rounded-md text-sm font-medium transition-colors"
-                    >
-                      <Monitor className="w-3.5 h-3.5" strokeWidth={2} />
-                      操作録画（顔合成）をダウンロード
-                    </a>
+                    <>
+                      <p className="text-amber-700 text-xs leading-relaxed max-w-xs">
+                        画面操作の録画は自動送信されません。お手数ですが下のボタンからダウンロードし、
+                        担当者にお送りください。
+                      </p>
+                      <a
+                        href={screenRecordingDownloadUrl}
+                        download={`screen-${sessionId.slice(0, 8)}.webm`}
+                        className="inline-flex items-center gap-1.5 border border-gray-300 hover:border-gray-400 text-gray-700 hover:text-gray-900 px-4 py-2 rounded-md text-sm font-medium transition-colors"
+                      >
+                        <Monitor className="w-3.5 h-3.5" strokeWidth={2} />
+                        操作録画（顔合成）をダウンロード
+                      </a>
+                    </>
                   )}
                 </div>
               </div>
@@ -1326,13 +1436,18 @@ export default function InterviewRoom({
           {interviewType === 'usability' && usabilityMode === 'prototype' && (phase === 'waiting' || phase === 'task' || phase === 'interview' || phase === 'thinking' || phase === 'intro') && (
             <div className="p-3 border-b border-gray-200 flex-shrink-0 bg-white">
               {!screenSharing ? (
-                <button
-                  onClick={startScreenShare}
-                  className="w-full inline-flex items-center justify-center gap-1.5 bg-white hover:bg-gray-50 border border-gray-300 hover:border-gray-900 text-gray-700 hover:text-gray-900 px-3 py-2 rounded-md text-xs font-medium transition-colors"
-                >
-                  <Mic className="w-3.5 h-3.5" strokeWidth={2} />
-                  録画を開始（このタブを共有）
-                </button>
+                <>
+                  <button
+                    onClick={startScreenShare}
+                    className="w-full inline-flex items-center justify-center gap-1.5 bg-white hover:bg-gray-50 border border-gray-300 hover:border-gray-900 text-gray-700 hover:text-gray-900 px-3 py-2 rounded-md text-xs font-medium transition-colors"
+                  >
+                    <Monitor className="w-3.5 h-3.5" strokeWidth={2} />
+                    録画を開始（このタブを共有）
+                  </button>
+                  <p className="text-[10px] text-gray-500 mt-1.5 text-center">
+                    共有ダイアログでは「このタブ」を選択してください
+                  </p>
+                </>
               ) : (
                 <div className="flex items-center gap-2 text-xs text-emerald-700">
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
@@ -1367,6 +1482,16 @@ export default function InterviewRoom({
               <p className={`text-sm font-medium leading-relaxed ${isFollowUp ? 'text-amber-700' : 'text-gray-900'}`}>
                 {displayedQuestion || currentQ?.text}
               </p>
+              {phase === 'interview' && !isSpeaking && !aiThinking && currentQ?.type === 'open' && (
+                <button
+                  onClick={replayQuestion}
+                  title="話しかけ中の内容はリセットされます"
+                  className="mt-2 inline-flex items-center gap-1 text-[11px] text-gray-500 hover:text-gray-900 underline underline-offset-2 transition-colors"
+                >
+                  <Volume2 className="w-3 h-3" strokeWidth={2} />
+                  質問をもう一度再生
+                </button>
+              )}
               {aiThinking && (
                 <div className="mt-3 flex items-center gap-2 text-xs text-amber-700">
                   <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-bounce" />

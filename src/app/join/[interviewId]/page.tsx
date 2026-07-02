@@ -105,7 +105,7 @@ export default function JoinPage(props: { params: Promise<{ interviewId: string 
           <ul className="space-y-2.5 text-sm text-gray-700">
             <li className="flex items-start gap-2.5">
               <Clock className="w-4 h-4 text-gray-400 mt-0.5 flex-shrink-0" strokeWidth={1.75} />
-              <span>所要時間：<strong className="text-gray-900 font-medium">約 15〜30 分</strong></span>
+              <span>所要時間の目安：<strong className="text-gray-900 font-medium">約 15〜30 分</strong>（内容により前後します）</span>
             </li>
             <li className="flex items-start gap-2.5">
               <Video className="w-4 h-4 text-gray-400 mt-0.5 flex-shrink-0" strokeWidth={1.75} />
@@ -121,11 +121,18 @@ export default function JoinPage(props: { params: Promise<{ interviewId: string 
               <VolumeX className="w-4 h-4 text-gray-400 mt-0.5 flex-shrink-0" strokeWidth={1.75} />
               <span>静かな場所で、<strong className="text-gray-900 font-medium">イヤホンなし</strong>での参加を推奨します</span>
             </li>
-            <li className="flex items-start gap-2.5">
-              <MessageSquare className="w-4 h-4 text-gray-400 mt-0.5 flex-shrink-0" strokeWidth={1.75} />
-              <span>操作・思考の過程を声に出してください（シンクアラウド）</span>
-            </li>
+            {isUsability && (
+              <li className="flex items-start gap-2.5">
+                <MessageSquare className="w-4 h-4 text-gray-400 mt-0.5 flex-shrink-0" strokeWidth={1.75} />
+                <span>操作・思考の過程を声に出してください（シンクアラウド）</span>
+              </li>
+            )}
           </ul>
+          {/* 小さい画面（スマホ等）への注意。md 以上では非表示 */}
+          <div className="md:hidden bg-amber-50 border border-amber-200 rounded-md p-3 text-xs text-amber-800 leading-relaxed">
+            このインタビューは <span className="font-semibold">PC の Chrome / Edge</span> での参加を推奨します。
+            画面の小さい端末では正しく動作しない場合があります。
+          </div>
         </div>
 
         {/* フォーム */}
@@ -196,7 +203,7 @@ export default function JoinPage(props: { params: Promise<{ interviewId: string 
             disabled={loading || !name.trim() || !consent}
             className="w-full inline-flex items-center justify-center gap-1.5 bg-gray-900 hover:bg-gray-800 text-white disabled:opacity-40 disabled:cursor-not-allowed px-4 py-2.5 rounded-md text-sm font-medium transition-colors"
           >
-            {loading ? '準備中...' : (<>インタビューを開始する<ArrowRight className="w-4 h-4" strokeWidth={2} /></>)}
+            {loading ? '準備中...' : (<>同意して参加する<ArrowRight className="w-4 h-4" strokeWidth={2} /></>)}
           </button>
 
           {!consent && name.trim() && (

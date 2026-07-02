@@ -23,6 +23,7 @@ function WidgetContent() {
   const [doneMessage, setDoneMessage]           = useState('')
   const [isScreenRecording, setIsScreenRecording] = useState(false)
   const [warnNoRecord, setWarnNoRecord]         = useState(false)
+  const [confirmEnd, setConfirmEnd]             = useState(false)
 
   const channelRef             = useRef<BroadcastChannel | null>(null)
   const webcamVideoRef         = useRef<HTMLVideoElement>(null)
@@ -212,7 +213,8 @@ function WidgetContent() {
     focusInterviewPage()            // ① フォーカス（ユーザージェスチャー文脈）
     await stopAndSendRecording()    // ② 録画停止 & blob 送信
     channelRef.current?.postMessage({ type: 'task_complete' })
-    setDoneMessage('インタビューページに戻ります...')
+    // フォーカス移動が効かないブラウザでも迷わないよう、戻り先を明示して表示し続ける
+    setDoneMessage('元のタブ（インタビュー画面）に戻って、質問にお答えください')
     setWidgetPhase('done')
   }
 
@@ -222,7 +224,7 @@ function WidgetContent() {
     focusInterviewPage()
     await stopAndSendRecording()
     channelRef.current?.postMessage({ type: 'task_complete' })
-    setDoneMessage('インタビューページに戻ります...')
+    setDoneMessage('元のタブ（インタビュー画面）に戻って、質問にお答えください')
     setWidgetPhase('done')
   }
 
@@ -231,9 +233,9 @@ function WidgetContent() {
     focusInterviewPage()
     await stopAndSendRecording()
     channelRef.current?.postMessage({ type: 'end_session' })
-    setDoneMessage('セッションを終了します...')
+    setDoneMessage('終了しました。元のタブ（インタビュー画面）にお戻りください')
     setWidgetPhase('done')
-    setTimeout(() => window.close(), 800)
+    setTimeout(() => window.close(), 1500)
   }
 
   /* ── 完了画面 ─────────────────────────────────────────────── */
@@ -298,14 +300,19 @@ function WidgetContent() {
       <div className="px-3 pb-3 space-y-2 flex-shrink-0">
         {/* 画面録画ボタン */}
         {!isScreenRecording ? (
-          <button
-            onClick={startScreenRecording}
-            className="w-full inline-flex items-center justify-center gap-2 bg-red-50 hover:bg-red-100 border-2 border-red-500 hover:border-red-600 text-red-700 py-2.5 rounded-lg text-sm font-semibold transition-colors animate-pulse hover:animate-none"
-          >
-            <Monitor className="w-4 h-4" strokeWidth={2} />
-            画面録画を開始する
-            <span className="bg-red-600 text-white text-[10px] font-bold px-1.5 py-0.5 rounded leading-none">必須</span>
-          </button>
+          <div className="space-y-1">
+            <button
+              onClick={startScreenRecording}
+              className="w-full inline-flex items-center justify-center gap-2 bg-red-50 hover:bg-red-100 border-2 border-red-500 hover:border-red-600 text-red-700 py-2.5 rounded-lg text-sm font-semibold transition-colors animate-pulse hover:animate-none"
+            >
+              <Monitor className="w-4 h-4" strokeWidth={2} />
+              画面録画を開始する
+              <span className="bg-red-600 text-white text-[10px] font-bold px-1.5 py-0.5 rounded leading-none">必須</span>
+            </button>
+            <p className="text-[10px] text-gray-500 text-center">
+              共有ダイアログでは「画面全体」を選択してください
+            </p>
+          </div>
         ) : (
           <div className="flex items-center justify-center gap-1.5 py-2 text-xs text-red-600">
             <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
@@ -369,14 +376,35 @@ function WidgetContent() {
           </button>
         )}
 
-        {/* セッション終了 */}
-        <button
-          onClick={endSession}
-          className="w-full inline-flex items-center justify-center gap-1.5 border border-gray-300 hover:border-gray-400 text-gray-600 hover:text-gray-900 py-2 rounded-lg text-xs transition-colors"
-        >
-          <X className="w-3.5 h-3.5" strokeWidth={2} />
-          セッションを終了
-        </button>
+        {/* セッション終了（誤タップ防止のため確認を挟む） */}
+        {confirmEnd ? (
+          <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 text-xs space-y-2">
+            <p className="text-gray-900 font-medium">セッションを終了しますか？</p>
+            <p className="text-gray-500">ここまでの回答・録画は保存されます。この後の質問はスキップされます。</p>
+            <div className="flex gap-2">
+              <button
+                onClick={endSession}
+                className="flex-1 bg-gray-900 hover:bg-gray-800 text-white py-1.5 rounded-md text-xs font-medium transition-colors"
+              >
+                終了する
+              </button>
+              <button
+                onClick={() => setConfirmEnd(false)}
+                className="flex-1 bg-white border border-gray-300 hover:border-gray-400 text-gray-700 py-1.5 rounded-md text-xs transition-colors"
+              >
+                キャンセル
+              </button>
+            </div>
+          </div>
+        ) : (
+          <button
+            onClick={() => setConfirmEnd(true)}
+            className="w-full inline-flex items-center justify-center gap-1.5 border border-gray-300 hover:border-gray-400 text-gray-600 hover:text-gray-900 py-2 rounded-lg text-xs transition-colors"
+          >
+            <X className="w-3.5 h-3.5" strokeWidth={2} />
+            セッションを終了
+          </button>
+        )}
       </div>
     </div>
   )
