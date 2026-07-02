@@ -57,15 +57,29 @@ export async function GET(req: NextRequest, props: { params: Promise<{ id: strin
     }
   })
 
-  // AI に共通インサイトを生成させる
-  let commonInsights: string | null = null
+  // AI 共通インサイト：対象セッションの組み合わせが変わった時だけ再生成し、DB にキャッシュする
+  // （以前は GET のたびに LLM を呼んでいたため、開くたびに数秒の待ちと課金が発生していた）
+  let commonInsights: string | null = interview.commonInsights
   if (interview.sessions.length >= 2) {
-    const allSummaries = sessionsWithStats
-      .filter((s) => s.summary)
-      .map((s, i) => `参加者${i + 1}（${s.participantName}）: ${s.summary}`)
-      .join('\n')
+    const sessionKey = interview.sessions.map((s) => s.id).sort().join(',')
+    if (sessionKey !== interview.insightsSessionKey) {
+      const allSummaries = sessionsWithStats
+        .filter((s) => s.summary)
+        .map((s, i) => `参加者${i + 1}（${s.participantName}）: ${s.summary}`)
+        .join('\n')
 
-    commonInsights = await generateCommonInsights(interview.title, allSummaries)
+      const generated = await generateCommonInsights(interview.title, allSummaries)
+      if (generated) {
+        commonInsights = generated
+        await prisma.interview.update({
+          where: { id },
+          data: { commonInsights: generated, insightsSessionKey: sessionKey },
+        })
+      }
+      // 生成失敗時（null）は既存キャッシュを表示し、次回の GET で再試行する
+    }
+  } else {
+    commonInsights = null
   }
 
   return NextResponse.json({ interview, sessions: sessionsWithStats, commonInsights })

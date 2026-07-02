@@ -42,11 +42,19 @@ export default function InterviewComparePage(props: { params: Promise<{ id: stri
   const { id } = use(props.params)
   const [data, setData] = useState<CompareData | null>(null)
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState<string | null>(null)
 
   useEffect(() => {
     fetch(`/api/interviews/${id}/compare`)
-      .then((r) => r.json())
-      .then((d) => { setData(d); setLoading(false) })
+      .then((r) => {
+        if (r.status === 401) { window.location.href = '/login'; return null }
+        if (r.status === 404) { setLoadError('インタビューが見つかりません。削除されたか、閲覧権限がない可能性があります。'); return null }
+        if (!r.ok) { setLoadError('データの取得に失敗しました。'); return null }
+        return r.json()
+      })
+      .then((d) => d && setData(d))
+      .catch(() => setLoadError('ネットワークエラーが発生しました。'))
+      .finally(() => setLoading(false))
   }, [id])
 
   if (loading) {
@@ -56,7 +64,19 @@ export default function InterviewComparePage(props: { params: Promise<{ id: stri
       </div>
     )
   }
-  if (!data) return null
+  if (loadError || !data) {
+    return (
+      <div className="min-h-screen bg-white flex items-center justify-center px-4">
+        <div className="text-center max-w-sm">
+          <p className="text-gray-900 font-medium mb-1.5">表示できません</p>
+          <p className="text-gray-500 text-sm mb-4">{loadError ?? 'データの取得に失敗しました。'}</p>
+          <Link href="/dashboard" className="text-sm text-gray-700 hover:text-gray-900 underline underline-offset-2">
+            ダッシュボードへ戻る
+          </Link>
+        </div>
+      </div>
+    )
+  }
 
   const { interview, sessions, commonInsights } = data
 

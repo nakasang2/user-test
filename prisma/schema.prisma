@@ -78,6 +78,8 @@ model Interview {
   usabilityMode    String?       // prototype | service (only when type = usability)
   stimulusUrl      String?       // impression: image URL, prototype: Figma embed URL
   stimulusDuration Int?          // impression test: seconds to display (default 5)
+  commonInsights     String?  // 比較ページの AI 共通インサイト（キャッシュ）
+  insightsSessionKey String?  // キャッシュ対象の done セッション ID 一覧（変化検知用）
   questions        Question[]
   sessions         Session[]
   tasks            Task[]

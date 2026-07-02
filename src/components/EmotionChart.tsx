@@ -11,6 +11,7 @@ import {
   ResponsiveContainer,
   BarChart,
   Bar,
+  Cell,
   ReferenceLine,
 } from 'recharts'
 import { LineChart as LineChartIcon } from 'lucide-react'
@@ -188,9 +189,9 @@ export default function EmotionChart({ emotions, currentTime, onSeek }: Props) {
             <Tooltip
               contentStyle={{ backgroundColor: '#ffffff', border: '1px solid #e5e7eb', borderRadius: '6px', color: '#111827' }}
             />
-            <Bar dataKey="value" fill="#1f2937" radius={[0, 4, 4, 0]}>
-              {avgEmotions.map((entry, index) => (
-                <rect key={index} fill={entry.color} />
+            <Bar dataKey="value" radius={[0, 4, 4, 0]}>
+              {avgEmotions.map((entry) => (
+                <Cell key={entry.emotion} fill={entry.color} />
               ))}
             </Bar>
           </BarChart>

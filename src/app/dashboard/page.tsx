@@ -77,16 +77,31 @@ export default function Dashboard() {
   const [searchQuery, setSearchQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
   const [sortKey, setSortKey] = useState<SortKey>('date-desc')
+  const [fetchError, setFetchError] = useState<string | null>(null)
 
   useEffect(() => { fetchData() }, [])
 
   async function fetchData() {
-    const [iv, sv] = await Promise.all([
-      fetch('/api/interviews').then((r) => r.json()),
-      fetch('/api/sessions').then((r) => r.json()),
-    ])
-    setInterviews(iv)
-    setSessions(sv)
+    setFetchError(null)
+    try {
+      const [ivRes, svRes] = await Promise.all([
+        fetch('/api/interviews'),
+        fetch('/api/sessions'),
+      ])
+      // トークン失効（7日）後に開きっぱなしのタブで操作した場合はログインへ
+      if (ivRes.status === 401 || svRes.status === 401) {
+        window.location.href = '/login?from=%2Fdashboard'
+        return
+      }
+      if (!ivRes.ok || !svRes.ok) {
+        setFetchError('データの取得に失敗しました')
+        return
+      }
+      setInterviews(await ivRes.json())
+      setSessions(await svRes.json())
+    } catch {
+      setFetchError('ネットワークエラーが発生しました')
+    }
   }
 
   function toggleCollapse(id: string) {
@@ -215,6 +230,18 @@ export default function Dashboard() {
       </nav>
 
       <div className="max-w-7xl mx-auto px-6 py-8">
+        {fetchError && (
+          <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg flex items-center justify-between">
+            <p className="text-red-700 text-sm">{fetchError}</p>
+            <button
+              onClick={fetchData}
+              className="ml-4 flex-shrink-0 border border-red-300 hover:border-red-400 text-red-700 px-3 py-1.5 rounded-md text-xs font-medium transition-colors"
+            >
+              再読み込み
+            </button>
+          </div>
+        )}
+
         {/* サマリーカード */}
         <div className="grid grid-cols-3 gap-3 mb-8">
           <StatCard value={interviews.length} label="インタビューテンプレート" />

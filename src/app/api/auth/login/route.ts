@@ -22,7 +22,8 @@ export async function POST(req: NextRequest) {
     const user = await prisma.user.findUnique({ where: { email } })
     if (!user) {
       // タイミング攻撃対策：ユーザーが存在しない場合もハッシュ比較時間を消費
-      await bcrypt.compare(password, '$2a$12$dummyhashfortiminng000000000000000000000000')
+      // （正しい形式の bcrypt ハッシュでないと compare が即 return して対策にならない）
+      await bcrypt.compare(password, '$2b$12$2VzegPrc.0dUVVrUBTUQFebKnB7A.KwfLWD8SsB24FmleVF6nIcMu')
       return NextResponse.json({ error: 'メールアドレスまたはパスワードが違います' }, { status: 401 })
     }
 

@@ -37,16 +37,3 @@ export async function createRoom(name: string): Promise<{ url: string; name: str
   return { url: data.url, name: data.name }
 }
 
-export async function deleteRoom(name: string): Promise<void> {
-  await dailyFetch(`/rooms/${name}`, { method: 'DELETE' })
-}
-
-export async function getRecordings(roomName: string) {
-  const data = await dailyFetch(`/recordings?room_name=${roomName}`)
-  return data.data ?? []
-}
-
-export async function getRecordingDownloadLink(recordingId: string): Promise<string> {
-  const data = await dailyFetch(`/recordings/${recordingId}/access-link`)
-  return data.download_link
-}

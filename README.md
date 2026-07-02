@@ -8,13 +8,15 @@
 
 | 機能 | 説明 |
 |------|------|
-| 🎥 ビデオ会議 | URL を共有するだけで被験者がブラウザから参加 |
-| 🤖 AI インタビュアー | 設定した質問を Web Speech API (TTS) で自動読み上げ・進行 |
-| 🎙️ 音声認識 | ブラウザの Speech Recognition API でリアルタイム文字起こし |
-| 😊 表情・感情分析 | カメラ映像からリアルタイムで感情データを収集（5秒間隔） |
-| 📝 AI サマリー | Claude がインタビュー全体を要約・テーマ抽出 |
-| 📊 ダッシュボード | 被験者ごとの文字起こし・感情グラフを一覧表示 |
+| 🎥 セッション録画 | 被験者のカメラ映像を録画し、完了時に Vercel Blob へ自動アップロード |
+| 🤖 AI インタビュアー | 設定した質問を TTS で読み上げ、回答に応じて AI が深掘り質問を生成（最大2回） |
+| 🎙️ 音声認識 | ブラウザの Speech Recognition API でリアルタイム文字起こし（テキスト入力フォールバックあり） |
+| 😊 表情・感情分析 | face-api.js によるブラウザ内感情検出（5秒間隔・7感情） |
+| 📝 AI サマリー | インタビュー全体の要約・テーマ抽出・センチメント分析 |
+| 📊 ダッシュボード | 被験者ごとの文字起こし・感情グラフ・録画同期再生・CSV 出力 |
 | 💬 AI エージェント | 「誰が最も困惑していた？」などを自然言語で質問・回答 |
+| 🧪 テストモード | 通常インタビュー / 印象テスト（画像刺激） / ユーザビリティテスト（プロトタイプ・実サービス） |
+| 🏢 マルチテナント | 組織・メンバー管理（owner / admin / editor / viewer）、招待リンク |
 
 ---
 
@@ -22,11 +24,12 @@
 
 - **フレームワーク**: Next.js 16 (App Router, Turbopack)
 - **言語**: TypeScript
-- **DB**: SQLite (Prisma ORM) → 本番では PostgreSQL を推奨
-- **ビデオ**: [Daily.co](https://daily.co) REST API（オプション）
-- **AI 文字起こし**: OpenAI Whisper API（録音ファイルがある場合）
-- **AI 分析**: Anthropic Claude API (`claude-sonnet-4-6`)
-- **感情分析**: ブラウザ内でシミュレーション（本番は AWS Rekognition / Azure Face API へ差し替え可）
+- **DB**: PostgreSQL (Prisma ORM)
+- **認証**: JWT (jose) + httpOnly Cookie。被験者はセッション限定トークンで認証
+- **AI**: OpenAI `gpt-4o`（分析・深掘り判断・Q&A・質問生成）、`tts-1`（質問読み上げ）
+- **感情分析**: `@vladmandic/face-api`（ブラウザ内 ML、モデルは `public/models/`）
+- **録画ストレージ**: Vercel Blob
+- **ビデオルーム**: Daily.co REST API（オプション、`DAILY_API_KEY` 設定時のみ）
 - **グラフ**: Recharts
 - **スタイル**: Tailwind CSS v4
 
@@ -36,20 +39,14 @@
 
 ### 1. 環境変数を設定
 
-`.env.example` をコピーして `.env` を作成：
-
-```bash
-cp .env.example .env
-```
-
 `.env` に API キーを設定：
 
 ```env
-# 絶対パスで指定すること（Turbopack のワークスペース検出対策）
-DATABASE_URL="file:///absolute/path/to/user-interview-tool/prisma/dev.db"
-DAILY_API_KEY="your_daily_co_api_key"       # オプション（未設定でも動作）
-ANTHROPIC_API_KEY="your_anthropic_api_key"   # AI 分析・Q&A に必要
-OPENAI_API_KEY="your_openai_api_key"         # Whisper 文字起こしに必要
+DATABASE_URL="postgresql://..."
+JWT_SECRET="ランダムな長い文字列"            # 認証トークンの署名に必須
+OPENAI_API_KEY="your_openai_api_key"         # AI 分析・TTS・深掘りに必須
+BLOB_READ_WRITE_TOKEN="vercel_blob_token"    # 録画アップロードに必須（Vercel 上では自動注入）
+DAILY_API_KEY="your_daily_co_api_key"        # オプション（未設定でも動作）
 NEXT_PUBLIC_APP_URL="http://localhost:3000"
 ```
 
@@ -72,38 +69,35 @@ npx prisma generate
 npm run dev
 ```
 
-http://localhost:3000 にアクセス。
+http://localhost:3000 にアクセスし、`/register` で組織とアカウントを作成。
 
 ---
 
 ## 使い方
 
-### Step 1: インタビューテンプレートを作成
+### Step 1: インタビューを作成
 
-1. ダッシュボード → 「インタビュー作成」
-2. タイトル・質問を入力、または「AI で自動生成」でトピックを入力するだけ
+- ダッシュボード → 「AIで質問設計」: AI と対話しながらプロットを生成
+- または「手動で作成」: タイプ（インタビュー / 印象テスト / ユーザビリティ）と質問を直接入力
 
-### Step 2: セッション（インタビューURL）を発行
+### Step 2: 参加者を招待
 
-1. 作成したテンプレートの「セッション作成」をクリック
-2. 参加者名・メールを入力 → URL が発行される
-3. URL を被験者に共有する
+インタビューの「参加者を招待」で共有リンク（`/join/[interviewId]`）をコピーして被験者に送る。
+同じリンクを複数人に送れます。被験者は名前を入力し、**録画・分析への同意**（DB に記録）
+にチェックするとセッションが自動作成されます。
 
 ### Step 3: 被験者がインタビューに参加
 
-1. 被験者がブラウザで URL を開く
-2. カメラ・マイクを許可
-3. 「インタビューを開始する」をクリック
-4. AI が質問を読み上げ → 被験者が話す → 次の質問へ
-5. 完了後、自動的に結果が処理される
+1. カメラ・マイクを許可（拒否した場合はテキスト回答モードで続行可能）
+2. AI が質問を読み上げ → 被験者が話す → AI が深掘り or 次の質問へ
+3. 回答・感情データはインタビュー中に逐次保存（途中離脱してもそれまでの分は残る）
+4. 完了時に録画がサーバーへ自動アップロードされ、AI 分析が実行される
 
 ### Step 4: 結果を確認
 
-ダッシュボード → セッションをクリック：
-
-- **文字起こしタブ**: AI サマリー・テーマ・会話ログ
-- **感情分析タブ**: 時系列グラフ・平均感情分布
-- **AI に質問タブ**: チャットで分析（「主な不満点は？」等）
+- **セッション詳細**: AI サマリー・テーマ・会話ログ・感情グラフ（録画と同期再生）・CSV 出力（会話 / 感情）
+- **インタビュー詳細**: 参加者比較テーブル・感情レーダー・AI 共通インサイト（キャッシュされ、対象セッションが変わると再生成）
+- **AI アシスタント**: 右下のフローティングチャットで自然言語の質問
 
 ---
 
@@ -111,83 +105,64 @@ http://localhost:3000 にアクセス。
 
 ```
 src/
+├── proxy.ts                             # /dashboard/* の認証ガード
 ├── app/
-│   ├── page.tsx                         # トップページ
-│   ├── dashboard/page.tsx               # ダッシュボード
-│   ├── dashboard/sessions/[id]/page.tsx # セッション詳細
-│   ├── interview/[roomName]/page.tsx    # インタビュールーム（被験者用）
+│   ├── page.tsx                         # トップページ（静的・DB 非参照）
+│   ├── login / register / invite/[token]# 認証・招待受諾
+│   ├── join/[interviewId]/page.tsx      # 被験者の参加登録（同意取得）
+│   ├── interview/[roomName]/page.tsx    # インタビュールーム（被験者トークン発行）
+│   ├── interview/widget/page.tsx        # ユーザビリティテスト用タスクウィジェット（PiP）
+│   ├── dashboard/                       # ダッシュボード・セッション詳細・比較・AI設計・メンバー管理
 │   └── api/
-│       ├── interviews/                  # テンプレート CRUD
-│       ├── sessions/                    # セッション管理・URL発行
-│       ├── sessions/[id]/process/       # 処理パイプライン（文字起こし＋AI分析）
-│       ├── emotions/                    # 感情データ保存
-│       └── agent/                       # AI Q&A
+│       ├── auth/                        # login / register / logout
+│       ├── interviews/                  # テンプレート CRUD・比較（要ログイン + 組織スコープ）
+│       ├── sessions/[id]/               # 詳細(要ログイン) / ステータス(被験者トークン)
+│       │   ├── transcript/             # 逐次保存ドラフト（被験者トークン）
+│       │   ├── process/                # AI 分析・確定（被験者トークン or ログイン）
+│       │   └── recording/              # 録画アップロード（被験者トークン）
+│       ├── emotions/                    # 感情データ逐次保存（被験者トークン）
+│       ├── tts / interviewer/           # 読み上げ・深掘り判断（被験者トークン）
+│       ├── agent/                       # AI Q&A（要ログイン + 組織スコープ）
+│       ├── join / invite/               # 公開エンドポイント
+│       └── organizations/               # メンバー・招待管理（admin+）
 ├── components/
-│   ├── InterviewRoom.tsx                # ビデオ + AI 進行 + 感情収集
-│   ├── AgentChat.tsx                    # AI エージェント チャット UI
-│   ├── EmotionChart.tsx                 # 感情グラフ（Recharts）
-│   ├── TranscriptView.tsx               # 文字起こし・サマリー表示
-│   ├── CreateInterviewModal.tsx         # インタビュー作成モーダル
-│   └── CreateSessionModal.tsx           # セッション作成・URL 発行モーダル
+│   ├── InterviewRoom.tsx                # インタビュー進行（録画・TTS・音声認識・フェーズ管理）
+│   ├── interview/                       # RealtimeEmotionGraph / RatingQuestion / NpsQuestion
+│   ├── FloatingAgentChat.tsx            # AI エージェント チャット
+│   ├── EmotionChart.tsx / TranscriptView.tsx / StatusBadge.tsx
+│   └── CreateInterviewModal.tsx
+├── hooks/useEmotionDetection.ts         # face-api.js 感情検出
 └── lib/
     ├── db.ts                            # Prisma クライアント（シングルトン）
-    ├── daily.ts                         # Daily.co REST API ラッパー
-    ├── anthropic.ts                     # Claude API（分析・Q&A・質問生成）
-    └── whisper.ts                       # OpenAI Whisper（録音ファイル文字起こし）
+    ├── jwt.ts                           # ユーザー JWT + 被験者セッショントークン
+    ├── api-auth.ts                      # requireAuth / requireRole / requireParticipant
+    ├── permissions.ts                   # ロール階層
+    ├── ai.ts                            # OpenAI（分析・Q&A・質問生成・共通インサイト）
+    └── daily.ts                         # Daily.co ルーム作成（オプション）
 ```
 
 ---
 
-## API エンドポイント
+## API エンドポイントと認証
 
-| Method | Path | 説明 |
-|--------|------|------|
-| GET | `/api/interviews` | テンプレート一覧 |
-| POST | `/api/interviews` | テンプレート作成（AI 自動生成オプションあり） |
-| GET | `/api/interviews/[id]` | テンプレート詳細 |
-| DELETE | `/api/interviews/[id]` | テンプレート削除 |
-| GET | `/api/sessions` | セッション一覧 |
-| POST | `/api/sessions` | セッション作成・URL 発行 |
-| GET | `/api/sessions/[id]` | セッション詳細（文字起こし・感情含む） |
-| PATCH | `/api/sessions/[id]` | ステータス更新（`status`, `recordingId`, `recordingUrl`） |
-| POST | `/api/sessions/[id]/process` | 文字起こし・感情データ保存・AI 分析実行 |
-| POST | `/api/emotions` | 感情データ保存（インタビュー中に自動呼び出し） |
-| POST | `/api/agent` | AI エージェントへの質問 |
+| 認証 | エンドポイント |
+|------|------|
+| 公開 | `GET/POST /api/join/[interviewId]`, `GET/POST /api/invite/[token]`, `POST /api/auth/*` |
+| 被験者トークン（`x-session-token`） | `PATCH /api/sessions/[id]`, `POST .../transcript`, `POST .../recording`, `POST /api/emotions`, `POST /api/tts`, `POST /api/interviewer` |
+| ログイン + 組織スコープ | `GET/POST /api/interviews*`, `GET /api/sessions*`, `DELETE /api/sessions/[id]`, `POST /api/agent` |
+| ログイン or 被験者トークン | `POST /api/sessions/[id]/process` |
+| admin 以上 | `/api/organizations/*` |
 
----
-
-## 本番環境への展開
-
-### データベース
-SQLite → PostgreSQL へ変更：
-
-```prisma
-// prisma/schema.prisma
-datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
-}
-```
-
-### ビデオ録画（Daily.co）
-`DAILY_API_KEY` を設定すると：
-- クラウド録画が自動で有効化
-- 録画完了後に `/api/sessions/[id]/process` を Webhook で呼び出し、Whisper で文字起こし
-
-### 感情分析の精度向上
-`InterviewRoom.tsx` の `simulateEmotionDetection()` を以下に差し替え：
-- **AWS Rekognition**: `DetectFaces` API でフレームごとに解析
-- **Azure Face API**: `Face - Detect` API
-- **face-api.js**: ブラウザ内 ML（サーバー不要・プライバシー重視の場合）
+被験者トークンはインタビュールームのサーバーコンポーネントが発行するセッション限定 JWT（24時間有効）。
 
 ---
 
 ## 既知の制限・今後の課題
 
-- [ ] Google Meet 連携（現状は独自 URL のみ）
-- [ ] 感情分析は現状シミュレーション → 本番 API への差し替えが必要
-- [ ] Whisper 文字起こしは Daily.co の録音ファイルダウンロード後に動作
+- [ ] 画面録画（ユーザビリティテスト）はローカルダウンロードのみ（サーバー保存先が未実装）
 - [ ] 話者識別は「Interviewer / Participant」の2者固定（diarization 未実装）
-- [ ] 認証・アクセス制御なし（本番前に要追加）
-- [ ] Next.js 16 + Turbopack は開発マシンへの負荷が高い場合あり  
+- [ ] `processing` のまま失敗したセッションの自動リカバリなし（「AI 再分析」で手動再実行は可能）
+- [ ] transcript の全文検索は未実装（ダッシュボードの検索は参加者名のみ）
+- [ ] `npm run build` が `prisma db push` を実行する（本来は `prisma migrate deploy` が望ましい）
+- [ ] Next.js 16 + Turbopack は開発マシンへの負荷が高い場合あり
   → `next dev --webpack` で Webpack モードに切り替え可

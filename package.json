@@ -9,16 +9,10 @@
     "lint": "eslint"
   },
   "dependencies": {
-    "@daily-co/daily-js": "^0.90.0",
     "@prisma/client": "^6.19.3",
-    "@radix-ui/react-dialog": "^1.1.15",
-    "@radix-ui/react-select": "^2.2.6",
-    "@radix-ui/react-tabs": "^1.1.13",
     "@vercel/blob": "^2.4.0",
     "@vladmandic/face-api": "^1.7.15",
-    "axios": "^1.16.1",
     "bcryptjs": "^3.0.3",
-    "date-fns": "^4.2.1",
     "jose": "^6.2.3",
     "lucide-react": "^1.16.0",
     "next": "16.2.6",

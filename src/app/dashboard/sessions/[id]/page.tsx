@@ -55,6 +55,7 @@ interface Session {
 export default function SessionDetail(props: { params: Promise<{ id: string }> }) {
   const { id } = use(props.params)
   const [session, setSession] = useState<Session | null>(null)
+  const [loadError, setLoadError] = useState<string | null>(null)
   const [processing, setProcessing] = useState(false)
   const videoRef = useRef<HTMLVideoElement>(null)
   const [videoCurrentTime, setVideoCurrentTime] = useState(0)
@@ -86,9 +87,26 @@ export default function SessionDetail(props: { params: Promise<{ id: string }> }
 
   useEffect(() => {
     fetch(`/api/sessions/${id}`)
-      .then((r) => r.json())
-      .then(setSession)
+      .then((r) => {
+        if (r.status === 401) { window.location.href = '/login'; return null }
+        if (r.status === 404) { setLoadError('セッションが見つかりません。削除されたか、閲覧権限がない可能性があります。'); return null }
+        if (!r.ok) { setLoadError('セッションの取得に失敗しました。'); return null }
+        return r.json()
+      })
+      .then((d) => d && setSession(d))
+      .catch(() => setLoadError('ネットワークエラーが発生しました。'))
   }, [id])
+
+  function downloadCsv(rows: string[][], filename: string) {
+    const csv = rows.map((r) => r.join(',')).join('\n')
+    const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = filename
+    a.click()
+    URL.revokeObjectURL(url)
+  }
 
   function exportCsv() {
     if (!session) return
@@ -99,12 +117,19 @@ export default function SessionDetail(props: { params: Promise<{ id: string }> }
         String(s.startTime), String(s.endTime), s.sentiment ?? '',
       ]) ?? []),
     ]
-    const csv = rows.map((r) => r.join(',')).join('\n')
-    const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' })
-    const a = document.createElement('a')
-    a.href = URL.createObjectURL(blob)
-    a.download = `interview_${session.participant?.name ?? 'anonymous'}_${session.id.slice(0, 6)}.csv`
-    a.click()
+    downloadCsv(rows, `interview_${session.participant?.name ?? 'anonymous'}_${session.id.slice(0, 6)}.csv`)
+  }
+
+  function exportEmotionsCsv() {
+    if (!session) return
+    const rows: string[][] = [
+      ['timestamp', 'happy', 'sad', 'angry', 'fearful', 'disgusted', 'surprised', 'neutral'],
+      ...session.emotions.map((e) => [
+        String(e.timestamp), String(e.happy), String(e.sad), String(e.angry),
+        String(e.fearful), String(e.disgusted), String(e.surprised), String(e.neutral),
+      ]),
+    ]
+    downloadCsv(rows, `emotions_${session.participant?.name ?? 'anonymous'}_${session.id.slice(0, 6)}.csv`)
   }
 
   async function reanalyze() {
@@ -130,6 +155,20 @@ export default function SessionDetail(props: { params: Promise<{ id: string }> }
     } finally {
       setProcessing(false)
     }
+  }
+
+  if (loadError) {
+    return (
+      <div className="min-h-screen bg-white flex items-center justify-center px-4">
+        <div className="text-center max-w-sm">
+          <p className="text-gray-900 font-medium mb-1.5">表示できません</p>
+          <p className="text-gray-500 text-sm mb-4">{loadError}</p>
+          <Link href="/dashboard" className="text-sm text-gray-700 hover:text-gray-900 underline underline-offset-2">
+            ダッシュボードへ戻る
+          </Link>
+        </div>
+      </div>
+    )
   }
 
   if (!session) {
@@ -182,7 +221,15 @@ export default function SessionDetail(props: { params: Promise<{ id: string }> }
               onClick={exportCsv}
               className="border border-gray-300 hover:border-gray-400 text-gray-700 hover:text-gray-900 px-3 py-2 rounded-md text-xs transition-colors"
             >
-              CSV 出力
+              会話 CSV
+            </button>
+          )}
+          {session.emotions.length > 0 && (
+            <button
+              onClick={exportEmotionsCsv}
+              className="border border-gray-300 hover:border-gray-400 text-gray-700 hover:text-gray-900 px-3 py-2 rounded-md text-xs transition-colors"
+            >
+              感情 CSV
             </button>
           )}
           {actionButton}
@@ -287,12 +334,13 @@ export default function SessionDetail(props: { params: Promise<{ id: string }> }
               <div className="mb-4 bg-gray-50 border border-gray-200 border-dashed rounded-lg p-6 text-center">
                 <Video className="w-5 h-5 text-gray-400 mx-auto mb-3" strokeWidth={1.75} />
                 <p className="text-sm text-gray-900 font-medium mb-1">
-                  録画ファイルを読み込むと感情グラフと同期できます
+                  録画データがまだありません
                 </p>
                 <p className="text-xs text-gray-500 mb-4">
-                  インタビュー終了時にダウンロードした{' '}
+                  録画はインタビュー完了時に自動送信されます。自動送信に失敗した場合は、
+                  被験者から受け取った{' '}
                   <span className="font-mono text-gray-700">interview-XXXXXXXX.webm</span>{' '}
-                  を選択
+                  を読み込むと感情グラフと同期できます
                 </p>
                 <input
                   ref={fileInputRef}
