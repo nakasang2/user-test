@@ -56,8 +56,7 @@ export async function POST(req: NextRequest) {
       questionList = generated.map((text) => ({ text, type: 'open' }))
     }
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const interview = await (prisma.interview.create as any)({
+    const interview = await prisma.interview.create({
       data: {
         organizationId: orgId,
         title,

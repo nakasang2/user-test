@@ -2,18 +2,24 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { chatWithAgent } from '@/lib/ai'
 import { requireAuth, handleApiError } from '@/lib/api-auth'
+import { sanitizeMessages } from '@/lib/llm-safety'
+import { rateLimit } from '@/lib/ratelimit'
 
 export async function POST(req: NextRequest) {
   try {
-  await requireAuth()
+  const { orgId } = await requireAuth()
+  if (!(await rateLimit(`agent:${orgId}`, 30, 60))) {
+    return NextResponse.json({ error: 'Too many requests' }, { status: 429 })
+  }
   const body = await req.json()
   const { messages, sessionId, interviewId } = body
 
   let context = ''
 
   if (sessionId) {
-    const session = await prisma.session.findUnique({
-      where: { id: sessionId },
+    // IDOR 対策: 呼び出し元の組織が所有するセッションのみ参照可
+    const session = await prisma.session.findFirst({
+      where: { id: sessionId, interview: { organizationId: orgId } },
       include: {
         interview: { include: { questions: true } },
         participant: true,
@@ -26,8 +32,8 @@ export async function POST(req: NextRequest) {
       context = buildSessionContext(session)
     }
   } else if (interviewId) {
-    const interview = await prisma.interview.findUnique({
-      where: { id: interviewId },
+    const interview = await prisma.interview.findFirst({
+      where: { id: interviewId, organizationId: orgId },
       include: {
         questions: true,
         sessions: {
@@ -45,7 +51,7 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  const reply = await chatWithAgent(messages, context)
+  const reply = await chatWithAgent(sanitizeMessages(messages), context)
   return NextResponse.json({ reply })
   } catch (err) {
     return handleApiError(err)

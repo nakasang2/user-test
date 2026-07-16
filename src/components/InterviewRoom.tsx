@@ -1,6 +1,8 @@
 'use client'
 
 import { useState, useEffect, useRef, useCallback } from 'react'
+import { upload } from '@vercel/blob/client'
+import { track } from '@/lib/analytics'
 import { useEmotionDetection, EmotionSnapshot } from '@/hooks/useEmotionDetection'
 import { AreaChart, Area, ResponsiveContainer, XAxis, YAxis } from 'recharts'
 import {
@@ -27,6 +29,7 @@ interface Question {
 
 interface Props {
   sessionId: string
+  participantToken?: string
   roomName: string
   dailyRoomUrl: string
   questions: Question[]
@@ -50,6 +53,7 @@ type Phase = 'guide' | 'waiting' | 'stimulus' | 'task' | 'intro' | 'interview' |
 
 export default function InterviewRoom({
   sessionId,
+  participantToken,
   questions,
   interviewTitle,
   participantName,
@@ -84,8 +88,17 @@ export default function InterviewRoom({
   useEffect(() => {
     if (lastEmotion) {
       setEmotionHistory((prev) => [...prev, lastEmotion].slice(-30))
+      // 途中離脱でも残るよう、感情スナップショットを逐次サーバー保存（失敗は無視）。
+      // 最終的には submitResults→/process が全件で上書きする。
+      if (participantToken) {
+        fetch('/api/emotions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-participant-token': participantToken },
+          body: JSON.stringify({ sessionId, ...lastEmotion }),
+        }).catch(() => {})
+      }
     }
-  }, [lastEmotion])
+  }, [lastEmotion, sessionId, participantToken])
 
   const [phase, setPhase] = useState<Phase>('guide') // Feature 6: 初期フェーズを guide に
   const [displayedQuestion, setDisplayedQuestion] = useState('')
@@ -96,6 +109,9 @@ export default function InterviewRoom({
   const [isSpeaking, setIsSpeaking] = useState(false)
   const [liveText, setLiveText] = useState('')
   const [cameraError, setCameraError] = useState(false)
+  // 一時的な通知（TTS 失敗・通信エラーなど。被験者に状況を伝える）
+  const [notice, setNotice] = useState<string | null>(null)
+  const noticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [aiThinking, setAiThinking] = useState(false)
   const [ratingValue, setRatingValue] = useState<number | null>(null) // Feature 5: 評価質問用
   const [textInput, setTextInput] = useState('')
@@ -104,6 +120,8 @@ export default function InterviewRoom({
   const [textOnlyMode, setTextOnlyMode] = useState(false) // 非対応でも続行する場合
   const [isListening, setIsListening] = useState(false)
   const [recordingDownloadUrl, setRecordingDownloadUrl] = useState<string | null>(null)
+  // 回答送信の状態（完了画面の表示・beforeunload ガード・再送に使う）
+  const [submitState, setSubmitState] = useState<'idle' | 'saving' | 'saved' | 'failed'>('idle')
   // テキスト入力フォールバック用：listenForAnswer のコールバックを保持
   const onAnswerCallbackRef = useRef<((answer: string) => void) | null>(null)
 
@@ -113,9 +131,20 @@ export default function InterviewRoom({
   const [screenSharing, setScreenSharing] = useState(false)
   const [screenShareError, setScreenShareError] = useState<string | null>(null)
   const [currentTaskIndex, setCurrentTaskIndex] = useState(0)
+  // BroadcastChannel の onmessage は startInterview 時のクロージャを保持するため、
+  // 最新のタスク番号は ref で参照する（state だけだと陳腐化して複数タスクで進めない）
+  const currentTaskIndexRef = useRef(0)
+  function gotoTask(idx: number) { currentTaskIndexRef.current = idx; setCurrentTaskIndex(idx) }
   const [stimulusCountdown, setStimulusCountdown] = useState(0)
+  const [stimulusError, setStimulusError] = useState(false)
+  const stimulusStartedRef = useRef(false)   // カウント開始の二重起動防止
+  const stimulusProceededRef = useRef(false)  // 質問遷移の二重実行防止
+  const stimulusIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const stimulusTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const screenMediaRecorderRef = useRef<MediaRecorder | null>(null)
   const screenRecordedChunksRef = useRef<Blob[]>([])
+  const screenDrawRafRef = useRef<number>(0)        // 合成描画ループの RAF
+  const screenBlobRef = useRef<Blob | null>(null)   // サービスモードで小窓から届く合成 Blob を保持
   const [screenRecordingDownloadUrl, setScreenRecordingDownloadUrl] = useState<string | null>(null)
 
   // フローティングウィジェット (service モード)
@@ -129,6 +158,29 @@ export default function InterviewRoom({
     if (typeof window !== 'undefined') {
       const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition // eslint-disable-line @typescript-eslint/no-explicit-any
       setSpeechSupported(!!SR)
+    }
+  }, [])
+
+  // ── 一時通知トースト ──────────────────────────────────
+  const showNotice = useCallback((msg: string) => {
+    if (noticeTimerRef.current) clearTimeout(noticeTimerRef.current)
+    setNotice(msg)
+    noticeTimerRef.current = setTimeout(() => setNotice(null), 6000)
+  }, [])
+
+  // ── カメラ初期化（マウント時・再試行時に呼ぶ）────────
+  const initCamera = useCallback(async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+      streamRef.current = stream
+      setCameraError(false)
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream
+        // ビデオが再生可能になったら感情検出を開始できる状態にする
+        videoRef.current.addEventListener('loadeddata', () => setCameraReady(true), { once: true })
+      }
+    } catch {
+      setCameraError(true)
     }
   }, [])
 
@@ -184,31 +236,23 @@ export default function InterviewRoom({
         }
         audio.play().catch(() => {
           setIsSpeaking(false)
+          showNotice('音声の再生に失敗しました。画面の質問テキストをご覧ください。')
           if (version === speakVersionRef.current) onEnd?.()
         })
       })
       .catch(() => {
         if (version !== speakVersionRef.current) return
         setIsSpeaking(false)
+        track('interview_tts_failed', { sessionId })
+        showNotice('音声の再生に失敗しました。画面の質問テキストをご覧ください。')
         onEnd?.() // TTS 失敗時もインタビューは続行
       })
-  }, [])
+  }, [showNotice, sessionId])
 
   // ── カメラ初期化 ─────────────────────────────────────
   useEffect(() => {
-    async function initCamera() {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true })
-        streamRef.current = stream
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream
-          // ビデオが再生可能になったら感情検出を開始できる状態にする
-          videoRef.current.addEventListener('loadeddata', () => setCameraReady(true), { once: true })
-        }
-      } catch {
-        setCameraError(true)
-      }
-    }
+    // initCamera() 内の setState は await 後に実行されるため同期 setState ではない
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     initCamera()
     return () => {
       streamRef.current?.getTracks().forEach((t) => t.stop())
@@ -227,12 +271,39 @@ export default function InterviewRoom({
       // service モード BroadcastChannel cleanup
       widgetChannelRef.current?.close()
       widgetChannelRef.current = null
+      if (noticeTimerRef.current) clearTimeout(noticeTimerRef.current)
+      cancelAnimationFrame(screenDrawRafRef.current)
+      if (stimulusIntervalRef.current) clearInterval(stimulusIntervalRef.current)
+      if (stimulusTimeoutRef.current) clearTimeout(stimulusTimeoutRef.current)
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // 感情検出はインタビュー開始時に startInterview() 内で起動する。
   // こうすることで録画の t=0 と感情タイムスタンプの t=0 が一致する。
+
+  // ── 離脱防止ガード: インタビュー開始後、回答が保存し終わるまでは閉じる前に警告 ──
+  useEffect(() => {
+    const started = phase !== 'guide' && phase !== 'waiting'
+    if (!started || submitState === 'saved') return
+    const handler = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = '' }
+    window.addEventListener('beforeunload', handler)
+    return () => window.removeEventListener('beforeunload', handler)
+  }, [phase, submitState])
+
+  // ── 進行中の文字起こしを逐次サーバー保存（途中離脱でも残す保険。AI 分析はしない）──
+  function saveProgress() {
+    if (!participantToken) return
+    const fullText = transcriptRef.current.map((t) => `[${t.speaker}]: ${t.text}`).join('\n')
+    const segments = transcriptRef.current.map((t) => ({
+      speaker: t.speaker, text: t.text, start: t.start, end: t.end ?? t.start,
+    }))
+    fetch(`/api/sessions/${sessionId}/progress`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-participant-token': participantToken },
+      body: JSON.stringify({ transcript: fullText, segments }),
+    }).catch(() => {})
+  }
 
   // ── テキスト入力で回答を送信 ──────────────────────────
   function submitTextAnswer() {
@@ -255,6 +326,7 @@ export default function InterviewRoom({
     conversationBufferRef.current += `\n参加者: ${text}`
 
     setTextInput('')
+    saveProgress()
     const callback = onAnswerCallbackRef.current
     onAnswerCallbackRef.current = null
     callback(text)
@@ -280,7 +352,7 @@ export default function InterviewRoom({
     let finalText = ''
     const startTime = (Date.now() - startTimeRef.current) / 1000
 
-    // 沈黙タイムアウト開始（30秒）
+    // 沈黙タイムアウト開始（60秒）— 考える時間・沈黙して内省する時間を確保する
     if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current)
     silenceTimerRef.current = setTimeout(() => {
       recognition.stop()
@@ -296,7 +368,7 @@ export default function InterviewRoom({
           onAnswer('')
         })
       }
-    }, 30000)
+    }, 60000)
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     recognition.onresult = (event: any) => {
@@ -328,6 +400,7 @@ export default function InterviewRoom({
         transcriptRef.current = [...transcriptRef.current, entry]
         setTranscript([...transcriptRef.current])
         conversationBufferRef.current += `\n参加者: ${finalText.trim()}`
+        saveProgress()
         onAnswer(finalText.trim())
       }
     }
@@ -350,6 +423,7 @@ export default function InterviewRoom({
     setTranscript([...transcriptRef.current])
     conversationBufferRef.current += `\n参加者: ${answerText}`
     setRatingValue(null)
+    saveProgress()
 
     // 評価質問は AI 深掘りなし → 次へ
     if (q.type === 'nps' || q.type === 'rating') {
@@ -394,6 +468,7 @@ export default function InterviewRoom({
     } catch {
       setAiThinking(false)
       setPhase('interview')
+      showNotice('通信エラーのため、次の質問に進みます。')
       moveToNextPlannedQuestion()
     }
   }
@@ -477,6 +552,34 @@ export default function InterviewRoom({
     setWidgetBlocked(!popup)
   }
 
+  // ── タスクの結果を記録して次へ（達成 / 断念）。最後のタスクなら質問フェーズへ ──
+  function recordTaskOutcome(outcome: 'completed' | 'gave_up') {
+    const idx = currentTaskIndexRef.current
+    const task = tasks?.[idx]
+    if (task) {
+      const label = outcome === 'completed' ? '達成' : '断念（たどり着けなかった）'
+      const text = `タスク${idx + 1}「${task.text}」→ ${label}`
+      const entry: TranscriptEntry = {
+        speaker: 'System',
+        text,
+        start: (Date.now() - startTimeRef.current) / 1000,
+      }
+      transcriptRef.current = [...transcriptRef.current, entry]
+      setTranscript([...transcriptRef.current])
+      conversationBufferRef.current += `\n[タスク記録] ${text}`
+      saveProgress()
+    }
+    const total = tasks?.length ?? 0
+    if (idx + 1 < total) {
+      const next = idx + 1
+      gotoTask(next)
+      // サービスモードの小窓へ現在タスクを同期
+      widgetChannelRef.current?.postMessage({ type: 'task_update', currentTaskIndex: next })
+    } else {
+      completeTasksAndStartInterview()
+    }
+  }
+
   // ── タスク完了 → 事後インタビュー開始 ─────────────────
   function completeTasksAndStartInterview() {
     // ウィジェットを閉じる（BroadcastChannel 経由 + 直接 close）
@@ -515,14 +618,15 @@ export default function InterviewRoom({
       const channel = new BroadcastChannel(`uservoice-widget-${sessionId}`)
       widgetChannelRef.current = channel
       channel.onmessage = (e) => {
-        if (e.data.type === 'task_complete') completeTasksAndStartInterview()
+        if (e.data.type === 'task_outcome') recordTaskOutcome(e.data.outcome === 'gave_up' ? 'gave_up' : 'completed')
+        else if (e.data.type === 'task_complete') completeTasksAndStartInterview() // 後方互換
         else if (e.data.type === 'end_session') endInterview()
         else if (e.data.type === 'recording_started') setScreenSharing(true)
         else if (e.data.type === 'screen_recording_blob') {
           const blob: Blob = e.data.blob
           if (blob.size > 0) {
-            const url = URL.createObjectURL(blob)
-            setScreenRecordingDownloadUrl(url)
+            screenBlobRef.current = blob
+            setScreenRecordingDownloadUrl(URL.createObjectURL(blob))
           }
         }
       }
@@ -541,7 +645,7 @@ export default function InterviewRoom({
 
     await fetch(`/api/sessions/${sessionId}`, {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'x-participant-token': participantToken ?? '' },
       body: JSON.stringify({ status: 'active' }),
     })
 
@@ -555,29 +659,14 @@ export default function InterviewRoom({
       return
     }
 
-    // 印象テストの場合: stimulus フェーズを挿入
+    // 印象テストの場合: stimulus フェーズを挿入。
+    // カウントダウンは「画像の読み込み完了後」に開始する（beginStimulusCountdown）。
     if (interviewType === 'impression' && stimulusUrl) {
+      stimulusStartedRef.current = false
+      stimulusProceededRef.current = false
+      setStimulusError(false)
+      setStimulusCountdown(stimulusDuration ?? 5)
       setPhase('stimulus')
-      const duration = stimulusDuration ?? 5
-      setStimulusCountdown(duration)
-      const countdownInterval = setInterval(() => {
-        setStimulusCountdown((prev) => {
-          if (prev <= 1) { clearInterval(countdownInterval); return 0 }
-          return prev - 1
-        })
-      }, 1000)
-      setTimeout(() => {
-        setPhase('interview')
-        currentQuestionIndexRef.current = 0
-        setCurrentQuestionIndex(0)
-        setIsFollowUp(false)
-        const q = questions[0]
-        setDisplayedQuestion(q.text)
-        conversationBufferRef.current = `AI: ${q.text}`
-        speak(q.text, () => {
-          if (q.type === 'open') listenForAnswer(decideNext)
-        })
-      }, duration * 1000)
       return
     }
 
@@ -608,6 +697,39 @@ export default function InterviewRoom({
     setIsSpeaking(false)
     setLiveText('')
     moveToNextPlannedQuestion()
+  }
+
+  // ── 印象テスト: 最初の質問へ遷移（タイマー・スキップ・エラーから共用、二重実行防止）──
+  function proceedFromStimulus() {
+    if (stimulusProceededRef.current) return
+    stimulusProceededRef.current = true
+    if (stimulusIntervalRef.current) clearInterval(stimulusIntervalRef.current)
+    if (stimulusTimeoutRef.current) clearTimeout(stimulusTimeoutRef.current)
+    setPhase('interview')
+    currentQuestionIndexRef.current = 0
+    setCurrentQuestionIndex(0)
+    setIsFollowUp(false)
+    const q = questions[0]
+    setDisplayedQuestion(q.text)
+    conversationBufferRef.current = `AI: ${q.text}`
+    speak(q.text, () => {
+      if (q.type === 'open') listenForAnswer(decideNext)
+    })
+  }
+
+  // 画像の読み込み完了後にカウントダウンを開始する（二重起動防止）
+  function beginStimulusCountdown() {
+    if (stimulusStartedRef.current || stimulusProceededRef.current) return
+    stimulusStartedRef.current = true
+    const duration = stimulusDuration ?? 5
+    setStimulusCountdown(duration)
+    stimulusIntervalRef.current = setInterval(() => {
+      setStimulusCountdown((prev) => {
+        if (prev <= 1) { if (stimulusIntervalRef.current) clearInterval(stimulusIntervalRef.current); return 0 }
+        return prev - 1
+      })
+    }, 1000)
+    stimulusTimeoutRef.current = setTimeout(() => proceedFromStimulus(), duration * 1000)
   }
 
   // ── インタビュー終了 ──────────────────────────────────
@@ -642,34 +764,67 @@ export default function InterviewRoom({
   }
 
   async function submitResults() {
-    // 録画停止 → ダウンロード用 URL を state に保存（サーバーアップロードは Vercel 4.5MB 制限のため断念）
-    const recordingBlob = await stopMediaRecorder()
-    if (recordingBlob.size > 0) {
-      const url = URL.createObjectURL(recordingBlob)
-      setRecordingDownloadUrl(url)
+    const isUsability = interviewType === 'usability'
+    const faceBlob = await stopMediaRecorder()          // 顔＋音声
+    const screenComposite = await stopScreenRecorder()  // プロトタイプ: 画面＋顔＋音声の合成
+    // サービスモードは小窓から届いた合成 Blob を使う
+    const compositeBlob = screenComposite.size > 0 ? screenComposite : screenBlobRef.current
+
+    // ローカル DL 用 URL
+    if (!isUsability && faceBlob.size > 0) setRecordingDownloadUrl(URL.createObjectURL(faceBlob))
+    if (compositeBlob && compositeBlob.size > 0) setScreenRecordingDownloadUrl(URL.createObjectURL(compositeBlob))
+
+    // サーバー保存: ユーザビリティは「画面＋顔＋音声」の合成、それ以外は顔録画。
+    // Vercel Blob クライアント直アップロードで関数の 4.5MB ボディ制限を回避し、非公開保存する。
+    const uploadBlob = isUsability
+      ? (compositeBlob && compositeBlob.size > 0 ? compositeBlob : (faceBlob.size > 0 ? faceBlob : null))
+      : (faceBlob.size > 0 ? faceBlob : null)
+    if (uploadBlob) {
+      try {
+        await upload(`recordings/${sessionId}.webm`, uploadBlob, {
+          access: 'private',
+          contentType: 'video/webm',
+          handleUploadUrl: `/api/sessions/${sessionId}/recording`,
+          clientPayload: participantToken ?? '',
+        })
+      } catch (e) {
+        console.error('録画のアップロードに失敗しました（ローカル保存は可能）:', e)
+        showNotice('録画のサーバー保存に失敗しました。完了画面からダウンロードして共有してください。')
+      }
     }
 
-    // 画面録画も保存
-    const screenBlob = await stopScreenRecorder()
-    if (screenBlob.size > 0) {
-      const screenUrl = URL.createObjectURL(screenBlob)
-      setScreenRecordingDownloadUrl(screenUrl)
-    }
+    await persistResults()
+  }
 
+  // ── 文字起こし・感情をサーバーへ保存（失敗時に再送可能）──
+  async function persistResults() {
+    setSubmitState('saving')
+    // status 更新はベストエフォート（失敗してもデータ保存を優先）
     await fetch(`/api/sessions/${sessionId}`, {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'x-participant-token': participantToken ?? '' },
       body: JSON.stringify({ status: 'completed' }),
-    })
+    }).catch(() => {})
+
     const fullText = transcriptRef.current.map((t) => `[${t.speaker}]: ${t.text}`).join('\n')
     const segments = transcriptRef.current.map((t) => ({
       speaker: t.speaker, text: t.text, start: t.start, end: t.end ?? t.start + 5,
     }))
-    await fetch(`/api/sessions/${sessionId}/process`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ transcript: fullText, segments, emotions: getSnapshots() }),
-    })
+    try {
+      const res = await fetch(`/api/sessions/${sessionId}/process`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-participant-token': participantToken ?? '' },
+        body: JSON.stringify({ transcript: fullText, segments, emotions: getSnapshots() }),
+      })
+      if (!res.ok) throw new Error(`process failed: ${res.status}`)
+      track('interview_completed', { sessionId })
+      setSubmitState('saved')
+    } catch (e) {
+      console.error('結果の送信に失敗しました:', e)
+      track('interview_process_failed', { sessionId })
+      setSubmitState('failed')
+      showNotice('回答の送信に失敗しました。完了画面から再送信できます。')
+    }
   }
 
   // ── 画面共有開始 ──────────────────────────────────────
@@ -681,18 +836,56 @@ export default function InterviewRoom({
       if (usabilityMode === 'service' && screenVideoRef.current) {
         screenVideoRef.current.srcObject = stream
       }
-      // Record the screen stream
+
+      // 画面に顔(PiP)を重ね、マイク音声も載せて「画面＋顔＋音声」を1ファイルに合成する
+      const screenVid = document.createElement('video')
+      screenVid.srcObject = stream
+      screenVid.muted = true
+      await new Promise<void>((resolve) => {
+        screenVid.onloadedmetadata = () => screenVid.play().then(resolve).catch(() => resolve())
+      })
+
+      const W = Math.min(screenVid.videoWidth || 1280, 1920)
+      const H = Math.min(screenVid.videoHeight || 720, 1080)
+      const canvas = document.createElement('canvas')
+      canvas.width = W
+      canvas.height = H
+      const ctx = canvas.getContext('2d')!
+      const webcamVid = videoRef.current
+
+      const draw = () => {
+        ctx.drawImage(screenVid, 0, 0, W, H)
+        if (webcamVid && webcamVid.readyState >= 2 && webcamVid.videoWidth) {
+          const pipW = Math.round(W * 0.18)
+          const pipH = Math.round(pipW * (webcamVid.videoHeight / webcamVid.videoWidth))
+          const x = W - pipW - 16
+          const y = H - pipH - 16
+          ctx.drawImage(webcamVid, x, y, pipW, pipH)
+          ctx.strokeStyle = 'rgba(255,255,255,0.85)'
+          ctx.lineWidth = 2
+          ctx.strokeRect(x, y, pipW, pipH)
+        }
+        screenDrawRafRef.current = requestAnimationFrame(draw)
+      }
+      draw()
+
+      const canvasStream = canvas.captureStream(25)
+      // マイク音声（顔ストリームの音声トラック）を合成に追加
+      const micTrack = streamRef.current?.getAudioTracks?.()[0]
+      if (micTrack) canvasStream.addTrack(micTrack)
+
       screenRecordedChunksRef.current = []
-      const mimeType = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm'].find(
+      const mimeType = ['video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm'].find(
         (t) => MediaRecorder.isTypeSupported(t)
       ) ?? ''
-      const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : {})
+      const recorder = new MediaRecorder(canvasStream, mimeType ? { mimeType } : {})
       recorder.ondataavailable = (e) => { if (e.data.size > 0) screenRecordedChunksRef.current.push(e.data) }
       recorder.start(1000)
       screenMediaRecorderRef.current = recorder
       setScreenSharing(true)
       stream.getVideoTracks()[0].onended = () => {
         setScreenSharing(false)
+        cancelAnimationFrame(screenDrawRafRef.current)
         screenStreamRef.current = null
       }
     } catch {
@@ -703,6 +896,7 @@ export default function InterviewRoom({
   // ── 画面録画停止 → Blob を返す ────────────────────────
   function stopScreenRecorder(): Promise<Blob> {
     return new Promise((resolve) => {
+      cancelAnimationFrame(screenDrawRafRef.current)
       const recorder = screenMediaRecorderRef.current
       if (!recorder || recorder.state === 'inactive') {
         resolve(new Blob([], { type: 'video/webm' }))
@@ -760,7 +954,7 @@ export default function InterviewRoom({
           <div className="border-t border-gray-200 pt-5">
             <p className="text-xs text-gray-500 mb-3">または、テキスト入力のみで続けることもできます</p>
             <button
-              onClick={() => setTextOnlyMode(true)}
+              onClick={() => { track('interview_speech_fallback', { sessionId }); setTextOnlyMode(true) }}
               className="inline-flex items-center gap-1.5 text-sm text-gray-700 hover:text-gray-900 border border-gray-300 hover:border-gray-400 px-4 py-1.5 rounded-md transition-colors"
             >
               テキスト入力で続ける
@@ -774,6 +968,13 @@ export default function InterviewRoom({
 
   return (
     <div className="h-screen bg-white text-gray-900 flex flex-col overflow-hidden">
+      {/* 一時通知トースト（TTS 失敗・通信エラーなど） */}
+      {notice && (
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 bg-gray-900 text-white text-sm px-4 py-2.5 rounded-lg shadow-lg max-w-md">
+          <AlertCircle className="w-4 h-4 flex-shrink-0" strokeWidth={2} />
+          <span>{notice}</span>
+        </div>
+      )}
       {/* ヘッダー */}
       <div className="border-b border-gray-200 px-6 py-3 flex items-center justify-between flex-shrink-0">
         <div className="flex items-center gap-2.5">
@@ -795,8 +996,19 @@ export default function InterviewRoom({
 
           {/* カメラ映像：左カラム全体を覆う */}
           {cameraError ? (
-            <div className="absolute inset-0 flex items-center justify-center bg-gray-100">
-              <span className="text-gray-500 text-sm">カメラが利用できません</span>
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-gray-100 px-6 text-center">
+              <AlertCircle className="w-6 h-6 text-gray-400" strokeWidth={1.75} />
+              <p className="text-gray-700 text-sm font-medium">カメラ・マイクが利用できません</p>
+              <p className="text-gray-500 text-xs leading-relaxed max-w-xs">
+                ブラウザのアドレスバーのカメラアイコンから「許可」を選択し、再試行してください。
+                他のアプリがカメラを使用している場合は終了してください。
+              </p>
+              <button
+                onClick={() => initCamera()}
+                className="mt-1 inline-flex items-center gap-1.5 bg-gray-900 hover:bg-gray-800 text-white px-4 py-2 rounded-md text-sm font-medium transition-colors"
+              >
+                カメラを許可して再試行
+              </button>
             </div>
           ) : (
             <video
@@ -930,15 +1142,42 @@ export default function InterviewRoom({
           {/* 印象テスト: 刺激表示フェーズ */}
           {phase === 'stimulus' && stimulusUrl && (
             <div className="absolute inset-0 bg-gray-50 flex items-center justify-center">
-              <img
-                src={stimulusUrl}
-                alt="stimulus"
-                className="max-w-full max-h-full object-contain"
-              />
-              {stimulusCountdown > 0 && (
-                <div className="absolute bottom-6 right-6 w-12 h-12 rounded-full bg-gray-900 text-white flex items-center justify-center text-xl font-semibold shadow-lg">
-                  {stimulusCountdown}
+              {stimulusError ? (
+                // 画像読み込み失敗時のフォールバック
+                <div className="text-center px-8">
+                  <AlertCircle className="w-6 h-6 text-gray-400 mx-auto mb-3" strokeWidth={1.75} />
+                  <p className="text-sm text-gray-700 mb-1">画像を読み込めませんでした</p>
+                  <p className="text-xs text-gray-500 mb-4">そのまま質問に進んでいただけます。</p>
+                  <button
+                    onClick={proceedFromStimulus}
+                    className="inline-flex items-center gap-1.5 bg-gray-900 hover:bg-gray-800 text-white px-4 py-2 rounded-md text-sm font-medium transition-colors"
+                  >
+                    質問に進む<ArrowRight className="w-3.5 h-3.5" strokeWidth={2} />
+                  </button>
                 </div>
+              ) : (
+                <>
+                  <img
+                    src={stimulusUrl}
+                    alt="提示画像"
+                    className="max-w-full max-h-full object-contain"
+                    // 読み込み完了後にカウント開始（それまでタイマーは走らせない）
+                    onLoad={beginStimulusCountdown}
+                    onError={() => setStimulusError(true)}
+                  />
+                  {stimulusCountdown > 0 && (
+                    <div className="absolute bottom-6 right-6 w-12 h-12 rounded-full bg-gray-900 text-white flex items-center justify-center text-xl font-semibold shadow-lg">
+                      {stimulusCountdown}
+                    </div>
+                  )}
+                  {/* 「もう見た」場合に早送りできるスキップ */}
+                  <button
+                    onClick={proceedFromStimulus}
+                    className="absolute bottom-6 left-6 text-xs text-gray-600 hover:text-gray-900 bg-white/90 border border-gray-300 hover:border-gray-400 px-3 py-1.5 rounded-md transition-colors"
+                  >
+                    質問に進む →
+                  </button>
+                </>
               )}
             </div>
           )}
@@ -1002,39 +1241,43 @@ export default function InterviewRoom({
                     {widgetBlocked && (
                       <div className="flex gap-2 pt-2 border-t border-gray-200">
                         <button
-                          onClick={completeTasksAndStartInterview}
+                          onClick={() => recordTaskOutcome('completed')}
                           className="flex-1 inline-flex items-center justify-center gap-1.5 bg-gray-900 hover:bg-gray-800 text-white px-4 py-2 rounded-md text-sm font-medium transition-colors"
                         >
                           <Check className="w-3.5 h-3.5" strokeWidth={2.5} />
-                          タスク完了
-                          <ArrowRight className="w-3.5 h-3.5" strokeWidth={2} />
-                          質問へ
+                          達成して{(tasks?.length ?? 0) <= currentTaskIndex + 1 ? '質問へ' : '次へ'}
                         </button>
                         <button
-                          onClick={endInterview}
+                          onClick={() => recordTaskOutcome('gave_up')}
                           className="border border-gray-300 hover:border-gray-400 text-gray-700 hover:text-gray-900 px-4 py-2 rounded-md text-sm transition-colors"
                         >
-                          終了
+                          できなかった
                         </button>
                       </div>
                     )}
                   </div>
                 ) : (
-                  <div className="flex gap-2">
-                    <button
-                      onClick={completeTasksAndStartInterview}
-                      className="flex-1 inline-flex items-center justify-center gap-1.5 bg-gray-900 hover:bg-gray-800 text-white px-4 py-2.5 rounded-md text-sm font-medium transition-colors"
-                    >
-                      <Check className="w-3.5 h-3.5" strokeWidth={2.5} />
-                      タスク完了
-                      <ArrowRight className="w-3.5 h-3.5" strokeWidth={2} />
-                      質問へ
-                    </button>
+                  <div className="space-y-2">
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => recordTaskOutcome('completed')}
+                        className="flex-1 inline-flex items-center justify-center gap-1.5 bg-gray-900 hover:bg-gray-800 text-white px-4 py-2.5 rounded-md text-sm font-medium transition-colors"
+                      >
+                        <Check className="w-3.5 h-3.5" strokeWidth={2.5} />
+                        達成して{(tasks?.length ?? 0) <= currentTaskIndex + 1 ? '質問へ' : '次へ'}
+                      </button>
+                      <button
+                        onClick={() => recordTaskOutcome('gave_up')}
+                        className="flex-1 inline-flex items-center justify-center gap-1.5 border border-gray-300 hover:border-gray-400 text-gray-700 hover:text-gray-900 px-4 py-2.5 rounded-md text-sm transition-colors"
+                      >
+                        できなかった
+                      </button>
+                    </div>
                     <button
                       onClick={endInterview}
-                      className="border border-gray-300 hover:border-gray-400 text-gray-700 hover:text-gray-900 px-4 py-2.5 rounded-md text-sm transition-colors"
+                      className="w-full text-xs text-gray-500 hover:text-gray-800 py-1 transition-colors"
                     >
-                      終了
+                      インタビューを終了する
                     </button>
                   </div>
                 )}
@@ -1073,28 +1316,52 @@ export default function InterviewRoom({
                 </div>
                 <h2 className="text-xl font-semibold tracking-tight mb-2 text-gray-900">インタビュー完了</h2>
                 <p className="text-gray-600 text-sm mb-4">ご回答いただきありがとうございました。</p>
+
+                {/* 送信状態 */}
+                {submitState === 'saving' && (
+                  <p className="text-gray-500 text-xs mb-4 animate-pulse">回答を送信しています… 閉じずにお待ちください。</p>
+                )}
+                {submitState === 'saved' && (
+                  <p className="text-emerald-700 text-xs mb-4">回答の送信が完了しました。このまま閉じて構いません。</p>
+                )}
+                {submitState === 'failed' && (
+                  <div className="mb-4 flex flex-col items-center gap-2">
+                    <p className="text-red-700 text-xs">回答の送信に失敗しました。通信環境をご確認のうえ再送信してください。</p>
+                    <button
+                      onClick={() => persistResults()}
+                      className="inline-flex items-center gap-1.5 bg-gray-900 hover:bg-gray-800 text-white px-4 py-2 rounded-md text-sm font-medium transition-colors"
+                    >
+                      回答を再送信する
+                    </button>
+                  </div>
+                )}
+
                 <div className="flex flex-col gap-2 items-center">
-                  {recordingDownloadUrl ? (
+                  {interviewType === 'usability' ? (
+                    // ユーザビリティ: 画面＋顔＋音声を合成した1ファイル
+                    screenRecordingDownloadUrl ? (
+                      <a
+                        href={screenRecordingDownloadUrl}
+                        download={`recording-${sessionId.slice(0, 8)}.webm`}
+                        className="inline-flex items-center gap-1.5 bg-gray-900 hover:bg-gray-800 text-white px-4 py-2 rounded-md text-sm font-medium transition-colors"
+                      >
+                        <Monitor className="w-3.5 h-3.5" strokeWidth={2} />
+                        録画（画面＋顔＋音声）をダウンロード
+                      </a>
+                    ) : (
+                      <p className="text-gray-500 text-xs">このページを閉じていただいて構いません。</p>
+                    )
+                  ) : recordingDownloadUrl ? (
                     <a
                       href={recordingDownloadUrl}
                       download={`interview-${sessionId.slice(0, 8)}.webm`}
                       className="inline-flex items-center gap-1.5 bg-gray-900 hover:bg-gray-800 text-white px-4 py-2 rounded-md text-sm font-medium transition-colors"
                     >
                       <Video className="w-3.5 h-3.5" strokeWidth={2} />
-                      顔録画をダウンロード
+                      録画をダウンロード
                     </a>
                   ) : (
                     <p className="text-gray-500 text-xs">このページを閉じていただいて構いません。</p>
-                  )}
-                  {screenRecordingDownloadUrl && (
-                    <a
-                      href={screenRecordingDownloadUrl}
-                      download={`screen-${sessionId.slice(0, 8)}.webm`}
-                      className="inline-flex items-center gap-1.5 border border-gray-300 hover:border-gray-400 text-gray-700 hover:text-gray-900 px-4 py-2 rounded-md text-sm font-medium transition-colors"
-                    >
-                      <Monitor className="w-3.5 h-3.5" strokeWidth={2} />
-                      操作録画（顔合成）をダウンロード
-                    </a>
                   )}
                 </div>
               </div>
@@ -1112,7 +1379,7 @@ export default function InterviewRoom({
                 {tasks.map((task, i) => (
                   <div
                     key={i}
-                    onClick={() => setCurrentTaskIndex(i)}
+                    onClick={() => gotoTask(i)}
                     className={`flex gap-2 items-start cursor-pointer rounded-md px-2 py-1.5 text-xs transition-colors ${
                       currentTaskIndex === i ? 'bg-gray-900 text-white' : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
                     }`}

@@ -2,6 +2,7 @@
 
 import { useState, useEffect, use } from 'react'
 import { useRouter } from 'next/navigation'
+import { track } from '@/lib/analytics'
 import {
   Video,
   Monitor,
@@ -34,6 +35,7 @@ export default function JoinPage(props: { params: Promise<{ interviewId: string 
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
+    track('join_viewed', { interviewId })
     fetch(`/api/join/${interviewId}`)
       .then((r) => {
         if (!r.ok) { setNotFound(true); return null }
@@ -56,6 +58,7 @@ export default function JoinPage(props: { params: Promise<{ interviewId: string 
       })
       const data = await res.json()
       if (!res.ok) { setError(data.error ?? 'エラーが発生しました'); return }
+      track('interview_started', { interviewId })
       router.push(`/interview/${data.roomName}`)
     } catch {
       setError('ネットワークエラーが発生しました')
@@ -170,17 +173,23 @@ export default function JoinPage(props: { params: Promise<{ interviewId: string 
                 checked={consent}
                 onChange={(e) => setConsent(e.target.checked)}
                 disabled={loading}
-                className="sr-only"
+                aria-label="録画・分析への同意"
+                className="peer sr-only"
               />
-              <div className={`w-[18px] h-[18px] rounded border-2 flex items-center justify-center transition-colors ${
+              <div className={`w-[18px] h-[18px] rounded border-2 flex items-center justify-center transition-colors peer-focus-visible:ring-2 peer-focus-visible:ring-gray-900 peer-focus-visible:ring-offset-2 ${
                 consent ? 'bg-gray-900 border-gray-900' : 'bg-white border-gray-300 group-hover:border-gray-500'
               }`}>
                 {consent && <span className="text-white text-[11px] font-bold leading-none">✓</span>}
               </div>
             </div>
             <span className="text-xs text-gray-600 leading-relaxed">
-              カメラ・マイク・画面の録画および AI による分析に同意します。
-              収集した情報は本調査目的にのみ使用されます。
+              カメラ・マイク・画面の録画、表情からの分析、および AI による文字起こし・要約に同意します。
+              録画・テキストは AI 分析のため外部サービスに送信される場合があります。
+              収集した情報は本調査目的にのみ利用し、取扱い・保持期間・削除請求の方法は
+              <a href="/privacy" target="_blank" rel="noopener noreferrer" className="text-gray-900 underline hover:no-underline">プライバシーポリシー</a>
+              に従います（
+              <a href="/terms" target="_blank" rel="noopener noreferrer" className="text-gray-900 underline hover:no-underline">利用規約</a>
+              ）。
             </span>
           </label>
 

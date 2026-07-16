@@ -1,56 +1,57 @@
-import OpenAI from 'openai'
-
-// ビルド時のモジュール評価でキーエラーが出ないよう、呼び出し時に初期化する
-function getClient(): OpenAI {
-  return new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
-}
+import { getOpenAI } from './openai'
+import { LIMITS, clampText, wrapUntrusted, UNTRUSTED_DATA_GUARD } from './llm-safety'
 
 export async function analyzeTranscript(
   transcript: string,
   questions: string[]
 ): Promise<{ summary: string; themes: string; sentiment: string }> {
-  const response = await getClient().chat.completions.create({
+  const response = await getOpenAI().chat.completions.create({
     model: 'gpt-4o',
     max_tokens: 2048,
+    response_format: { type: 'json_object' },
     messages: [
       {
         role: 'system',
         content: `You are an expert UX researcher analyzing user interview transcripts.
+The transcript lines are prefixed with [mm:ss] timestamps.
 Provide structured analysis in JSON format with keys: summary, themes, sentiment.
-- summary: 2-3 sentence overview of key findings
+- summary: 2-3 sentence overview of key findings. When you reference a specific finding, cite the supporting moment with its [mm:ss] timestamp so claims can be verified.
 - themes: comma-separated list of main themes
-- sentiment: overall sentiment (positive/neutral/negative) with brief explanation`,
+- sentiment: overall sentiment (positive/neutral/negative) with brief explanation
+${UNTRUSTED_DATA_GUARD}`,
       },
       {
         role: 'user',
         content: `Interview Questions:
-${questions.map((q, i) => `${i + 1}. ${q}`).join('\n')}
+${questions.map((q, i) => `${i + 1}. ${clampText(q, LIMITS.question)}`).join('\n')}
 
 Transcript:
-${transcript}
+${wrapUntrusted(transcript, LIMITS.transcript)}
 
-Analyze this interview and return JSON.`,
+Analyze this interview and return a JSON object.`,
       },
     ],
   })
 
   const text = response.choices[0].message.content ?? ''
-  const jsonMatch = text.match(/\{[\s\S]*\}/)
-  if (jsonMatch) {
-    try {
-      return JSON.parse(jsonMatch[0])
-    } catch {
-      // ignore
+  try {
+    const parsed = JSON.parse(text)
+    return {
+      // 型不一致時はモデル生出力をそのまま保存せず、固定の失敗メッセージにフォールバック
+      summary: typeof parsed.summary === 'string' ? clampText(parsed.summary, 4000) : '分析結果を取得できませんでした。',
+      themes: typeof parsed.themes === 'string' ? clampText(parsed.themes, 1000) : '',
+      sentiment: typeof parsed.sentiment === 'string' ? parsed.sentiment : 'neutral',
     }
+  } catch {
+    return { summary: '分析結果を取得できませんでした。', themes: '', sentiment: 'neutral' }
   }
-  return { summary: text, themes: '', sentiment: 'neutral' }
 }
 
 export async function chatWithAgent(
   messages: Array<{ role: 'user' | 'assistant'; content: string }>,
   context: string
 ): Promise<string> {
-  const response = await getClient().chat.completions.create({
+  const response = await getOpenAI().chat.completions.create({
     model: 'gpt-4o',
     max_tokens: 1024,
     messages: [
@@ -59,9 +60,10 @@ export async function chatWithAgent(
         content: `You are an AI assistant that helps analyze user interview data.
 You have access to interview transcripts and analysis data.
 Answer questions concisely and helpfully based on the provided data.
+${UNTRUSTED_DATA_GUARD}
 
 Interview Data Context:
-${context}`,
+${wrapUntrusted(context, LIMITS.context)}`,
       },
       ...messages,
     ],
@@ -74,13 +76,15 @@ export async function generateInterviewQuestions(
   topic: string,
   count: number = 5
 ): Promise<string[]> {
-  const response = await getClient().chat.completions.create({
+  const response = await getOpenAI().chat.completions.create({
     model: 'gpt-4o',
     max_tokens: 1024,
     messages: [
       {
         role: 'user',
-        content: `Generate ${count} open-ended user interview questions about: "${topic}"
+        content: `${UNTRUSTED_DATA_GUARD}
+Generate ${count} open-ended user interview questions about the following topic.
+Topic: ${wrapUntrusted(topic, LIMITS.topic)}
 Return ONLY a JSON array of strings. No explanation.`,
       },
     ],
@@ -90,7 +94,11 @@ Return ONLY a JSON array of strings. No explanation.`,
   const jsonMatch = text.match(/\[[\s\S]*\]/)
   if (jsonMatch) {
     try {
-      return JSON.parse(jsonMatch[0])
+      const arr = JSON.parse(jsonMatch[0])
+      // 文字列要素のみ採用し、長さも制限する
+      if (Array.isArray(arr)) {
+        return arr.filter((q): q is string => typeof q === 'string').map((q) => clampText(q, LIMITS.question))
+      }
     } catch {
       // ignore
     }
@@ -104,16 +112,17 @@ export async function generateCommonInsights(
   summaries: string
 ): Promise<string | null> {
   try {
-    const response = await getClient().chat.completions.create({
+    const response = await getOpenAI().chat.completions.create({
       model: 'gpt-4o',
       max_tokens: 1024,
       messages: [
         {
           role: 'user',
-          content: `以下は「${interviewTitle}」に対する複数のユーザーインタビューの要約です。
+          content: `${UNTRUSTED_DATA_GUARD}
+以下は「${clampText(interviewTitle, LIMITS.topic)}」に対する複数のユーザーインタビューの要約です。
 全参加者に共通する課題・パターン・インサイトを3〜5点、箇条書きで簡潔にまとめてください。
 
-${summaries}`,
+${wrapUntrusted(summaries, LIMITS.context)}`,
         },
       ],
     })

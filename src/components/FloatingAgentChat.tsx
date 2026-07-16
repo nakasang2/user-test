@@ -53,34 +53,34 @@ export default function FloatingAgentChat({ sessionId, interviewId }: Props) {
     if (open) setTimeout(() => inputRef.current?.focus(), 50)
   }, [open])
 
-  // ── ドラッグ ──────────────────────────────────────────
-  const onMouseMove = useCallback((e: MouseEvent) => {
+  // ── ドラッグ（Pointer Events でマウス・タッチ両対応）──────────
+  const onPointerMove = useCallback((e: PointerEvent) => {
     if (!drag.current.active) return
     const newX = Math.max(0, Math.min(window.innerWidth - PANEL_W, drag.current.originX + e.clientX - drag.current.startX))
     const newY = Math.max(0, Math.min(window.innerHeight - 48,     drag.current.originY + e.clientY - drag.current.startY))
     setPos({ x: newX, y: newY })
   }, [])
 
-  const onMouseUp = useCallback(() => {
+  const onPointerUp = useCallback(() => {
     drag.current.active = false
-    window.removeEventListener('mousemove', onMouseMove)
-    window.removeEventListener('mouseup', onMouseUp)
-  }, [onMouseMove])
+    window.removeEventListener('pointermove', onPointerMove)
+    window.removeEventListener('pointerup', onPointerUp)
+  }, [onPointerMove])
 
-  function onDragStart(e: React.MouseEvent) {
+  function onDragStart(e: React.PointerEvent) {
     if (!pos) return
     e.preventDefault()
     drag.current = { active: true, startX: e.clientX, startY: e.clientY, originX: pos.x, originY: pos.y }
-    window.addEventListener('mousemove', onMouseMove)
-    window.addEventListener('mouseup', onMouseUp)
+    window.addEventListener('pointermove', onPointerMove)
+    window.addEventListener('pointerup', onPointerUp)
   }
 
   useEffect(() => {
     return () => {
-      window.removeEventListener('mousemove', onMouseMove)
-      window.removeEventListener('mouseup', onMouseUp)
+      window.removeEventListener('pointermove', onPointerMove)
+      window.removeEventListener('pointerup', onPointerUp)
     }
-  }, [onMouseMove, onMouseUp])
+  }, [onPointerMove, onPointerUp])
 
   // ── メッセージ送信 ────────────────────────────────────
   async function sendMessage() {
@@ -116,8 +116,8 @@ export default function FloatingAgentChat({ sessionId, interviewId }: Props) {
         >
           {/* ヘッダー（ドラッグハンドル） */}
           <div
-            onMouseDown={onDragStart}
-            className="flex items-center justify-between px-4 py-3 border-b border-gray-200 bg-white cursor-grab active:cursor-grabbing select-none flex-shrink-0"
+            onPointerDown={onDragStart}
+            className="flex items-center justify-between px-4 py-3 border-b border-gray-200 bg-white cursor-grab active:cursor-grabbing select-none touch-none flex-shrink-0"
           >
             <div className="flex items-center gap-2 text-gray-700">
               <GripHorizontal className="w-3.5 h-3.5 text-gray-400" strokeWidth={2} />

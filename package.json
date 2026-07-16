@@ -4,9 +4,11 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "prisma db push && next build",
+    "build": "prisma db push --accept-data-loss && next build",
+    "db:push": "prisma db push",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test:data": "node --env-file-if-exists=.env scripts/test-data-capture.mjs"
   },
   "dependencies": {
     "@daily-co/daily-js": "^0.90.0",
@@ -14,6 +16,8 @@
     "@radix-ui/react-dialog": "^1.1.15",
     "@radix-ui/react-select": "^2.2.6",
     "@radix-ui/react-tabs": "^1.1.13",
+    "@upstash/ratelimit": "^2.0.8",
+    "@upstash/redis": "^1.38.0",
     "@vercel/blob": "^2.4.0",
     "@vladmandic/face-api": "^1.7.15",
     "axios": "^1.16.1",

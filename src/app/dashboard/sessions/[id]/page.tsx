@@ -7,6 +7,7 @@ import TranscriptView from '@/components/TranscriptView'
 import FloatingAgentChat from '@/components/FloatingAgentChat'
 import StatusBadge from '@/components/StatusBadge'
 import { Video, Download, X, Folder } from 'lucide-react'
+import { track } from '@/lib/analytics'
 
 interface Segment {
   id: string
@@ -41,6 +42,7 @@ interface Session {
   dailyRoomName: string
   dailyRoomUrl: string
   recordingUrl: string | null
+  shareEnabled?: boolean
   createdAt: string
   interview: {
     id: string
@@ -56,9 +58,12 @@ export default function SessionDetail(props: { params: Promise<{ id: string }> }
   const { id } = use(props.params)
   const [session, setSession] = useState<Session | null>(null)
   const [processing, setProcessing] = useState(false)
+  const [transcribing, setTranscribing] = useState(false)
+  const [loadError, setLoadError] = useState(false)
   const videoRef = useRef<HTMLVideoElement>(null)
   const [videoCurrentTime, setVideoCurrentTime] = useState(0)
   const [localVideoUrl, setLocalVideoUrl] = useState<string | null>(null)
+  const [signedVideoUrl, setSignedVideoUrl] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const localVideoUrlRef = useRef<string | null>(null)
 
@@ -85,10 +90,55 @@ export default function SessionDetail(props: { params: Promise<{ id: string }> }
   }
 
   useEffect(() => {
+    let cancelled = false
     fetch(`/api/sessions/${id}`)
-      .then((r) => r.json())
-      .then(setSession)
+      .then((r) => {
+        if (r.status === 401) { window.location.href = '/login'; return null }
+        if (!r.ok) throw new Error('failed')
+        return r.json()
+      })
+      .then((d) => { if (!cancelled && d) setSession(d) })
+      .catch(() => { if (!cancelled) setLoadError(true) })
+    return () => { cancelled = true }
   }, [id])
+
+  // 録画は非公開 Blob のため、認可済みエンドポイント経由で短命の署名付き URL を取得する
+  useEffect(() => {
+    if (!session?.recordingUrl) return
+    let cancelled = false
+    fetch(`/api/sessions/${id}/recording`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => { if (!cancelled && data?.url) setSignedVideoUrl(data.url) })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [id, session?.recordingUrl])
+
+  async function shareSession() {
+    try {
+      const res = await fetch(`/api/sessions/${id}/share`, { method: 'POST' })
+      if (!res.ok) throw new Error('failed')
+      const { shareToken } = await res.json()
+      const url = `${window.location.origin}/share/${shareToken}`
+      await navigator.clipboard.writeText(url)
+      track('report_shared', { sessionId: id })
+      setSession((prev) => (prev ? { ...prev, shareEnabled: true } : prev))
+      alert(`読み取り専用の共有リンクをコピーしました:\n${url}`)
+    } catch {
+      alert('共有リンクの発行に失敗しました')
+    }
+  }
+
+  async function revokeShare() {
+    if (!confirm('共有リンクを停止します。停止後、このリンクからは閲覧できなくなります。よろしいですか？')) return
+    try {
+      const res = await fetch(`/api/sessions/${id}/share`, { method: 'DELETE' })
+      if (!res.ok) throw new Error('failed')
+      setSession((prev) => (prev ? { ...prev, shareEnabled: false } : prev))
+      alert('共有リンクを停止しました')
+    } catch {
+      alert('共有の停止に失敗しました')
+    }
+  }
 
   function exportCsv() {
     if (!session) return
@@ -132,18 +182,47 @@ export default function SessionDetail(props: { params: Promise<{ id: string }> }
     }
   }
 
+  async function transcribeFromRecording() {
+    setTranscribing(true)
+    try {
+      const res = await fetch(`/api/sessions/${id}/transcribe`, { method: 'POST' })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        alert(err.error ?? '文字起こしに失敗しました')
+        return
+      }
+      track('recording_transcribed', { sessionId: id })
+      const updated = await fetch(`/api/sessions/${id}`).then((r) => r.json())
+      setSession(updated)
+    } finally {
+      setTranscribing(false)
+    }
+  }
+
   if (!session) {
     return (
-      <div className="min-h-screen bg-white flex items-center justify-center">
-        <div className="text-gray-500 text-sm">読み込み中...</div>
+      <div className="min-h-screen bg-white flex flex-col items-center justify-center gap-3">
+        {loadError ? (
+          <>
+            <div className="text-gray-700 text-sm">データの読み込みに失敗しました。</div>
+            <button
+              onClick={() => window.location.reload()}
+              className="border border-gray-300 hover:border-gray-400 text-gray-700 px-4 py-2 rounded-md text-sm transition-colors"
+            >
+              再試行
+            </button>
+          </>
+        ) : (
+          <div className="text-gray-500 text-sm">読み込み中...</div>
+        )}
       </div>
     )
   }
 
   const roomLink = `/interview/${session.dailyRoomName}`
 
-  // Blob CDN URL のみ有効な録画とみなす
-  const serverVideoUrl = session.recordingUrl?.startsWith('https://') ? session.recordingUrl : null
+  // 録画は非公開 Blob。署名付き URL を取得できた場合のみ再生・ダウンロード可能とする
+  const serverVideoUrl = signedVideoUrl
   const videoSrc = localVideoUrl ?? serverVideoUrl ?? null
 
   const actionButton = (() => {
@@ -178,11 +257,38 @@ export default function SessionDetail(props: { params: Promise<{ id: string }> }
         <div className="flex items-center gap-3">
           <StatusBadge status={session.status} />
           {session.transcript && (
+            <>
+              <button
+                onClick={shareSession}
+                title={session.shareEnabled ? '共有リンクをコピー（共有は有効中）' : '読み取り専用の共有リンクを発行'}
+                className="border border-gray-300 hover:border-gray-400 text-gray-700 hover:text-gray-900 px-3 py-2 rounded-md text-xs transition-colors"
+              >
+                {session.shareEnabled ? '共有リンクをコピー' : '共有リンク'}
+              </button>
+              {session.shareEnabled && (
+                <button
+                  onClick={revokeShare}
+                  className="border border-red-200 hover:border-red-300 text-red-600 hover:text-red-700 px-3 py-2 rounded-md text-xs transition-colors"
+                >
+                  共有を停止
+                </button>
+              )}
+              <button
+                onClick={exportCsv}
+                className="border border-gray-300 hover:border-gray-400 text-gray-700 hover:text-gray-900 px-3 py-2 rounded-md text-xs transition-colors"
+              >
+                CSV 出力
+              </button>
+            </>
+          )}
+          {session.recordingUrl && (
             <button
-              onClick={exportCsv}
-              className="border border-gray-300 hover:border-gray-400 text-gray-700 hover:text-gray-900 px-3 py-2 rounded-md text-xs transition-colors"
+              onClick={transcribeFromRecording}
+              disabled={transcribing}
+              title="録画から Whisper で高精度に文字起こしします（話者識別は非対応）"
+              className="border border-gray-300 hover:border-gray-400 text-gray-700 hover:text-gray-900 disabled:opacity-50 px-3 py-2 rounded-md text-xs transition-colors"
             >
-              CSV 出力
+              {transcribing ? 'Whisper 実行中...' : '録画から文字起こし'}
             </button>
           )}
           {actionButton}
@@ -254,9 +360,9 @@ export default function SessionDetail(props: { params: Promise<{ id: string }> }
             />
           </div>
 
-          {/* 右: 感情分析 + 動画 */}
+          {/* 右: 表情エンゲージメント指標 + 動画 */}
           <div>
-            <SectionLabel>感情分析</SectionLabel>
+            <SectionLabel>表情エンゲージメント指標（参考）</SectionLabel>
 
             {/* 動画プレーヤー or ファイルピッカー */}
             {videoSrc ? (

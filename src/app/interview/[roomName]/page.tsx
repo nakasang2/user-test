@@ -23,6 +23,7 @@ export default async function InterviewPage(props: { params: Promise<{ roomName:
   return (
     <InterviewRoom
       sessionId={session.id}
+      participantToken={session.participantToken ?? undefined}
       roomName={roomName}
       dailyRoomUrl={session.dailyRoomUrl}
       questions={session.interview.questions.map((q) => ({
@@ -32,8 +33,7 @@ export default async function InterviewPage(props: { params: Promise<{ roomName:
       interviewTitle={session.interview.title}
       participantName={session.participant?.name}
       interviewType={session.interview.type as 'interview' | 'impression' | 'usability'}
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      usabilityMode={((session.interview as any).usabilityMode as 'prototype' | 'service' | null | undefined) ?? undefined}
+      usabilityMode={(session.interview.usabilityMode as 'prototype' | 'service' | null | undefined) ?? undefined}
       stimulusUrl={session.interview.stimulusUrl ?? undefined}
       stimulusDuration={session.interview.stimulusDuration ?? undefined}
       tasks={session.interview.tasks}

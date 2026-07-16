@@ -1,10 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth, handleApiError } from '@/lib/api-auth'
-import OpenAI from 'openai'
-
-function getClient() {
-  return new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
-}
+import { sanitizeMessages } from '@/lib/llm-safety'
+import { getOpenAI } from '@/lib/openai'
+import { rateLimit } from '@/lib/ratelimit'
 
 type Message = { role: 'user' | 'assistant'; content: string }
 
@@ -39,17 +37,22 @@ const GENERATE_SYSTEM = `あなたはUXリサーチの専門家です。
 
 export async function POST(req: NextRequest) {
   try {
-    await requireAuth()
+    const { orgId } = await requireAuth()
+    if (!(await rateLimit(`design:${orgId}`, 20, 60))) {
+      return NextResponse.json({ error: 'Too many requests' }, { status: 429 })
+    }
     const body = await req.json()
-    const { messages, action } = body as { messages: Message[]; action?: 'generate' }
+    const { action } = body as { action?: 'generate' }
+    const messages: Message[] = sanitizeMessages(body.messages)
 
-    const client = getClient()
+    const client = getOpenAI()
 
     if (action === 'generate') {
       // 会話履歴からインタビュープロットを生成
       const res = await client.chat.completions.create({
         model: 'gpt-4o',
         max_tokens: 2048,
+        response_format: { type: 'json_object' },
         messages: [
           { role: 'system', content: GENERATE_SYSTEM },
           ...messages,
@@ -58,12 +61,8 @@ export async function POST(req: NextRequest) {
       })
 
       const text = res.choices[0].message.content ?? '{}'
-      const jsonMatch = text.match(/\{[\s\S]*\}/)
-      if (!jsonMatch) {
-        return NextResponse.json({ error: '生成に失敗しました' }, { status: 500 })
-      }
       try {
-        const interview = JSON.parse(jsonMatch[0])
+        const interview = JSON.parse(text)
         return NextResponse.json({ interview })
       } catch {
         return NextResponse.json({ error: '生成結果のパースに失敗しました' }, { status: 500 })

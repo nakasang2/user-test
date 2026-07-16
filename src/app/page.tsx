@@ -89,13 +89,13 @@ export default async function Home() {
           />
           <FeatureCard
             icon={<SmilePlus className="w-5 h-5" strokeWidth={1.5} />}
-            title="表情・感情分析"
-            desc="インタビュー中の表情をリアルタイムで解析・記録"
+            title="表情エンゲージメント指標"
+            desc="インタビュー中の表情から参考指標をリアルタイム記録（補助シグナル）"
           />
           <FeatureCard
             icon={<FileText className="w-5 h-5" strokeWidth={1.5} />}
             title="自動文字起こし"
-            desc="Whisper で高精度な文字起こし。話者も識別"
+            desc="ブラウザ音声認識でリアルタイムに文字起こし"
           />
           <FeatureCard
             icon={<LayoutDashboard className="w-5 h-5" strokeWidth={1.5} />}
