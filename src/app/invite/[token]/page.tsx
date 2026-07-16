@@ -1,8 +1,9 @@
 'use client'
 
 import { useState, useEffect, use } from 'react'
+import Link from 'next/link'
 import { ROLE_LABELS, type Role } from '@/lib/permissions'
-import { Link2Off, AlertCircle } from 'lucide-react'
+import { Link2Off, AlertCircle, Eye, EyeOff } from 'lucide-react'
 
 interface InviteInfo {
   orgName: string
@@ -23,6 +24,7 @@ export default function InvitePage({ params }: { params: Promise<{ token: string
   const [confirm, setConfirm] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
+  const [showPw, setShowPw] = useState(false)
 
   useEffect(() => {
     fetch(`/api/invite/${token}`)
@@ -73,7 +75,11 @@ export default function InvitePage({ params }: { params: Promise<{ token: string
             <Link2Off className="w-5 h-5 text-red-600" strokeWidth={1.75} />
           </div>
           <h1 className="text-base font-semibold text-gray-900 mb-1 tracking-tight">招待リンクが無効です</h1>
-          <p className="text-gray-500 text-sm">{error}</p>
+          <p className="text-gray-500 text-sm mb-4">{error}</p>
+          <p className="text-gray-500 text-xs mb-4">リンクの有効期限が切れているか、取り消された可能性があります。招待者に新しいリンクの発行を依頼してください。</p>
+          <Link href="/login" className="inline-flex items-center gap-1.5 bg-gray-900 hover:bg-gray-800 text-white px-4 py-2 rounded-md text-sm font-medium transition-colors">
+            ログインへ
+          </Link>
         </div>
       </div>
     )
@@ -96,29 +102,36 @@ export default function InvitePage({ params }: { params: Promise<{ token: string
 
         <form onSubmit={handleSubmit} className="bg-white border border-gray-200 rounded-xl p-6 space-y-4">
           <div>
-            <label className="block text-xs font-medium text-gray-700 mb-1.5">名前 <span className="text-red-500">*</span></label>
-            <input type="text" value={name} onChange={(e) => setName(e.target.value)}
-              placeholder="例：田中 太郎" required disabled={submitting}
+            <label htmlFor="inv-name" className="block text-xs font-medium text-gray-700 mb-1.5">名前 <span className="text-red-500">*</span></label>
+            <input id="inv-name" type="text" value={name} onChange={(e) => setName(e.target.value)}
+              placeholder="例：田中 太郎" required autoFocus disabled={submitting}
               className={inputClass} />
           </div>
           <div>
-            <label className="block text-xs font-medium text-gray-700 mb-1.5">メールアドレス <span className="text-red-500">*</span></label>
-            <input type="email" value={email} onChange={(e) => setEmail(e.target.value)}
+            <label htmlFor="inv-email" className="block text-xs font-medium text-gray-700 mb-1.5">メールアドレス <span className="text-red-500">*</span></label>
+            <input id="inv-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)}
               placeholder="例：tanaka@example.com" required disabled={submitting || !!info!.email}
               className={inputClass} />
           </div>
           <div>
-            <label className="block text-xs font-medium text-gray-700 mb-1.5">
+            <label htmlFor="inv-password" className="block text-xs font-medium text-gray-700 mb-1.5">
               パスワード <span className="text-red-500">*</span>
               <span className="text-gray-400 font-normal ml-1">(8文字以上)</span>
             </label>
-            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)}
-              placeholder="8文字以上" required minLength={8} disabled={submitting}
-              className={inputClass} />
+            <div className="relative">
+              <input id="inv-password" type={showPw ? 'text' : 'password'} value={password} onChange={(e) => setPassword(e.target.value)}
+                placeholder="8文字以上" required minLength={8} disabled={submitting}
+                className={`${inputClass} pr-10`} />
+              <button type="button" onClick={() => setShowPw((v) => !v)}
+                aria-label={showPw ? 'パスワードを隠す' : 'パスワードを表示'}
+                className="absolute inset-y-0 right-0 flex items-center px-3 text-gray-400 hover:text-gray-700">
+                {showPw ? <EyeOff className="w-4 h-4" strokeWidth={1.75} /> : <Eye className="w-4 h-4" strokeWidth={1.75} />}
+              </button>
+            </div>
           </div>
           <div>
-            <label className="block text-xs font-medium text-gray-700 mb-1.5">パスワード（確認） <span className="text-red-500">*</span></label>
-            <input type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)}
+            <label htmlFor="inv-confirm" className="block text-xs font-medium text-gray-700 mb-1.5">パスワード（確認） <span className="text-red-500">*</span></label>
+            <input id="inv-confirm" type={showPw ? 'text' : 'password'} value={confirm} onChange={(e) => setConfirm(e.target.value)}
               placeholder="もう一度入力" required disabled={submitting}
               className={inputClass} />
           </div>

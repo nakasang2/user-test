@@ -61,10 +61,12 @@ export default function MembersPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ role: newRole, email: newEmail || undefined }),
       })
-      const data = await res.json()
+      const data = await res.json().catch(() => ({}))
       if (!res.ok) { alert(data.error ?? 'エラーが発生しました'); return }
       setInvites((prev) => [data, ...prev])
       setNewEmail('')
+    } catch {
+      alert('招待リンクの生成に失敗しました。通信環境をご確認ください。')
     } finally {
       setCreating(false)
     }
@@ -72,8 +74,18 @@ export default function MembersPage() {
 
   async function revokeInvite(token: string) {
     if (!confirm('この招待リンクを無効にしますか？')) return
-    await fetch(`/api/organizations/invites/${token}`, { method: 'DELETE' })
-    setInvites((prev) => prev.filter((i) => i.token !== token))
+    try {
+      const res = await fetch(`/api/organizations/invites/${token}`, { method: 'DELETE' })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        alert(data.error ?? '招待リンクの無効化に失敗しました。')
+        return
+      }
+      // サーバーで削除が確定してから UI を更新する
+      setInvites((prev) => prev.filter((i) => i.token !== token))
+    } catch {
+      alert('通信エラーで招待リンクを無効化できませんでした。')
+    }
   }
 
   async function changeRole(userId: string, role: Role) {

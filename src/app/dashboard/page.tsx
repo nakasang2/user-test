@@ -62,6 +62,7 @@ export default function Dashboard() {
   const [sortKey, setSortKey] = useState<SortKey>('date-desc')
 
   const [loadError, setLoadError] = useState(false)
+  const [loading, setLoading] = useState(true)
 
   useEffect(() => { fetchData() }, [])
 
@@ -84,16 +85,23 @@ export default function Dashboard() {
       setLoadError(false)
     } catch {
       setLoadError(true)
+    } finally {
+      setLoading(false)
     }
   }
 
   async function copyInviteLink(interviewId: string, e: React.MouseEvent) {
     e.preventDefault()
     const url = `${window.location.origin}/join/${interviewId}`
-    await navigator.clipboard.writeText(url)
-    track('invite_copied', { interviewId })
-    setCopiedInviteId(interviewId)
-    setTimeout(() => setCopiedInviteId(null), 2000)
+    try {
+      await navigator.clipboard.writeText(url)
+      track('invite_copied', { interviewId })
+      setCopiedInviteId(interviewId)
+      setTimeout(() => setCopiedInviteId(null), 2000)
+    } catch {
+      // クリップボードが使えない環境（非HTTPS等）のフォールバック
+      window.prompt('以下のリンクをコピーしてください', url)
+    }
   }
 
   // インタビュー(テスト)ごとのセッション集計
@@ -134,7 +142,7 @@ export default function Dashboard() {
           <span className="text-gray-300">/</span>
           <span className="text-gray-600 text-sm">ダッシュボード</span>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center justify-end gap-2">
           <Link
             href="/dashboard/design"
             className="inline-flex items-center gap-1.5 bg-gray-900 hover:bg-gray-800 text-white px-3 py-1.5 rounded-md text-sm font-medium transition-colors"
@@ -182,7 +190,7 @@ export default function Dashboard() {
           </div>
         )}
         {/* サマリーカード */}
-        <div className="grid grid-cols-3 gap-3 mb-8">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-8">
           <StatCard value={interviews.length} label="テスト数" />
           <StatCard value={sessions.length} label="総セッション数" />
           <StatCard value={doneCount} label="分析完了" />
@@ -222,7 +230,16 @@ export default function Dashboard() {
 
         {/* テスト一覧 */}
         <div className="space-y-3">
-          {visibleInterviews.length === 0 ? (
+          {loading ? (
+            <div className="space-y-3">
+              {[0, 1, 2].map((i) => (
+                <div key={i} className="bg-white border border-gray-200 rounded-lg p-4 animate-pulse">
+                  <div className="h-4 bg-gray-100 rounded w-1/3 mb-2" />
+                  <div className="h-3 bg-gray-100 rounded w-1/2" />
+                </div>
+              ))}
+            </div>
+          ) : visibleInterviews.length === 0 ? (
             <div className="p-8 text-center text-sm text-gray-500 bg-white border border-gray-200 rounded-lg">
               {searchQuery.trim()
                 ? '条件に一致するテストがありません'
@@ -248,7 +265,7 @@ export default function Dashboard() {
                       <span className="text-gray-300">·</span>
                       <span>分析済み {c.done}</span>
                       <span className="text-gray-300">·</span>
-                      <span className="text-gray-400">{new Date(iv.createdAt).toLocaleDateString('ja-JP')}</span>
+                      <span className="text-gray-500">{new Date(iv.createdAt).toLocaleDateString('ja-JP')}</span>
                     </div>
                   </Link>
 

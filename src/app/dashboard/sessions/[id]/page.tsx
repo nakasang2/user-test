@@ -64,6 +64,7 @@ export default function SessionDetail(props: { params: Promise<{ id: string }> }
   const [videoCurrentTime, setVideoCurrentTime] = useState(0)
   const [localVideoUrl, setLocalVideoUrl] = useState<string | null>(null)
   const [signedVideoUrl, setSignedVideoUrl] = useState<string | null>(null)
+  const [videoLoadError, setVideoLoadError] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const localVideoUrlRef = useRef<string | null>(null)
 
@@ -78,7 +79,18 @@ export default function SessionDetail(props: { params: Promise<{ id: string }> }
     const url = URL.createObjectURL(file)
     localVideoUrlRef.current = url
     setLocalVideoUrl(url)
+    setVideoLoadError(false)
     setVideoCurrentTime(0)
+  }
+
+  // 再生失敗時: ローカルファイルなら破棄、サーバー録画なら署名URLを破棄しエラー表示する
+  function handleVideoError() {
+    if (localVideoUrl) {
+      clearLocalVideo()
+    } else {
+      setSignedVideoUrl(null)
+      setVideoLoadError(true)
+    }
   }
 
   function clearLocalVideo() {
@@ -161,7 +173,7 @@ export default function SessionDetail(props: { params: Promise<{ id: string }> }
     if (!session?.transcript) return
     setProcessing(true)
     try {
-      await fetch(`/api/sessions/${id}/process`, {
+      const res = await fetch(`/api/sessions/${id}/process`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -175,8 +187,19 @@ export default function SessionDetail(props: { params: Promise<{ id: string }> }
           emotions: session.emotions,
         }),
       })
-      const updated = await fetch(`/api/sessions/${id}`).then((r) => r.json())
-      setSession(updated)
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        alert(data.error ?? 'AI 再分析に失敗しました。時間をおいて再度お試しください。')
+        return
+      }
+      const upRes = await fetch(`/api/sessions/${id}`)
+      if (!upRes.ok) {
+        alert('分析は完了しましたが、最新データの取得に失敗しました。ページを再読み込みしてください。')
+        return
+      }
+      setSession(await upRes.json())
+    } catch {
+      alert('通信エラーで AI 再分析を実行できませんでした。')
     } finally {
       setProcessing(false)
     }
@@ -246,7 +269,7 @@ export default function SessionDetail(props: { params: Promise<{ id: string }> }
   return (
     <div className="min-h-screen bg-white text-gray-900">
       {/* ナビ */}
-      <nav className="border-b border-gray-200 px-6 py-4 flex items-center justify-between bg-white">
+      <nav className="border-b border-gray-200 px-6 py-4 flex flex-wrap items-center justify-between gap-y-3 bg-white">
         <div className="flex items-center gap-2 text-sm">
           <Link href="/" className="text-gray-700 hover:text-gray-900">UserVoice</Link>
           <span className="text-gray-300">/</span>
@@ -254,7 +277,7 @@ export default function SessionDetail(props: { params: Promise<{ id: string }> }
           <span className="text-gray-300">/</span>
           <span className="text-gray-900">{session.participant?.name ?? 'Anonymous'}</span>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center justify-end gap-2">
           <StatusBadge status={session.status} />
           {session.transcript && (
             <>
@@ -349,7 +372,7 @@ export default function SessionDetail(props: { params: Promise<{ id: string }> }
         )}
 
         {/* ── メインコンテンツ 2カラム ── */}
-        <div className="grid grid-cols-2 gap-6 items-start">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
 
           {/* 左: 文字起こし */}
           <div>
@@ -384,7 +407,7 @@ export default function SessionDetail(props: { params: Promise<{ id: string }> }
                   controls
                   src={videoSrc}
                   onTimeUpdate={(e) => setVideoCurrentTime(e.currentTarget.currentTime)}
-                  onError={clearLocalVideo}
+                  onError={handleVideoError}
                   className="w-full bg-black"
                   style={{ maxHeight: '320px' }}
                 />
@@ -392,6 +415,11 @@ export default function SessionDetail(props: { params: Promise<{ id: string }> }
             ) : (
               <div className="mb-4 bg-gray-50 border border-gray-200 border-dashed rounded-lg p-6 text-center">
                 <Video className="w-5 h-5 text-gray-400 mx-auto mb-3" strokeWidth={1.75} />
+                {videoLoadError && (
+                  <p className="text-xs text-red-600 mb-3">
+                    サーバー上の録画を読み込めませんでした（リンクの期限切れの可能性があります）。ページを再読み込みするか、下記からローカルの録画ファイルを読み込んでください。
+                  </p>
+                )}
                 <p className="text-sm text-gray-900 font-medium mb-1">
                   録画ファイルを読み込むと感情グラフと同期できます
                 </p>
