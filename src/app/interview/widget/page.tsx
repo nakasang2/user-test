@@ -23,6 +23,7 @@ function WidgetContent() {
   const [doneMessage, setDoneMessage]           = useState('')
   const [isScreenRecording, setIsScreenRecording] = useState(false)
   const [warnNoRecord, setWarnNoRecord]         = useState(false)
+  const [cameraError, setCameraError]           = useState(false)
 
   const channelRef             = useRef<BroadcastChannel | null>(null)
   const webcamVideoRef         = useRef<HTMLVideoElement>(null)
@@ -53,14 +54,7 @@ function WidgetContent() {
     }
 
     // ウェブカメラ（表示＋音声。音声は合成録画に載せる）
-    navigator.mediaDevices.getUserMedia({ video: true, audio: true })
-      .then((stream) => {
-        webcamStreamRef.current = stream
-        if (webcamVideoRef.current) {
-          webcamVideoRef.current.srcObject = stream
-        }
-      })
-      .catch(() => { /* カメラ未使用でも継続 */ })
+    initWebcam()
 
     return () => {
       channelRef.current?.close()
@@ -73,6 +67,19 @@ function WidgetContent() {
       }
     }
   }, [sessionId, tasksRaw])
+
+  /* ── ウェブカメラ取得（失敗時はフォールバック表示 + 再試行） ── */
+  function initWebcam() {
+    navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+      .then((stream) => {
+        webcamStreamRef.current = stream
+        if (webcamVideoRef.current) {
+          webcamVideoRef.current.srcObject = stream
+        }
+        setCameraError(false)
+      })
+      .catch(() => { setCameraError(true) })
+  }
 
   /* ── 画面録画開始（Canvas合成: スクリーン + ウェブカメラPiP） ── */
   async function startScreenRecording() {
@@ -99,11 +106,9 @@ function WidgetContent() {
       canvas.height = H
       const ctx = canvas.getContext('2d')!
 
-      // ウェブカメラ PiP サイズ（右下に配置）
+      // ウェブカメラ PiP 幅（右下に配置）。高さは実映像のアスペクト比から毎フレーム算出し、
+      // 縦横比の潰れ（16:9 を 4:3 枠に押し込む等）を防ぐ。
       const pipW = Math.round(W * 0.22)
-      const pipH = Math.round(pipW * 0.75) // 4:3
-      const pipX = W - pipW - 16
-      const pipY = H - pipH - 16
 
       const webcamVid = webcamVideoRef.current
 
@@ -111,7 +116,12 @@ function WidgetContent() {
       function draw() {
         ctx.drawImage(screenVid, 0, 0, W, H)
 
-        if (webcamVid && webcamVid.readyState >= 2) {
+        if (webcamVid && webcamVid.readyState >= 2 && webcamVid.videoWidth) {
+          // 実際のカメラのアスペクト比で高さを決める（潰れ防止）
+          const ratio = webcamVid.videoHeight / webcamVid.videoWidth || 0.75
+          const pipH = Math.round(pipW * ratio)
+          const pipX = W - pipW - 16
+          const pipY = H - pipH - 16
           // クリップしてから左右反転（鏡映し）で描画
           ctx.save()
           ctx.beginPath()
@@ -262,15 +272,28 @@ function WidgetContent() {
         )}
       </div>
 
-      {/* ウェブカメラ */}
-      <div className="relative bg-gray-900 flex-shrink-0" style={{ height: 140 }}>
+      {/* ウェブカメラ（16:9 で潰れず表示。取得失敗時はフォールバック） */}
+      <div className="relative bg-gray-900 flex-shrink-0 aspect-video">
         <video
           ref={webcamVideoRef}
           autoPlay
           muted
           playsInline
-          className="w-full h-full object-cover scale-x-[-1]"
+          aria-label="あなたのカメラ映像"
+          className={`w-full h-full object-cover scale-x-[-1] ${cameraError ? 'hidden' : ''}`}
         />
+        {cameraError && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 px-4 text-center">
+            <AlertTriangle className="w-5 h-5 text-gray-300" strokeWidth={1.75} />
+            <p className="text-[11px] text-gray-200 leading-relaxed">カメラを利用できません。<br />ブラウザで許可されているかご確認ください。</p>
+            <button
+              onClick={initWebcam}
+              className="mt-0.5 text-[11px] bg-white/90 hover:bg-white text-gray-900 px-2.5 py-1 rounded-md font-medium transition-colors"
+            >
+              再試行
+            </button>
+          </div>
+        )}
         {isScreenRecording && (
           <div className="absolute top-2 right-2 flex items-center gap-1.5 bg-white/95 border border-red-200 px-2 py-1 rounded-md shadow-sm">
             <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
@@ -279,8 +302,8 @@ function WidgetContent() {
         )}
       </div>
 
-      {/* タスク内容 */}
-      <div className="px-3 py-3 flex-1">
+      {/* タスク内容（長文はスクロール） */}
+      <div className="px-3 py-3 flex-1 min-h-0 overflow-y-auto">
         {currentTask ? (
           <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 h-full">
             <p className="text-[10px] text-gray-500 mb-1.5 uppercase tracking-wide font-medium">現在のタスク</p>

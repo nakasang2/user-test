@@ -2,12 +2,13 @@
 
 import { useState } from 'react'
 import Link from 'next/link'
-import { AlertCircle } from 'lucide-react'
+import { AlertCircle, Eye, EyeOff } from 'lucide-react'
 
 export default function RegisterPage() {
   const [form, setForm] = useState({ orgName: '', name: '', email: '', password: '', confirm: '' })
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
+  const [showPw, setShowPw] = useState(false)
 
   function update(field: keyof typeof form) {
     return (e: React.ChangeEvent<HTMLInputElement>) =>
@@ -52,28 +53,35 @@ export default function RegisterPage() {
         </div>
 
         <form onSubmit={handleSubmit} className="bg-white border border-gray-200 rounded-xl p-6 space-y-4">
-          <Field label="組織・会社名" required>
-            <input type="text" value={form.orgName} onChange={update('orgName')}
-              placeholder="例：Acme Inc." required disabled={loading}
+          <Field id="reg-org" label="組織・会社名" required>
+            <input id="reg-org" type="text" value={form.orgName} onChange={update('orgName')}
+              placeholder="例：Acme Inc." required autoFocus disabled={loading}
               className={inputClass} />
           </Field>
-          <Field label="あなたの名前" required>
-            <input type="text" value={form.name} onChange={update('name')}
+          <Field id="reg-name" label="あなたの名前" required>
+            <input id="reg-name" type="text" value={form.name} onChange={update('name')}
               placeholder="例：田中 太郎" required disabled={loading}
               className={inputClass} />
           </Field>
-          <Field label="メールアドレス" required>
-            <input type="email" value={form.email} onChange={update('email')}
+          <Field id="reg-email" label="メールアドレス" required>
+            <input id="reg-email" type="email" value={form.email} onChange={update('email')}
               placeholder="例：tanaka@example.com" required disabled={loading}
               className={inputClass} />
           </Field>
-          <Field label="パスワード" hint="8文字以上" required>
-            <input type="password" value={form.password} onChange={update('password')}
-              placeholder="8文字以上" required minLength={8} disabled={loading}
-              className={inputClass} />
+          <Field id="reg-password" label="パスワード" hint="8文字以上" required>
+            <div className="relative">
+              <input id="reg-password" type={showPw ? 'text' : 'password'} value={form.password} onChange={update('password')}
+                placeholder="8文字以上" required minLength={8} disabled={loading}
+                className={`${inputClass} pr-10`} />
+              <button type="button" onClick={() => setShowPw((v) => !v)}
+                aria-label={showPw ? 'パスワードを隠す' : 'パスワードを表示'}
+                className="absolute inset-y-0 right-0 flex items-center px-3 text-gray-400 hover:text-gray-700">
+                {showPw ? <EyeOff className="w-4 h-4" strokeWidth={1.75} /> : <Eye className="w-4 h-4" strokeWidth={1.75} />}
+              </button>
+            </div>
           </Field>
-          <Field label="パスワード（確認）" required>
-            <input type="password" value={form.confirm} onChange={update('confirm')}
+          <Field id="reg-confirm" label="パスワード（確認）" required>
+            <input id="reg-confirm" type={showPw ? 'text' : 'password'} value={form.confirm} onChange={update('confirm')}
               placeholder="もう一度入力" required disabled={loading}
               className={inputClass} />
           </Field>
@@ -103,7 +111,8 @@ export default function RegisterPage() {
 const inputClass =
   'w-full bg-white border border-gray-300 focus:border-gray-900 focus:ring-1 focus:ring-gray-900 focus:outline-none rounded-md px-3 py-2 text-gray-900 placeholder-gray-400 text-sm transition-colors disabled:opacity-50'
 
-function Field({ label, hint, required, children }: {
+function Field({ id, label, hint, required, children }: {
+  id: string
   label: string
   hint?: string
   required?: boolean
@@ -111,7 +120,7 @@ function Field({ label, hint, required, children }: {
 }) {
   return (
     <div>
-      <label className="block text-xs font-medium text-gray-700 mb-1.5">
+      <label htmlFor={id} className="block text-xs font-medium text-gray-700 mb-1.5">
         {label}
         {required && <span className="text-red-500 ml-1">*</span>}
         {hint && <span className="text-gray-400 font-normal ml-1">({hint})</span>}

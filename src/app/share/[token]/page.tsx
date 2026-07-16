@@ -43,6 +43,31 @@ export default async function SharePage(props: { params: Promise<{ token: string
 
   if (!session) notFound()
 
+  // 分析がまだ完了していない共有レポートは、内部操作向けの空状態（「AI分析を実行」等）を
+  // 外部閲覧者に見せず、中立的な「準備中」表示にする。
+  const analysisReady = !!session.transcript
+
+  if (!analysisReady) {
+    return (
+      <div className="min-h-screen bg-white text-gray-900">
+        <div className="max-w-4xl mx-auto px-6 py-10">
+          <header className="mb-8">
+            <p className="text-xs text-gray-500 mb-1">共有レポート（読み取り専用）</p>
+            <h1 className="text-2xl font-semibold tracking-tight">{session.interview.title}</h1>
+            <p className="text-sm text-gray-500 mt-1">
+              {session.participant?.name ?? 'Anonymous'} ·{' '}
+              {new Date(session.createdAt).toLocaleDateString('ja-JP')}
+            </p>
+          </header>
+          <div className="bg-gray-50 border border-gray-200 rounded-lg p-8 text-center">
+            <p className="text-sm text-gray-700 font-medium mb-1">このレポートはまだ準備中です</p>
+            <p className="text-xs text-gray-500">分析が完了すると、文字起こしと表情指標が表示されます。しばらくしてから再度お開きください。</p>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="min-h-screen bg-white text-gray-900">
       <div className="max-w-4xl mx-auto px-6 py-10">

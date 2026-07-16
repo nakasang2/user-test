@@ -119,8 +119,9 @@ export default function InterviewComparePage(props: { params: Promise<{ id: stri
   const radarData = ['happy', 'neutral', 'sad', 'surprised'].map((emotion) => ({
     emotion: EMOTION_LABELS[emotion],
     ...Object.fromEntries(
+      // 同名参加者や名前中の「.」で系列が衝突しないよう、一意な session id をキーにする
       doneSessions.map((s) => [
-        s.participantName,
+        s.id,
         s.avgEmotion ? Math.round((s.avgEmotion[emotion as keyof typeof s.avgEmotion] ?? 0) * 100) : 0,
       ])
     ),
@@ -273,11 +274,16 @@ export default function InterviewComparePage(props: { params: Promise<{ id: stri
                         <td className="px-6 py-3 font-medium text-gray-900 whitespace-nowrap">{s.participantName}</td>
                         <td className="px-6 py-3">
                           <div className="flex flex-wrap gap-1">
-                            {s.themes?.split(',').slice(0, 3).map((t, i) => (
-                              <span key={i} className="bg-gray-100 text-gray-700 px-1.5 py-0.5 rounded text-xs">
-                                {t.trim()}
-                              </span>
-                            )) ?? <span className="text-gray-400">—</span>}
+                            {(() => {
+                              const themes = s.themes?.split(',').map((t) => t.trim()).filter(Boolean) ?? []
+                              return themes.length > 0
+                                ? themes.slice(0, 3).map((t, i) => (
+                                    <span key={i} className="bg-gray-100 text-gray-700 px-1.5 py-0.5 rounded text-xs">
+                                      {t}
+                                    </span>
+                                  ))
+                                : <span className="text-gray-400">—</span>
+                            })()}
                           </div>
                         </td>
                         <td className="px-6 py-3 whitespace-nowrap">
@@ -334,7 +340,7 @@ export default function InterviewComparePage(props: { params: Promise<{ id: stri
                       <Radar
                         key={s.id}
                         name={s.participantName}
-                        dataKey={s.participantName}
+                        dataKey={s.id}
                         stroke={RADAR_COLORS[i % RADAR_COLORS.length]}
                         fill={RADAR_COLORS[i % RADAR_COLORS.length]}
                         fillOpacity={0.15}

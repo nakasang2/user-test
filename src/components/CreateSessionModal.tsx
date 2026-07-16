@@ -1,7 +1,7 @@
 'use client'
 
-import { useState } from 'react'
-import { CheckCircle2 } from 'lucide-react'
+import { useState, useEffect } from 'react'
+import { CheckCircle2, AlertCircle } from 'lucide-react'
 
 interface Props {
   interviewId: string
@@ -14,9 +14,18 @@ export default function CreateSessionModal({ interviewId, onClose, onCreated }: 
   const [email, setEmail] = useState('')
   const [loading, setLoading] = useState(false)
   const [created, setCreated] = useState<{ joinUrl: string } | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  // Escape で閉じる
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
+    setError(null)
     setLoading(true)
     try {
       const res = await fetch('/api/sessions', {
@@ -28,8 +37,14 @@ export default function CreateSessionModal({ interviewId, onClose, onCreated }: 
           participantEmail: email || undefined,
         }),
       })
-      const session = await res.json()
+      const session = await res.json().catch(() => ({}))
+      if (!res.ok || !session.joinUrl) {
+        setError(session.error ?? 'セッションの作成に失敗しました。')
+        return
+      }
       setCreated({ joinUrl: session.joinUrl })
+    } catch {
+      setError('通信エラーが発生しました。時間をおいて再度お試しください。')
     } finally {
       setLoading(false)
     }
@@ -37,15 +52,29 @@ export default function CreateSessionModal({ interviewId, onClose, onCreated }: 
 
   async function copyAndClose() {
     if (!created) return
-    await navigator.clipboard.writeText(created.joinUrl)
+    // クリップボードが使えない環境でも必ず閉じられるようにする
+    try {
+      await navigator.clipboard.writeText(created.joinUrl)
+    } catch {
+      window.prompt('以下のURLをコピーしてください', created.joinUrl)
+    }
     onCreated({ joinUrl: created.joinUrl })
   }
 
   return (
-    <div className="fixed inset-0 bg-gray-900/40 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-      <div className="bg-white border border-gray-200 rounded-xl w-full max-w-md shadow-xl">
+    <div
+      className="fixed inset-0 bg-gray-900/40 backdrop-blur-sm flex items-center justify-center z-50 p-4"
+      onClick={onClose}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="create-session-title"
+        onClick={(e) => e.stopPropagation()}
+        className="bg-white border border-gray-200 rounded-xl w-full max-w-md shadow-xl"
+      >
         <div className="p-6 border-b border-gray-200">
-          <h2 className="text-lg font-semibold tracking-tight text-gray-900">インタビューセッションを作成</h2>
+          <h2 id="create-session-title" className="text-lg font-semibold tracking-tight text-gray-900">インタビューセッションを作成</h2>
         </div>
 
         {!created ? (
@@ -72,6 +101,12 @@ export default function CreateSessionModal({ interviewId, onClose, onCreated }: 
             <p className="text-xs text-gray-500">
               セッションを作成するとインタビューURLが発行されます。被験者にURLを共有してください。
             </p>
+            {error && (
+              <div className="flex items-start gap-2 text-sm text-red-700 bg-red-50 border border-red-200 rounded-md px-3 py-2">
+                <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" strokeWidth={2} />
+                <span>{error}</span>
+              </div>
+            )}
             <div className="flex gap-3">
               <button
                 type="button"
@@ -114,6 +149,12 @@ export default function CreateSessionModal({ interviewId, onClose, onCreated }: 
               className="w-full border border-gray-300 hover:border-gray-400 text-gray-700 hover:text-gray-900 py-2 rounded-md text-sm transition-colors"
             >
               今すぐインタビューを開始する
+            </button>
+            <button
+              onClick={() => onCreated({ joinUrl: created.joinUrl })}
+              className="w-full text-xs text-gray-500 hover:text-gray-800 py-1 transition-colors"
+            >
+              閉じる
             </button>
           </div>
         )}
