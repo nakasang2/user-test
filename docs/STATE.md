@@ -5,15 +5,15 @@
 - **最終更新**: 2026-07-16（リリース可否QA — UX/UI監査58件修正、ブランチ qa/release-readiness）
 
 ## 進行中
-- リリース可否QA（社内テスト実施可能な状態への整備）。ブランチ `qa/release-readiness`。
-  - 多エージェント監査ワークフローで確定した58件を全て修正済み（カメラ表示の潰れ、権限拒否デッドエンド、公開ページの情報漏洩、ダッシュボードのエラーハンドリング、レスポンシブ、コピー/a11y）。
-  - 検証: `npx tsc --noEmit` 通過。ESLintの既存8エラーは main と同一（新規追加なし）。`next build` はサンドボックスのフォント取得不可・.env読取不可で未完（本番Vercelでは解消見込み）。
-  - 未コミット→この後コミット予定。push は ship スキルでユーザー確認後。
+- リリース可否QA → 出荷ハンドオフ中。ブランチ `qa/release-readiness`（コミット f89d31e）。
+  - 多エージェント監査で確定58件を全修正。tsc通過、敵対的リグレッションレビュー0件、ダッシュ/ログイン/登録/トップ/小窓は実機描画OK。
+  - **このセッションからは push/merge/本番反映確認が不可**（GitHub認証がsandboxで読めず `git push` 失敗、`next build` はGoogle Fonts遮断で未完、Vercel URLもnetwork非許可）。→ ユーザーのローカル端末で `npx next build` → `git push -u origin qa/release-readiness` → GitHub WebでPR merge を依頼済み。
+  - 環境変数（DATABASE_URL 等）は Vercel(user-test) に設定済みとユーザー確認済み。DBスキーマはデプロイ時 `prisma db push` で自動作成。
 
 ## 次にやること（再開ポイント）
-- ユーザー確認後に push → Vercel(user-test) 本番反映確認（ship スキル）。push前にローカルで `npx next build` が通ることをネット接続のある環境で最終確認する。
-- 社内テスト前のDB/環境変数セットアップ（別途「必要作業まとめ」で提示）。
-- 残した軽微項目: CreateInterviewModal 内個別ラベルの htmlFor 付与（[49] polish・グループラベル主体のため保留）、gray-400 placeholder のコントラスト（[56]の一部・装飾的）。
+- ユーザーが push→merge 実行後、preview ブラウザ（network有）で**本番Vercel URLを開いて反映・動作確認**する（ship step4/5）。本番URLが不明なら聞いて DECISIONS に記録。
+- 社内テスト前チェックリスト（トップ→登録→テスト作成→招待→被験者実施→結果表示）を一緒に通す。
+- 残した軽微項目: CreateInterviewModal 内個別ラベルの htmlFor（[49] polish）、gray-400 placeholder コントラスト（[56]一部・装飾的）。
 
 ## 注意（並行セッション・未コミット変更）
 - prisma/migrations に未コミット変更あり（20260520051124_init 削除 / 20260101000000_init 追加 / migration_lock.toml を sqlite→postgresql）。別セッションの作業のため**このQAコミットには含めない**。
