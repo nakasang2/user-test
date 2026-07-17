@@ -14,7 +14,7 @@
 - 2026-06 | 多エージェントレビューでトークン漏えい・タスク進行バグが確定指摘（8d545e7） → 実装した本人（同じ視点）のセルフチェックだけでは見落とす → push 前に別視点レビュー（/code-review）を ship スキルの手順に組み込み
 
 ### UX/UI・録画
-- 2026-07-17 | 小窓(Document PiP)で `min-h-screen`/`100vh`/`max-h-[..vh]` を使い、余白が伸びきってボタンが画面外＋スクロールになる崩れ（widget/page.tsx）。Chrome/通常タブでは再現せず Brave 等で発覚 ×2 → **Document PiP の iframe 内では viewport 単位(vh)が実際の窓サイズより大きく評価される** → 小窓/PiP/iframe に入れる UI は vh・min-h-screen・flex高さ配分に依存せず、block flow（自然な縦積み）＋px上限で組む。検証は「通常タブ」ではなく**実際の埋め込み文脈（iframe/PiP）**で行う（top-level タブでの目視は罠）
+- 2026-07-17 | 小窓(Document PiP)の中身が崩れる（カメラ下に巨大余白＋スクロール、ボタンが見えない）。Chromeでは正常・Braveで崩れる ×3 → **真因: PiP の html/body に高さを与えず iframe を `height:100%` で入れていたため、iframe が HTML デフォルトの 150px に潰れていた**（Chromeは窓高さに補完、Braveは補完せず150pxのまま）。openWidget で `documentElement`/`body` に `height:100%` を与え iframe を窓いっぱいに（InterviewRoom.tsx）。合わせて widget 側も `min-h-screen`/`vh` を撤廃し block flow に。教訓: **iframe の height:100% は親チェーンに definite height が要る**／小窓・PiP は「通常タブ」ではなく**実際の iframe 文脈で実測検証**する／ブラウザ差が出たら CSS のデフォルト挙動差を疑う
 - 2026-07-16 | Canvas合成録画で PiP（顔映像）を固定比率（4:3）の矩形に描画し、16:9カメラが縦に潰れて保存されていた（widget/page.tsx） → drawImage の描画先矩形をソース実比率と無関係に固定していた → PiP高さは必ず `videoHeight/videoWidth` から毎フレーム算出する（InterviewRoom.tsx:860 が正しい実装）。カメラ/映像を扱うUIは「実映像の比率」で検証する
 - 2026-07-17 | 「本番が反映されない」の混乱が多発 ×3（古いプレビュー/デプロイ固定URLを開いていた、ブラウザが小窓iframeをキャッシュ）→ Vercelは push/merge ごとにハッシュ付きURLを量産し、古いものを開くと旧コードが出る → 確認は必ず**本番エイリアス（ハッシュ無し）**＋プライベートウィンドウで。小窓URLには一意パラメータを付けてキャッシュ回避（openWidget）。デプロイ反映は「配信中JSに修正マーカーが含まれるか」を fetch で確定させる
 - 2026-07-16 | カメラ/マイク権限を拒否すると、再試行UIが案内オーバーレイの下に隠れ・開始ボタンが永久disabledでデッドエンド（InterviewRoom） → エラー要素とオーバーレイが同一親の兄弟でz-index未指定、かつ `<video>` をエラー時にアンマウントして再取得時に再アタッチ不可 → 権限系の復帰UIは最前面（z-30）に、メディア要素は常時マウントしてエラーはオーバーレイで重ねる

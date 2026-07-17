@@ -553,10 +553,14 @@ export default function InterviewRoom({
       try {
         // Document PiP: どのタブ・ウィンドウの上にも常時浮く小窓（Chrome 116+ / Google Meet と同じ仕組み）
         const pipWindow: Window = await docPiP.requestWindow({ width: 400, height: 560 })
-        pipWindow.document.body.style.cssText = 'margin:0;padding:0;overflow:hidden;background:#ffffff;'
+        // ⚠️ html/body に高さを与えないと iframe の height:100% が解決できず、
+        //    HTML デフォルトの 150px に潰れる（Chrome は補完するが Brave 等では潰れる）。
+        //    高さの連鎖を明示し、iframe を窓いっぱいに広げる。
+        pipWindow.document.documentElement.style.cssText = 'height:100%;'
+        pipWindow.document.body.style.cssText = 'margin:0;padding:0;overflow:hidden;background:#ffffff;height:100%;'
         const iframe = pipWindow.document.createElement('iframe')
         iframe.src = url
-        iframe.style.cssText = 'width:100%;height:100%;border:none;'
+        iframe.style.cssText = 'width:100%;height:100%;border:none;display:block;'
         pipWindow.document.body.appendChild(iframe)
         pipWindowRef.current = pipWindow
         setWidgetBlocked(false)
