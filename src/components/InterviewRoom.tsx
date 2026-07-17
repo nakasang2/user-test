@@ -542,7 +542,10 @@ export default function InterviewRoom({
     // btoa の出力には + / = が含まれうる。URLSearchParams で + が空白に化けて
     // widget 側の atob/JSON.parse が失敗する（タスクが空表示になる）ため、必ず encode する。
     const tasksEncoded = encodeURIComponent(btoa(encodeURIComponent(JSON.stringify(tasks ?? []))))
-    const url = `/interview/widget?session=${encodeURIComponent(sessionId)}&tasks=${tasksEncoded}&current=${currentTaskIndex}`
+    // 小窓（別ウィンドウの iframe）が古い版をキャッシュして表示するのを防ぐため、
+    // 開くたびに一意なパラメータを付けて必ず最新を読み込ませる。
+    const cacheBust = `${Date.now()}${Math.round(performance.now())}`
+    const url = `/interview/widget?session=${encodeURIComponent(sessionId)}&tasks=${tasksEncoded}&current=${currentTaskIndex}&_t=${cacheBust}`
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const docPiP = (window as any).documentPictureInPicture

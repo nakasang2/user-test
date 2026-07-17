@@ -262,18 +262,21 @@ function WidgetContent() {
   const currentTask = tasks[currentTaskIndex]
 
   /* ── タスク画面 ─────────────────────────────────────────────── */
+  // 注: Document PiP の iframe 内では 100vh 等の viewport 単位が実際の窓より大きく評価され、
+  //     min-h-screen だと巨大な余白＋スクロールが出る。ここでは vh/flex 高さ配分を使わず、
+  //     ヘッダー→カメラ→タスク→ボタンを自然な縦積み（block flow）で並べて崩れを防ぐ。
   return (
-    <div className="min-h-screen bg-white text-gray-900 flex flex-col">
+    <div className="bg-white text-gray-900">
       {/* ヘッダー */}
-      <div className="flex items-center justify-between px-3 py-2 border-b border-gray-200 flex-shrink-0">
+      <div className="flex items-center justify-between px-3 py-2 border-b border-gray-200">
         <span className="text-xs font-semibold text-gray-900 tracking-tight">UserVoice</span>
         {tasks.length > 0 && (
           <span className="text-gray-500 text-xs">タスク {currentTaskIndex + 1} / {tasks.length}</span>
         )}
       </div>
 
-      {/* ウェブカメラ（16:9 で潰れず表示。取得失敗時はフォールバック。極端に大きい窓でも占有しすぎない） */}
-      <div className="relative bg-gray-900 flex-shrink-0 aspect-video max-h-[55vh]">
+      {/* ウェブカメラ（16:9 で潰れず表示。取得失敗時はフォールバック） */}
+      <div className="relative bg-gray-900 aspect-video">
         <video
           ref={webcamVideoRef}
           autoPlay
@@ -302,8 +305,8 @@ function WidgetContent() {
         )}
       </div>
 
-      {/* タスク内容（上詰め。長文はここだけスクロールし、下のボタンは常に見える） */}
-      <div className="px-3 py-3 flex-shrink-0 max-h-[38vh] overflow-y-auto">
+      {/* タスク内容（上詰め。長文はここだけスクロールし、下のボタンは常に見える。vh非依存で px 上限） */}
+      <div className="px-3 py-3 max-h-64 overflow-y-auto">
         {currentTask ? (
           <div className="bg-gray-50 border border-gray-200 rounded-lg p-3">
             <p className="text-[10px] text-gray-500 mb-1.5 uppercase tracking-wide font-medium">現在のタスク</p>
@@ -316,8 +319,8 @@ function WidgetContent() {
         )}
       </div>
 
-      {/* ボタン群（タスク直下に配置。余白は最下部にまとめ、操作は常に画面内に収める） */}
-      <div className="px-3 pb-3 pt-1 space-y-2 flex-shrink-0">
+      {/* ボタン群（タスク直下に配置。自然フローで常に画面内に収める） */}
+      <div className="px-3 pb-3 pt-1 space-y-2">
         {/* 画面録画ボタン */}
         {!isScreenRecording ? (
           <button
