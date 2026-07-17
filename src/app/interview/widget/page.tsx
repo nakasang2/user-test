@@ -263,7 +263,7 @@ function WidgetContent() {
 
   /* ── タスク画面 ─────────────────────────────────────────────── */
   return (
-    <div className="min-h-screen bg-white text-gray-900 flex flex-col overflow-hidden">
+    <div className="min-h-screen bg-white text-gray-900 flex flex-col">
       {/* ヘッダー */}
       <div className="flex items-center justify-between px-3 py-2 border-b border-gray-200 flex-shrink-0">
         <span className="text-xs font-semibold text-gray-900 tracking-tight">UserVoice</span>
@@ -272,8 +272,8 @@ function WidgetContent() {
         )}
       </div>
 
-      {/* ウェブカメラ（16:9 で潰れず表示。取得失敗時はフォールバック） */}
-      <div className="relative bg-gray-900 flex-shrink-0 aspect-video">
+      {/* ウェブカメラ（16:9 で潰れず表示。取得失敗時はフォールバック。極端に大きい窓でも占有しすぎない） */}
+      <div className="relative bg-gray-900 flex-shrink-0 aspect-video max-h-[55vh]">
         <video
           ref={webcamVideoRef}
           autoPlay
@@ -302,10 +302,10 @@ function WidgetContent() {
         )}
       </div>
 
-      {/* タスク内容（長文はスクロール） */}
-      <div className="px-3 py-3 flex-1 min-h-0 overflow-y-auto">
+      {/* タスク内容（上詰め。長文はここだけスクロールし、下のボタンは常に見える） */}
+      <div className="px-3 py-3 flex-shrink-0 max-h-[38vh] overflow-y-auto">
         {currentTask ? (
-          <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 h-full">
+          <div className="bg-gray-50 border border-gray-200 rounded-lg p-3">
             <p className="text-[10px] text-gray-500 mb-1.5 uppercase tracking-wide font-medium">現在のタスク</p>
             <p className="text-sm text-gray-900 leading-relaxed">{currentTask.text}</p>
           </div>
@@ -316,8 +316,8 @@ function WidgetContent() {
         )}
       </div>
 
-      {/* ボタン群 */}
-      <div className="px-3 pb-3 space-y-2 flex-shrink-0">
+      {/* ボタン群（タスク直下に配置。余白は最下部にまとめ、操作は常に画面内に収める） */}
+      <div className="px-3 pb-3 pt-1 space-y-2 flex-shrink-0">
         {/* 画面録画ボタン */}
         {!isScreenRecording ? (
           <button

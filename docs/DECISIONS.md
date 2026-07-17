@@ -3,6 +3,8 @@
 ## 現在の前提・絶対ルール
 - `prisma db push` は directUrl（DB直結）経由で実行する。ビルド時の pooler 経由接続は P1017 で不安定（2026-06 に3回失敗して確立したルール）
 - push 前のローカルビルド検証（`npx tsc --noEmit` + `npx next build`）を省略しない
+- **本番URL**: https://user-test-nakasang2s-projects.vercel.app/ （Vercel: user-test / GitHub: nakasang2/user-test → main が本番）。反映確認はここで行う。※ `user-test.vercel.app`（末尾に -projects なし）は別の create-react-app 製サイトで無関係
+- このセッション種別（sandbox）からは `git push` / `next build`（Google Fonts遮断）/ Vercel URLへの画面遷移 が不可。push・merge はユーザーのローカル端末、本番確認は preview ブラウザの `fetch`（外部到達可）で行う
 
 ## 並行セッションの担当
 - prisma/migrations の整理（20260520051124_init 削除 → 20260101000000_init 追加）が未コミットで存在。別セッションの作業の可能性があるため、このセッション（自己改善ワークフロー導入）では触らない・コミットしない
