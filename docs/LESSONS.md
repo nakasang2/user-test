@@ -14,6 +14,7 @@
 - 2026-06 | 多エージェントレビューでトークン漏えい・タスク進行バグが確定指摘（8d545e7） → 実装した本人（同じ視点）のセルフチェックだけでは見落とす → push 前に別視点レビュー（/code-review）を ship スキルの手順に組み込み
 
 ### UX/UI・録画
+- 2026-07-17 | ユーザビリティ録画で「開いたタブを自動で録画対象にしたい」→ **不可**。`getDisplayMedia` の録画対象（タブ/ウィンドウ/画面）選択はプライバシー保護のため必ずユーザーがブラウザダイアログで選ぶ必要があり、サイトから特定タブを指定するAPIは無い（`preferCurrentTab` は"呼び出したタブ"限定で他タブ不可）→ 参加者が迷わないよう `video:{displaySurface:'monitor'}` で「画面全体」を既定に寄せ、「画面全体を選んで共有」と明示。全画面なら操作タブに関係なく確実に対象に含まれる
 - 2026-07-17 | サービスモードで「開始する」後にテスト対象サービスが新しいタブで開かない（特にBrave）→ **1回のユーザージェスチャーでは PiP(requestWindow) と window.open の2窓は同時に開けない**（PiPが activation を消費し、後続の window.open はポップアップブロックされる）。さらに Brave はプログラム的 window.open に厳しい → 自動 window.open をやめ、**ユーザークリックの実リンク `<a href target rel>`（ポップアップブロッカーを回避しやすい）**でサービスを開く。案内文も「ボタンを押して開く」に統一
 - 2026-07-17 | 小窓(Document PiP)の中身が崩れる（カメラ下に巨大余白＋スクロール、ボタンが見えない）。Chromeでは正常・Braveで崩れる ×3 → **真因: PiP の html/body に高さを与えず iframe を `height:100%` で入れていたため、iframe が HTML デフォルトの 150px に潰れていた**（Chromeは窓高さに補完、Braveは補完せず150pxのまま）。openWidget で `documentElement`/`body` に `height:100%` を与え iframe を窓いっぱいに（InterviewRoom.tsx）。合わせて widget 側も `min-h-screen`/`vh` を撤廃し block flow に。教訓: **iframe の height:100% は親チェーンに definite height が要る**／小窓・PiP は「通常タブ」ではなく**実際の iframe 文脈で実測検証**する／ブラウザ差が出たら CSS のデフォルト挙動差を疑う
 - 2026-07-16 | Canvas合成録画で PiP（顔映像）を固定比率（4:3）の矩形に描画し、16:9カメラが縦に潰れて保存されていた（widget/page.tsx） → drawImage の描画先矩形をソース実比率と無関係に固定していた → PiP高さは必ず `videoHeight/videoWidth` から毎フレーム算出する（InterviewRoom.tsx:860 が正しい実装）。カメラ/映像を扱うUIは「実映像の比率」で検証する
