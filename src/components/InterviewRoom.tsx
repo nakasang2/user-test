@@ -150,7 +150,6 @@ export default function InterviewRoom({
   // フローティングウィジェット (service モード)
   const widgetChannelRef = useRef<BroadcastChannel | null>(null)
   const [widgetBlocked, setWidgetBlocked] = useState(false)
-  const serviceWinRef = useRef<Window | null>(null) // サービスタブの window 参照
   const pipWindowRef = useRef<Window | null>(null)   // Document PiP または popup の window 参照
   const startedRef = useRef(false)  // startInterview の二重起動防止
   const endedRef = useRef(false)    // endInterview の二重実行防止（結果の二重送信を防ぐ）
@@ -526,14 +525,6 @@ export default function InterviewRoom({
     mediaRecorderRef.current = recorder
   }
 
-  // ── ユーザビリティ: サービスを新しいタブで開く ────────────
-  function openServicePopup() {
-    if (!stimulusUrl) return
-    const win = window.open(stimulusUrl, 'uservoice-service')
-    if (win) serviceWinRef.current = win
-    else showNotice('ポップアップがブロックされました。ブラウザのアドレスバーからこのサイトのポップアップを許可してください。')
-  }
-
   // ── タスクウィジェットを開く（Document PiP 優先 → ポップアップ fallback） ──
   // ⚠️ この関数は必ずユーザージェスチャーハンドラの中で、かつ window.open() より先に呼ぶこと
   //    （documentPictureInPicture.requestWindow() は transient user activation を要求する。
@@ -661,14 +652,9 @@ export default function InterviewRoom({
       //    ⚠️ documentPictureInPicture.requestWindow() は transient user activation が必要。
       //       window.open() より後に呼ぶとトークンが消費されて PiP が失敗するため、必ず先に呼ぶ。
       void openWidget()
-      // ② サービスタブを開く（PiP の後）
-      if (stimulusUrl) {
-        const win = window.open(stimulusUrl, 'uservoice-service')
-        if (win) serviceWinRef.current = win
-        else showNotice('サービスを新しいタブで開けませんでした。ポップアップを許可してから「サービスを再度開く」を押してください。')
-      }
-      // ③ サービスタブへ自動遷移
-      serviceWinRef.current?.focus()
+      // ② サービスは自動 window.open しない：PiP がジェスチャーを消費した後の window.open は
+      //    ポップアップブロックされ失敗の通知が出るだけ。代わりにタスク画面の
+      //    「サービスを開く（新しいタブ）」実リンク（ブロッカー回避）から開いてもらう。
     }
 
     await fetch(`/api/sessions/${sessionId}`, {
@@ -1138,13 +1124,16 @@ export default function InterviewRoom({
                       ) : (
                         <>
                           <li className="flex gap-2.5"><span className="text-gray-400 flex-shrink-0 font-medium">2.</span>
-                            <span>「開始する」を押すと<span className="text-gray-900 font-medium">サービスが新しいタブ</span>で開き、<span className="text-gray-900 font-medium">タスク用の小窓</span>が自動表示されます（小窓はどのタブを操作していても<span className="text-gray-900 font-medium">常に最前面</span>に表示されます）</span>
+                            <span>「開始する」を押すと<span className="text-gray-900 font-medium">タスク用の小窓</span>が表示されます（どのタブを操作していても<span className="text-gray-900 font-medium">常に最前面</span>）</span>
                           </li>
                           <li className="flex gap-2.5"><span className="text-gray-400 flex-shrink-0 font-medium">3.</span>
+                            <span>画面の<span className="inline-flex items-center gap-1 text-gray-900 font-medium"><Globe className="w-3 h-3 inline" strokeWidth={2} />サービスを開く（新しいタブ）</span>を押して、テスト対象のサービスを開いてください</span>
+                          </li>
+                          <li className="flex gap-2.5"><span className="text-gray-400 flex-shrink-0 font-medium">4.</span>
                             <span>小窓の <span className="inline-flex items-center gap-1 text-red-600 font-medium"><Monitor className="w-3 h-3 inline" strokeWidth={2} />画面録画を開始する</span> を<strong className="text-gray-900">必ず押してから</strong>操作を始めてください</span>
                           </li>
-                          <li className="flex gap-2.5"><span className="text-gray-400 flex-shrink-0 font-medium">4.</span>タスクに沿ってサービスを操作しながら、気づいたこと・感じたことを声に出してください（シンクアラウド）</li>
-                          <li className="flex gap-2.5"><span className="text-gray-400 flex-shrink-0 font-medium">5.</span>操作が終わったら小窓の「達成して質問へ」（できなければ「できなかった」）を押してください</li>
+                          <li className="flex gap-2.5"><span className="text-gray-400 flex-shrink-0 font-medium">5.</span>タスクに沿ってサービスを操作しながら、気づいたこと・感じたことを声に出してください（シンクアラウド）</li>
+                          <li className="flex gap-2.5"><span className="text-gray-400 flex-shrink-0 font-medium">6.</span>操作が終わったら小窓の「達成して質問へ」（できなければ「できなかった」）を押してください</li>
                         </>
                       )}
                     </ul>
@@ -1266,16 +1255,20 @@ export default function InterviewRoom({
                         タスク用の小窓が別ウィンドウで表示中です
                       </div>
                     )}
+                    {/* サービスは実リンクで開く（window.open はポップアップブロックされやすいため）。
+                        ユーザークリックの target付きリンクはブロッカーを回避しやすい。 */}
+                    {stimulusUrl && (
+                      <a
+                        href={stimulusUrl}
+                        target="uservoice-service"
+                        rel="noopener noreferrer"
+                        className="w-full inline-flex items-center justify-center gap-1.5 bg-gray-900 hover:bg-gray-800 text-white px-3 py-2.5 rounded-md text-sm font-medium transition-colors"
+                      >
+                        <Globe className="w-4 h-4" strokeWidth={2} />
+                        サービスを開く（新しいタブ）
+                      </a>
+                    )}
                     <div className="flex gap-2">
-                      {stimulusUrl && (
-                        <button
-                          onClick={openServicePopup}
-                          className="flex-1 inline-flex items-center justify-center gap-1.5 border border-gray-300 hover:border-gray-400 text-gray-700 hover:text-gray-900 px-3 py-2 rounded-md text-xs font-medium transition-colors"
-                        >
-                          <Globe className="w-3.5 h-3.5" strokeWidth={2} />
-                          サービスを再度開く
-                        </button>
-                      )}
                       <button
                         onClick={openWidget}
                         className="flex-1 inline-flex items-center justify-center gap-1.5 border border-gray-300 hover:border-gray-400 text-gray-700 hover:text-gray-900 px-3 py-2 rounded-md text-xs font-medium transition-colors"
