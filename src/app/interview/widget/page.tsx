@@ -84,7 +84,9 @@ function WidgetContent() {
   /* ── 画面録画開始（Canvas合成: スクリーン + ウェブカメラPiP） ── */
   async function startScreenRecording() {
     try {
-      const screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false })
+      // displaySurface:'monitor' で「画面全体」をダイアログの既定に寄せる。
+      // どのタブを操作してもサービスが確実に録画対象に含まれ、参加者がタブを選び間違えない。
+      const screenStream = await navigator.mediaDevices.getDisplayMedia({ video: { displaySurface: 'monitor' }, audio: false })
       screenStreamRef.current = screenStream
       screenChunksRef.current = []
 
@@ -323,14 +325,19 @@ function WidgetContent() {
       <div className="px-3 pb-3 pt-1 space-y-2">
         {/* 画面録画ボタン */}
         {!isScreenRecording ? (
-          <button
-            onClick={startScreenRecording}
-            className="w-full inline-flex items-center justify-center gap-2 bg-red-50 hover:bg-red-100 border-2 border-red-500 hover:border-red-600 text-red-700 py-2.5 rounded-lg text-sm font-semibold transition-colors animate-pulse hover:animate-none"
-          >
-            <Monitor className="w-4 h-4" strokeWidth={2} />
-            画面録画を開始する
-            <span className="bg-red-600 text-white text-[10px] font-bold px-1.5 py-0.5 rounded leading-none">必須</span>
-          </button>
+          <div className="space-y-1">
+            <button
+              onClick={startScreenRecording}
+              className="w-full inline-flex items-center justify-center gap-2 bg-red-50 hover:bg-red-100 border-2 border-red-500 hover:border-red-600 text-red-700 py-2.5 rounded-lg text-sm font-semibold transition-colors animate-pulse hover:animate-none"
+            >
+              <Monitor className="w-4 h-4" strokeWidth={2} />
+              画面録画を開始する
+              <span className="bg-red-600 text-white text-[10px] font-bold px-1.5 py-0.5 rounded leading-none">必須</span>
+            </button>
+            <p className="text-[10px] text-gray-500 text-center leading-snug">
+              表示されるダイアログで<span className="font-semibold text-gray-700">「画面全体」</span>を選んで共有してください
+            </p>
+          </div>
         ) : (
           <div className="flex items-center justify-center gap-1.5 py-2 text-xs text-red-600">
             <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />

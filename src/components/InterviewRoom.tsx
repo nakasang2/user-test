@@ -849,7 +849,8 @@ export default function InterviewRoom({
   // ── 画面共有開始 ──────────────────────────────────────
   async function startScreenShare() {
     try {
-      const stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false })
+      // 「画面全体」を既定に寄せる（どのタブを操作しても対象に含め、選び間違いを防ぐ）
+      const stream = await navigator.mediaDevices.getDisplayMedia({ video: { displaySurface: 'monitor' }, audio: false })
       screenStreamRef.current = stream
       // For 'service' mode: show in video element
       if (usabilityMode === 'service' && screenVideoRef.current) {
@@ -1130,7 +1131,7 @@ export default function InterviewRoom({
                             <span>画面の<span className="inline-flex items-center gap-1 text-gray-900 font-medium"><Globe className="w-3 h-3 inline" strokeWidth={2} />サービスを開く（新しいタブ）</span>を押して、テスト対象のサービスを開いてください</span>
                           </li>
                           <li className="flex gap-2.5"><span className="text-gray-400 flex-shrink-0 font-medium">4.</span>
-                            <span>小窓の <span className="inline-flex items-center gap-1 text-red-600 font-medium"><Monitor className="w-3 h-3 inline" strokeWidth={2} />画面録画を開始する</span> を<strong className="text-gray-900">必ず押してから</strong>操作を始めてください</span>
+                            <span>小窓の <span className="inline-flex items-center gap-1 text-red-600 font-medium"><Monitor className="w-3 h-3 inline" strokeWidth={2} />画面録画を開始する</span> を<strong className="text-gray-900">必ず押し</strong>、ダイアログで<strong className="text-gray-900">「画面全体」</strong>を選んで共有してから操作を始めてください</span>
                           </li>
                           <li className="flex gap-2.5"><span className="text-gray-400 flex-shrink-0 font-medium">5.</span>タスクに沿ってサービスを操作しながら、気づいたこと・感じたことを声に出してください（シンクアラウド）</li>
                           <li className="flex gap-2.5"><span className="text-gray-400 flex-shrink-0 font-medium">6.</span>操作が終わったら小窓の「達成して質問へ」（できなければ「できなかった」）を押してください</li>
@@ -1238,14 +1239,14 @@ export default function InterviewRoom({
                     )}
                     {widgetBlocked ? (
                       <div className="bg-amber-50 border border-amber-200 rounded-md p-3 text-xs text-amber-800 leading-relaxed space-y-2">
-                        <p>小窓を開けませんでした（ブラウザにブロックされた可能性があります）。アドレスバー右端でポップアップを許可して「小窓を再度開く」を押すか、下のボタンでこのタブから画面録画を開始してください。</p>
+                        <p>小窓を開けませんでした（ブラウザにブロックされた可能性があります）。アドレスバー右端でポップアップを許可して「小窓を再度開く」を押すか、下のボタンで画面録画を開始してください（ダイアログで<strong>「画面全体」</strong>を選択）。</p>
                         {!screenSharing && (
                           <button
                             onClick={() => startScreenShare()}
                             className="w-full inline-flex items-center justify-center gap-1.5 bg-red-600 hover:bg-red-700 text-white px-3 py-2 rounded-md text-xs font-semibold transition-colors"
                           >
                             <Monitor className="w-3.5 h-3.5" strokeWidth={2} />
-                            このタブで画面録画を開始する
+                            画面録画を開始する（画面全体を選択）
                           </button>
                         )}
                       </div>
@@ -1314,7 +1315,7 @@ export default function InterviewRoom({
                           className="w-full inline-flex items-center justify-center gap-1.5 bg-red-600 hover:bg-red-700 text-white px-3 py-2 rounded-md text-xs font-semibold transition-colors"
                         >
                           <Monitor className="w-3.5 h-3.5" strokeWidth={2} />
-                          録画を開始（このタブを共有）
+                          録画を開始（画面全体を選択）
                         </button>
                       </div>
                     )}
