@@ -129,6 +129,7 @@ export default function InterviewRoom({
   const screenVideoRef = useRef<HTMLVideoElement>(null)
   const screenStreamRef = useRef<MediaStream | null>(null)
   const [screenSharing, setScreenSharing] = useState(false)
+  const [serviceOpened, setServiceOpened] = useState(false)   // service モード: 小窓でサービスを開いたか（メイン画面プログレス表示用）
   const [screenShareError, setScreenShareError] = useState<string | null>(null)
   const [currentTaskIndex, setCurrentTaskIndex] = useState(0)
   // BroadcastChannel の onmessage は startInterview 時のクロージャを保持するため、
@@ -642,6 +643,7 @@ export default function InterviewRoom({
         else if (e.data.type === 'task_complete') completeTasksAndStartInterview() // 後方互換
         else if (e.data.type === 'end_session') endInterview()
         else if (e.data.type === 'recording_started') setScreenSharing(true)
+        else if (e.data.type === 'service_opened') setServiceOpened(true)
         else if (e.data.type === 'screen_recording_blob') {
           const blob: Blob = e.data.blob
           if (blob.size > 0) {
@@ -1215,7 +1217,9 @@ export default function InterviewRoom({
           {phase === 'task' && interviewType === 'usability' && (
             <div className="absolute inset-0 bg-gray-950/40 backdrop-blur-sm flex items-end justify-center py-4 sm:pb-8 z-10 overflow-y-auto">
               <div className="bg-white border border-gray-200 rounded-xl shadow-xl p-5 max-w-md w-full mx-4 my-auto space-y-4">
-                {tasks && tasks.length > 0 && (
+                {/* 通常の service モード（小窓が開いている）は、タスク文言を小窓に一本化するため
+                    メイン画面には出さない。プロトタイプモードと、小窓が開けなかったフォールバック時のみ表示。 */}
+                {tasks && tasks.length > 0 && !(usabilityMode === 'service' && !widgetBlocked) && (
                   <div>
                     <p className="text-[10px] text-gray-500 mb-1 uppercase tracking-wide font-medium">
                       タスク {currentTaskIndex + 1} / {tasks.length}
@@ -1291,28 +1295,63 @@ export default function InterviewRoom({
                     </div>
                   ) : (
                     /* ── 通常時 ──
-                       操作はすべて右下の小窓に集約。本体タブは「案内 + 進捗」と、
-                       小窓を誤って閉じたときの復帰手段（小窓を再度開く）だけを残す。 */
-                    <div className="space-y-3">
-                      <div className="bg-blue-50 border border-blue-200 rounded-md p-3 text-xs text-blue-900 leading-relaxed">
-                        <p className="font-medium mb-1">操作は右下の小窓で行います</p>
-                        <p className="text-blue-800/80">小窓の <span className="font-semibold">①画面録画 → ②サービスを開く → ③達成</span> の順に進めてください。この画面のボタンを押す必要はありません。</p>
-                      </div>
-                      {screenSharing ? (
-                        <div className="flex items-center gap-2 text-xs px-3 py-1.5 rounded-md bg-red-50 border border-red-200 text-red-700">
-                          <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse flex-shrink-0" />
-                          画面録画中
+                       操作・タスク文言はすべて右下の小窓に集約。メイン画面は「小窓を見てください」の
+                       案内と、小窓を誤って閉じたときの復帰手段（再度開く）だけにする。 */
+                    <div className="space-y-4 text-center">
+                      <div className="flex items-center justify-center">
+                        <div className="w-11 h-11 rounded-full bg-blue-50 border border-blue-200 flex items-center justify-center">
+                          <AppWindow className="w-5 h-5 text-blue-600" strokeWidth={1.75} />
                         </div>
-                      ) : (
-                        <div className="flex items-center gap-2 text-xs px-3 py-1.5 rounded-md bg-gray-50 border border-gray-200 text-gray-600">
-                          <span className="w-1.5 h-1.5 rounded-full bg-gray-400 flex-shrink-0" />
-                          小窓の「①画面録画を開始する」を押してください
-                        </div>
-                      )}
-                      <div className="flex items-center gap-2 text-xs text-emerald-700">
-                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse flex-shrink-0" />
-                        タスク用の小窓が別ウィンドウで表示中です
                       </div>
+                      <div className="space-y-1">
+                        <p className="text-sm text-gray-900 font-medium">右下の小窓を見て操作してください</p>
+                        <p className="text-xs text-gray-500 leading-relaxed">タスクと操作ボタンは、常に最前面に表示される右下の小窓にまとまっています。この画面での操作は不要です。</p>
+                      </div>
+                      {/* 進捗ステップ（小窓での手続きを可視化）: ①録画 → ②サイトアクセス → ③テスト開始。
+                          小窓からの recording_started / service_opened を受けて現在地を進める。 */}
+                      {(() => {
+                        const steps = [
+                          { label: '録画', done: screenSharing },
+                          { label: 'サイトアクセス', done: serviceOpened },
+                          { label: 'テスト開始', done: false },
+                        ]
+                        // 現在アクティブなステップ = 最初の未完了ステップ
+                        const activeIdx = steps.findIndex((s) => !s.done)
+                        return (
+                          <div className="flex items-center justify-center gap-1 pt-1">
+                            {steps.map((s, i) => {
+                              const state = s.done ? 'done' : i === activeIdx ? 'active' : 'todo'
+                              return (
+                                <div key={s.label} className="flex items-center gap-1">
+                                  <div className="flex items-center gap-1.5">
+                                    <span
+                                      className={`w-5 h-5 flex items-center justify-center rounded-full text-[10px] font-bold ${
+                                        state === 'done'
+                                          ? 'bg-emerald-500 text-white'
+                                          : state === 'active'
+                                          ? 'bg-blue-600 text-white'
+                                          : 'bg-gray-200 text-gray-500'
+                                      }`}
+                                    >
+                                      {state === 'done' ? <Check className="w-3 h-3" strokeWidth={3} /> : i + 1}
+                                    </span>
+                                    <span
+                                      className={`text-[11px] ${
+                                        state === 'todo' ? 'text-gray-400' : 'text-gray-700 font-medium'
+                                      }`}
+                                    >
+                                      {s.label}
+                                    </span>
+                                  </div>
+                                  {i < steps.length - 1 && (
+                                    <span className={`w-4 h-px ${steps[i].done ? 'bg-emerald-400' : 'bg-gray-200'}`} />
+                                  )}
+                                </div>
+                              )
+                            })}
+                          </div>
+                        )
+                      })()}
                       <button
                         onClick={openWidget}
                         className="w-full inline-flex items-center justify-center gap-1.5 text-gray-500 hover:text-gray-800 px-3 py-1.5 rounded-md text-xs transition-colors"
