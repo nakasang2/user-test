@@ -129,6 +129,7 @@ export default function InterviewRoom({
   const screenVideoRef = useRef<HTMLVideoElement>(null)
   const screenStreamRef = useRef<MediaStream | null>(null)
   const [screenSharing, setScreenSharing] = useState(false)
+  const [serviceOpened, setServiceOpened] = useState(false)   // service モード: 小窓でサービスを開いたか（メイン画面プログレス表示用）
   const [screenShareError, setScreenShareError] = useState<string | null>(null)
   const [currentTaskIndex, setCurrentTaskIndex] = useState(0)
   // BroadcastChannel の onmessage は startInterview 時のクロージャを保持するため、
@@ -642,6 +643,7 @@ export default function InterviewRoom({
         else if (e.data.type === 'task_complete') completeTasksAndStartInterview() // 後方互換
         else if (e.data.type === 'end_session') endInterview()
         else if (e.data.type === 'recording_started') setScreenSharing(true)
+        else if (e.data.type === 'service_opened') setServiceOpened(true)
         else if (e.data.type === 'screen_recording_blob') {
           const blob: Blob = e.data.blob
           if (blob.size > 0) {
@@ -1305,6 +1307,51 @@ export default function InterviewRoom({
                         <p className="text-sm text-gray-900 font-medium">右下の小窓を見て操作してください</p>
                         <p className="text-xs text-gray-500 leading-relaxed">タスクと操作ボタンは、常に最前面に表示される右下の小窓にまとまっています。この画面での操作は不要です。</p>
                       </div>
+                      {/* 進捗ステップ（小窓での手続きを可視化）: ①録画 → ②サイトアクセス → ③テスト開始。
+                          小窓からの recording_started / service_opened を受けて現在地を進める。 */}
+                      {(() => {
+                        const steps = [
+                          { label: '録画', done: screenSharing },
+                          { label: 'サイトアクセス', done: serviceOpened },
+                          { label: 'テスト開始', done: false },
+                        ]
+                        // 現在アクティブなステップ = 最初の未完了ステップ
+                        const activeIdx = steps.findIndex((s) => !s.done)
+                        return (
+                          <div className="flex items-center justify-center gap-1 pt-1">
+                            {steps.map((s, i) => {
+                              const state = s.done ? 'done' : i === activeIdx ? 'active' : 'todo'
+                              return (
+                                <div key={s.label} className="flex items-center gap-1">
+                                  <div className="flex items-center gap-1.5">
+                                    <span
+                                      className={`w-5 h-5 flex items-center justify-center rounded-full text-[10px] font-bold ${
+                                        state === 'done'
+                                          ? 'bg-emerald-500 text-white'
+                                          : state === 'active'
+                                          ? 'bg-blue-600 text-white'
+                                          : 'bg-gray-200 text-gray-500'
+                                      }`}
+                                    >
+                                      {state === 'done' ? <Check className="w-3 h-3" strokeWidth={3} /> : i + 1}
+                                    </span>
+                                    <span
+                                      className={`text-[11px] ${
+                                        state === 'todo' ? 'text-gray-400' : 'text-gray-700 font-medium'
+                                      }`}
+                                    >
+                                      {s.label}
+                                    </span>
+                                  </div>
+                                  {i < steps.length - 1 && (
+                                    <span className={`w-4 h-px ${steps[i].done ? 'bg-emerald-400' : 'bg-gray-200'}`} />
+                                  )}
+                                </div>
+                              )
+                            })}
+                          </div>
+                        )
+                      })()}
                       <button
                         onClick={openWidget}
                         className="w-full inline-flex items-center justify-center gap-1.5 text-gray-500 hover:text-gray-800 px-3 py-1.5 rounded-md text-xs transition-colors"

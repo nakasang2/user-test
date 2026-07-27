@@ -264,6 +264,9 @@ function WidgetContent() {
   }
 
   const currentTask = tasks[currentTaskIndex]
+  // 事前手続き（録画開始 →（サービスURLがあれば）サービスを開く）が完了したか。
+  // 完了して初めてタスク文言と結果ボタンを表示し、準備中は隠して混乱を防ぐ。
+  const readyForTask = isScreenRecording && (serviceOpened || !stimulusUrl)
 
   /* ── タスク画面 ─────────────────────────────────────────────── */
   // 注: Document PiP の iframe 内では 100vh 等の viewport 単位が実際の窓より大きく評価され、
@@ -309,16 +312,26 @@ function WidgetContent() {
         )}
       </div>
 
-      {/* タスク内容（上詰め。長文はここだけスクロールし、下のボタンは常に見える。vh非依存で px 上限） */}
+      {/* タスク内容（上詰め。長文はここだけスクロールし、下のボタンは常に見える。vh非依存で px 上限）。
+          事前手続き（録画・サービス起動）が終わるまでは、タスク文言ではなく準備の案内を出す。 */}
       <div className="px-3 py-3 max-h-64 overflow-y-auto">
-        {currentTask ? (
-          <div className="bg-gray-50 border border-gray-200 rounded-lg p-3">
-            <p className="text-[10px] text-gray-500 mb-1.5 uppercase tracking-wide font-medium">現在のタスク</p>
-            <p className="text-sm text-gray-900 leading-relaxed">{currentTask.text}</p>
-          </div>
+        {readyForTask ? (
+          currentTask ? (
+            <div className="bg-gray-50 border border-gray-200 rounded-lg p-3">
+              <p className="text-[10px] text-gray-500 mb-1.5 uppercase tracking-wide font-medium">現在のタスク</p>
+              <p className="text-sm text-gray-900 leading-relaxed">{currentTask.text}</p>
+            </div>
+          ) : (
+            <div className="bg-gray-50 border border-gray-200 rounded-lg p-3">
+              <p className="text-sm text-gray-500">タスクを実行してください</p>
+            </div>
+          )
         ) : (
           <div className="bg-gray-50 border border-gray-200 rounded-lg p-3">
-            <p className="text-sm text-gray-500">タスクを実行してください</p>
+            <p className="text-[10px] text-gray-500 mb-1.5 uppercase tracking-wide font-medium">準備</p>
+            <p className="text-sm text-gray-600 leading-relaxed">
+              下のボタンで準備を進めてください{stimulusUrl ? '（画面録画 → サービスを開く）' : '（画面録画）'}。準備ができると、ここにタスクが表示されます。
+            </p>
           </div>
         )}
       </div>
@@ -355,7 +368,7 @@ function WidgetContent() {
               href={stimulusUrl}
               target="uservoice-service"
               rel="noopener noreferrer"
-              onClick={() => setServiceOpened(true)}
+              onClick={() => { setServiceOpened(true); channelRef.current?.postMessage({ type: 'service_opened' }) }}
               className="w-full inline-flex items-center justify-center gap-2 bg-gray-900 hover:bg-gray-800 text-white py-2.5 rounded-lg text-sm font-semibold transition-colors"
             >
               <Globe className="w-4 h-4" strokeWidth={2} />

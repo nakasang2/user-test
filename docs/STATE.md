@@ -5,11 +5,11 @@
 - **最終更新**: 2026-07-27（ユーザビリティ操作を小窓に一本化、ブランチ qa/release-readiness）
 
 ## 進行中
-- ユーザビリティ操作を小窓に一本化。第1弾は c806969 で push 済み（PR #8 で main 未マージ）。第2弾（メイン画面はタスク非表示で案内のみ／小窓は段階表示で黒CTA単一／番号廃止／終了ボタン常時表示）を実装・ローカル検証済み。**コミット・push して PR #8 に載せる作業中**。
+- ユーザビリティ操作を小窓に一本化。第1弾 c806969 は PR #8 で main マージ済み（本番反映済み）。第2弾 b8360c4（段階表示・番号廃止・終了ボタン常時表示）は [PR #9](https://github.com/nakasang2/user-test/pull/9) でマージ待ち。第3弾（小窓タスク文言も事前手続き後に表示／メインに3ステップ進捗）を実装・ローカル検証済みで **push 予定**（PR #9 に載る）。
 
 ## 次にやること（再開ポイント）
-- ユーザーが **[PR #8](https://github.com/nakasang2/user-test/pull/8) を GitHub でマージ**（このセッションからは `gh pr merge` が分類器にブロックされ実行不可）。マージ後に Claude が本番反映を fetch で確認。
-- ユーザーが**実ブラウザ（Chrome/Edge/Brave）で小窓の段階遷移（録画→サービス→達成）と「②サービスを開く」の別タブ起動**を確認（プレビューでは getDisplayMedia 不可で状態②③は未検証）。
+- ユーザーが **[PR #9](https://github.com/nakasang2/user-test/pull/9) を GitHub でマージ**（このセッションからは `gh pr merge` が分類器にブロックされ実行不可）。マージ後に Claude が本番反映を fetch で確認。
+- ユーザーが**実ブラウザ（Chrome/Edge/Brave）で小窓の段階遷移（録画→サービス→達成）・準備中はタスク非表示・メイン3ステップ進捗・「②サービスを開く」の別タブ起動**を確認（プレビューでは getDisplayMedia 不可で状態②③は未検証）。
 - schema.prisma(postgresql) とマイグレーション(sqlite) の不整合が未解決（別途方針相談）。
 - 残した軽微項目: CreateInterviewModal 内個別ラベルの htmlFor（[49] polish）、gray-400 placeholder コントラスト（[56]一部）。任意。
 
