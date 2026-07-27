@@ -536,7 +536,9 @@ export default function InterviewRoom({
     // 小窓（別ウィンドウの iframe）が古い版をキャッシュして表示するのを防ぐため、
     // 開くたびに一意なパラメータを付けて必ず最新を読み込ませる。
     const cacheBust = `${Date.now()}${Math.round(performance.now())}`
-    const url = `/interview/widget?session=${encodeURIComponent(sessionId)}&tasks=${tasksEncoded}&current=${currentTaskIndex}&_t=${cacheBust}`
+    // サービス起動も小窓に一本化するため、対象サービスの URL を小窓へ渡す。
+    const stimulusParam = stimulusUrl ? `&stimulus=${encodeURIComponent(stimulusUrl)}` : ''
+    const url = `/interview/widget?session=${encodeURIComponent(sessionId)}&tasks=${tasksEncoded}&current=${currentTaskIndex}&_t=${cacheBust}${stimulusParam}`
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const docPiP = (window as any).documentPictureInPicture
@@ -1225,82 +1227,101 @@ export default function InterviewRoom({
                 )}
 
                 {usabilityMode === 'service' ? (
-                  <div className="space-y-3">
-                    {screenSharing ? (
-                      <div className="flex items-center gap-2 text-xs px-3 py-1.5 rounded-md bg-red-50 border border-red-200 text-red-700">
-                        <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse flex-shrink-0" />
-                        画面録画中
+                  widgetBlocked ? (
+                    /* ── 詰み防止フォールバック ──
+                       小窓を開けなかった場合のみ、この本体タブにフル操作を出す。
+                       通常時（小窓あり）は操作を小窓へ集約し、ここには出さない。 */
+                    <div className="space-y-3">
+                      <div className="bg-amber-50 border border-amber-200 rounded-md p-3 text-xs text-amber-800 leading-relaxed">
+                        小窓を開けませんでした（ブラウザにブロックされた可能性があります）。アドレスバー右端でポップアップを許可して「小窓を再度開く」を押すか、このままこの画面で操作を続けてください（録画ダイアログでは<strong>「画面全体」</strong>を選択）。
                       </div>
-                    ) : (
-                      <div className="flex items-center gap-2 text-xs px-3 py-1.5 rounded-md bg-gray-50 border border-gray-200 text-gray-600">
-                        <span className="w-1.5 h-1.5 rounded-full bg-gray-400 flex-shrink-0" />
-                        小窓の「画面録画を開始する」を押してください
-                      </div>
-                    )}
-                    {widgetBlocked ? (
-                      <div className="bg-amber-50 border border-amber-200 rounded-md p-3 text-xs text-amber-800 leading-relaxed space-y-2">
-                        <p>小窓を開けませんでした（ブラウザにブロックされた可能性があります）。アドレスバー右端でポップアップを許可して「小窓を再度開く」を押すか、下のボタンで画面録画を開始してください（ダイアログで<strong>「画面全体」</strong>を選択）。</p>
-                        {!screenSharing && (
-                          <button
-                            onClick={() => startScreenShare()}
-                            className="w-full inline-flex items-center justify-center gap-1.5 bg-red-600 hover:bg-red-700 text-white px-3 py-2 rounded-md text-xs font-semibold transition-colors"
-                          >
-                            <Monitor className="w-3.5 h-3.5" strokeWidth={2} />
-                            画面録画を開始する（画面全体を選択）
-                          </button>
-                        )}
-                      </div>
-                    ) : (
-                      <div className="flex items-center gap-2 text-xs text-emerald-700">
-                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse flex-shrink-0" />
-                        タスク用の小窓が別ウィンドウで表示中です
-                      </div>
-                    )}
-                    {/* サービスは実リンクで開く（window.open はポップアップブロックされやすいため）。
-                        ユーザークリックの target付きリンクはブロッカーを回避しやすい。 */}
-                    {stimulusUrl && (
-                      <a
-                        href={stimulusUrl}
-                        target="uservoice-service"
-                        rel="noopener noreferrer"
-                        className="w-full inline-flex items-center justify-center gap-1.5 bg-gray-900 hover:bg-gray-800 text-white px-3 py-2.5 rounded-md text-sm font-medium transition-colors"
-                      >
-                        <Globe className="w-4 h-4" strokeWidth={2} />
-                        サービスを開く（新しいタブ）
-                      </a>
-                    )}
-                    <div className="flex gap-2">
                       <button
                         onClick={openWidget}
-                        className="flex-1 inline-flex items-center justify-center gap-1.5 border border-gray-300 hover:border-gray-400 text-gray-700 hover:text-gray-900 px-3 py-2 rounded-md text-xs font-medium transition-colors"
+                        className="w-full inline-flex items-center justify-center gap-1.5 border border-gray-300 hover:border-gray-400 text-gray-700 hover:text-gray-900 px-3 py-2 rounded-md text-xs font-medium transition-colors"
                       >
                         <AppWindow className="w-3.5 h-3.5" strokeWidth={2} />
                         小窓を再度開く
                       </button>
-                    </div>
-                    {/* 達成/断念・終了は常に本体タブにも表示（小窓を閉じても操作不能にならないように） */}
-                    <div className="flex gap-2 pt-2 border-t border-gray-200">
+                      {screenSharing ? (
+                        <div className="flex items-center gap-2 text-xs px-3 py-1.5 rounded-md bg-red-50 border border-red-200 text-red-700">
+                          <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse flex-shrink-0" />
+                          画面録画中
+                        </div>
+                      ) : (
+                        <button
+                          onClick={() => startScreenShare()}
+                          className="w-full inline-flex items-center justify-center gap-1.5 bg-red-600 hover:bg-red-700 text-white px-3 py-2 rounded-md text-xs font-semibold transition-colors"
+                        >
+                          <Monitor className="w-3.5 h-3.5" strokeWidth={2} />
+                          画面録画を開始する（画面全体を選択）
+                        </button>
+                      )}
+                      {stimulusUrl && (
+                        <a
+                          href={stimulusUrl}
+                          target="uservoice-service"
+                          rel="noopener noreferrer"
+                          className="w-full inline-flex items-center justify-center gap-1.5 bg-gray-900 hover:bg-gray-800 text-white px-3 py-2.5 rounded-md text-sm font-medium transition-colors"
+                        >
+                          <Globe className="w-4 h-4" strokeWidth={2} />
+                          サービスを開く（新しいタブ）
+                        </a>
+                      )}
+                      <div className="flex gap-2 pt-2 border-t border-gray-200">
+                        <button
+                          onClick={() => recordTaskOutcome('completed')}
+                          className="flex-1 inline-flex items-center justify-center gap-1.5 bg-gray-900 hover:bg-gray-800 text-white px-4 py-2 rounded-md text-sm font-medium transition-colors"
+                        >
+                          <Check className="w-3.5 h-3.5" strokeWidth={2.5} />
+                          達成して{(tasks?.length ?? 0) <= currentTaskIndex + 1 ? '質問へ' : '次へ'}
+                        </button>
+                        <button
+                          onClick={() => recordTaskOutcome('gave_up')}
+                          className="border border-gray-300 hover:border-gray-400 text-gray-700 hover:text-gray-900 px-4 py-2 rounded-md text-sm transition-colors"
+                        >
+                          できなかった
+                        </button>
+                      </div>
                       <button
-                        onClick={() => recordTaskOutcome('completed')}
-                        className="flex-1 inline-flex items-center justify-center gap-1.5 bg-gray-900 hover:bg-gray-800 text-white px-4 py-2 rounded-md text-sm font-medium transition-colors"
+                        onClick={endInterview}
+                        className="w-full text-xs text-gray-500 hover:text-gray-800 py-1 transition-colors"
                       >
-                        <Check className="w-3.5 h-3.5" strokeWidth={2.5} />
-                        達成して{(tasks?.length ?? 0) <= currentTaskIndex + 1 ? '質問へ' : '次へ'}
-                      </button>
-                      <button
-                        onClick={() => recordTaskOutcome('gave_up')}
-                        className="border border-gray-300 hover:border-gray-400 text-gray-700 hover:text-gray-900 px-4 py-2 rounded-md text-sm transition-colors"
-                      >
-                        できなかった
+                        セッションを終了する
                       </button>
                     </div>
-                    <button
-                      onClick={endInterview}
-                      className="w-full text-xs text-gray-500 hover:text-gray-800 py-1 transition-colors"
-                    >
-                      セッションを終了する
-                    </button>
-                  </div>
+                  ) : (
+                    /* ── 通常時 ──
+                       操作はすべて右下の小窓に集約。本体タブは「案内 + 進捗」と、
+                       小窓を誤って閉じたときの復帰手段（小窓を再度開く）だけを残す。 */
+                    <div className="space-y-3">
+                      <div className="bg-blue-50 border border-blue-200 rounded-md p-3 text-xs text-blue-900 leading-relaxed">
+                        <p className="font-medium mb-1">操作は右下の小窓で行います</p>
+                        <p className="text-blue-800/80">小窓の <span className="font-semibold">①画面録画 → ②サービスを開く → ③達成</span> の順に進めてください。この画面のボタンを押す必要はありません。</p>
+                      </div>
+                      {screenSharing ? (
+                        <div className="flex items-center gap-2 text-xs px-3 py-1.5 rounded-md bg-red-50 border border-red-200 text-red-700">
+                          <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse flex-shrink-0" />
+                          画面録画中
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-2 text-xs px-3 py-1.5 rounded-md bg-gray-50 border border-gray-200 text-gray-600">
+                          <span className="w-1.5 h-1.5 rounded-full bg-gray-400 flex-shrink-0" />
+                          小窓の「①画面録画を開始する」を押してください
+                        </div>
+                      )}
+                      <div className="flex items-center gap-2 text-xs text-emerald-700">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse flex-shrink-0" />
+                        タスク用の小窓が別ウィンドウで表示中です
+                      </div>
+                      <button
+                        onClick={openWidget}
+                        className="w-full inline-flex items-center justify-center gap-1.5 text-gray-500 hover:text-gray-800 px-3 py-1.5 rounded-md text-xs transition-colors"
+                      >
+                        <AppWindow className="w-3.5 h-3.5" strokeWidth={2} />
+                        小窓が見当たらないときは再度開く
+                      </button>
+                    </div>
+                  )
                 ) : (
                   <div className="space-y-2">
                     {/* 画面録画の状態（オフなら目立つ CTA を出す） */}

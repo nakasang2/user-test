@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useRef, Suspense } from 'react'
 import { useSearchParams } from 'next/navigation'
-import { Monitor, Check, X, AlertTriangle, CheckCircle2 } from 'lucide-react'
+import { Monitor, Check, X, AlertTriangle, CheckCircle2, Globe } from 'lucide-react'
 
 interface Task {
   text: string
@@ -13,9 +13,10 @@ type WidgetPhase = 'task' | 'done'
 
 function WidgetContent() {
   const searchParams = useSearchParams()
-  const sessionId  = searchParams.get('session') ?? ''
-  const tasksRaw   = searchParams.get('tasks')   ?? 'W10='
+  const sessionId  = searchParams.get('session')  ?? ''
+  const tasksRaw   = searchParams.get('tasks')    ?? 'W10='
   const initialIdx = parseInt(searchParams.get('current') ?? '0', 10)
+  const stimulusUrl = searchParams.get('stimulus') ?? ''
 
   const [tasks, setTasks]                       = useState<Task[]>([])
   const [currentTaskIndex, setCurrentTaskIndex] = useState(initialIdx)
@@ -321,15 +322,17 @@ function WidgetContent() {
         )}
       </div>
 
-      {/* ボタン群（タスク直下に配置。自然フローで常に画面内に収める） */}
+      {/* ボタン群（タスク直下に配置。自然フローで常に画面内に収める）。
+          操作はすべてこの小窓に集約。①録画 → ②サービス → ③終わったら達成、の順で番号提示。 */}
       <div className="px-3 pb-3 pt-1 space-y-2">
-        {/* 画面録画ボタン */}
+        {/* ① 画面録画ボタン */}
         {!isScreenRecording ? (
           <div className="space-y-1">
             <button
               onClick={startScreenRecording}
               className="w-full inline-flex items-center justify-center gap-2 bg-red-50 hover:bg-red-100 border-2 border-red-500 hover:border-red-600 text-red-700 py-2.5 rounded-lg text-sm font-semibold transition-colors animate-pulse hover:animate-none"
             >
+              <span className="bg-red-600 text-white text-[10px] font-bold w-4 h-4 flex items-center justify-center rounded-full leading-none">1</span>
               <Monitor className="w-4 h-4" strokeWidth={2} />
               画面録画を開始する
               <span className="bg-red-600 text-white text-[10px] font-bold px-1.5 py-0.5 rounded leading-none">必須</span>
@@ -343,6 +346,21 @@ function WidgetContent() {
             <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
             画面録画中
           </div>
+        )}
+
+        {/* ② サービスを開く（実リンク a target でポップアップブロックを回避）。
+            サービス起動もメイン画面から小窓へ集約。録画開始後に押してもらう想定。 */}
+        {stimulusUrl && (
+          <a
+            href={stimulusUrl}
+            target="uservoice-service"
+            rel="noopener noreferrer"
+            className="w-full inline-flex items-center justify-center gap-2 bg-gray-900 hover:bg-gray-800 text-white py-2.5 rounded-lg text-sm font-semibold transition-colors"
+          >
+            <span className="bg-white/25 text-white text-[10px] font-bold w-4 h-4 flex items-center justify-center rounded-full leading-none">2</span>
+            <Globe className="w-4 h-4" strokeWidth={2} />
+            サービスを開く（新しいタブ）
+          </a>
         )}
 
         {/* 録画未開始の警告 */}
@@ -370,12 +388,16 @@ function WidgetContent() {
           </div>
         )}
 
-        {/* タスク結果: 達成 / できなかった */}
+        {/* ③ タスク結果: 達成 / できなかった（操作が終わったら押す） */}
+        <p className="text-[10px] text-gray-500 text-center leading-snug pt-1">
+          操作が終わったら押してください
+        </p>
         <div className="flex gap-2">
           <button
             onClick={() => handleOutcome('completed')}
             className="flex-1 inline-flex items-center justify-center gap-1.5 bg-gray-900 hover:bg-gray-800 active:bg-black text-white py-2.5 rounded-lg text-sm font-semibold transition-colors"
           >
+            <span className="bg-white/25 text-white text-[10px] font-bold w-4 h-4 flex items-center justify-center rounded-full leading-none">3</span>
             <Check className="w-4 h-4" strokeWidth={2.5} />
             達成して{isLastTask ? '質問へ' : '次へ'}
           </button>
