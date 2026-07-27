@@ -2,17 +2,18 @@
 
 > Claude向け運用ルール: セッション開始時にこのファイルを読んでから作業に入る。作業の節目・中断時・ship後に更新する。終わった項目は「完了ログ」へ移し、完了ログは直近5件だけ残す。
 
-- **最終更新**: 2026-07-16（リリース可否QA — UX/UI監査58件修正、ブランチ qa/release-readiness）
+- **最終更新**: 2026-07-27（ユーザビリティ操作を小窓に一本化、ブランチ qa/release-readiness）
 
 ## 進行中
-- なし（リリース可否QA → 出荷完了。main にマージ済み・本番反映確認済み）
+- ユーザビリティテスト（serviceモード）の操作を右下の小窓に一本化。実装＋ローカル検証（tsc/next build 通過、小窓ページのプレビュー確認）まで完了。**未コミット・未push**。
 
 ## 次にやること（再開ポイント）
-- ユーザーが本番URL（https://user-test-nakasang2s-projects.vercel.app/）で社内テスト前チェックを実施（トップ→登録→テスト作成→招待→被験者実施→**小窓のカメラ表示／録画の顔が潰れていないか**→結果表示）。カメラ実機確認だけは実カメラが要るためユーザー側で。
-- 残した軽微項目: CreateInterviewModal 内個別ラベルの htmlFor（[49] polish）、gray-400 placeholder コントラスト（[56]一部・装飾的）。着手は任意。
+- ユーザーが**実ブラウザ（Chrome/Edge/Brave）で Document PiP の小窓を開き、小窓内の「②サービスを開く」で別タブが実際に開くか**を確認（プレビュー環境ではPiP実体を再現できず未検証。ここが唯一の残リスク）。問題なければ /ship。
+- schema.prisma(postgresql) とマイグレーション(sqlite) の不整合が未解決（別途方針相談）。
+- 残した軽微項目: CreateInterviewModal 内個別ラベルの htmlFor（[49] polish）、gray-400 placeholder コントラスト（[56]一部）。任意。
 
 ## 注意（並行セッション・未コミット変更）
-- prisma/migrations に未コミット変更あり（20260520051124_init 削除 / 20260101000000_init 追加 / migration_lock.toml を sqlite→postgresql）。別セッションの作業のため**このQAコミットには含めない**。
+- なし（prisma の PostgreSQL 移行分はユーザー指示で 2026-07-27 に破棄済み）。
 
 ## 完了ログ（直近5件）
 - 2026-07-16: リリース可否QA出荷完了。UX/UI 58件修正 → PR #2 で main マージ（5d7d965）→ 本番反映確認（トップの情報漏洩解消・新デプロイ配信を fetch で確認）。本番URLを DECISIONS に記録
