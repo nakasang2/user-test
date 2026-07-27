@@ -23,6 +23,7 @@ function WidgetContent() {
   const [widgetPhase, setWidgetPhase]           = useState<WidgetPhase>('task')
   const [doneMessage, setDoneMessage]           = useState('')
   const [isScreenRecording, setIsScreenRecording] = useState(false)
+  const [serviceOpened, setServiceOpened]       = useState(false)
   const [warnNoRecord, setWarnNoRecord]         = useState(false)
   const [cameraError, setCameraError]           = useState(false)
 
@@ -322,17 +323,16 @@ function WidgetContent() {
         )}
       </div>
 
-      {/* ボタン群（タスク直下に配置。自然フローで常に画面内に収める）。
-          操作はすべてこの小窓に集約。①録画 → ②サービス → ③終わったら達成、の順で番号提示。 */}
+      {/* ボタン群。操作はこの小窓に集約し、黒い主 CTA が常に 1 つだけになるよう段階表示する。
+          録画 →（録画後に）サービスを開く →（開いた後に）達成/できなかった/終了、と主役が入れ替わる。 */}
       <div className="px-3 pb-3 pt-1 space-y-2">
-        {/* ① 画面録画ボタン */}
+        {/* 録画状態: 未開始なら開始ボタン、開始後は「画面録画中」インジケータ（常に単一表示） */}
         {!isScreenRecording ? (
           <div className="space-y-1">
             <button
               onClick={startScreenRecording}
               className="w-full inline-flex items-center justify-center gap-2 bg-red-50 hover:bg-red-100 border-2 border-red-500 hover:border-red-600 text-red-700 py-2.5 rounded-lg text-sm font-semibold transition-colors animate-pulse hover:animate-none"
             >
-              <span className="bg-red-600 text-white text-[10px] font-bold w-4 h-4 flex items-center justify-center rounded-full leading-none">1</span>
               <Monitor className="w-4 h-4" strokeWidth={2} />
               画面録画を開始する
               <span className="bg-red-600 text-white text-[10px] font-bold px-1.5 py-0.5 rounded leading-none">必須</span>
@@ -348,68 +348,91 @@ function WidgetContent() {
           </div>
         )}
 
-        {/* ② サービスを開く（実リンク a target でポップアップブロックを回避）。
-            サービス起動もメイン画面から小窓へ集約。録画開始後に押してもらう想定。 */}
-        {stimulusUrl && (
-          <a
-            href={stimulusUrl}
-            target="uservoice-service"
-            rel="noopener noreferrer"
-            className="w-full inline-flex items-center justify-center gap-2 bg-gray-900 hover:bg-gray-800 text-white py-2.5 rounded-lg text-sm font-semibold transition-colors"
-          >
-            <span className="bg-white/25 text-white text-[10px] font-bold w-4 h-4 flex items-center justify-center rounded-full leading-none">2</span>
-            <Globe className="w-4 h-4" strokeWidth={2} />
-            サービスを開く（新しいタブ）
-          </a>
-        )}
-
-        {/* 録画未開始の警告 */}
-        {warnNoRecord && (
-          <div className="bg-amber-50 border border-amber-300 rounded-lg p-3 text-xs text-amber-900 space-y-2">
-            <p className="flex items-center gap-1.5 font-semibold">
-              <AlertTriangle className="w-3.5 h-3.5" strokeWidth={2} />
-              画面録画が開始されていません
+        {/* サービスを開く: 録画開始後・未オープン時のみ主 CTA として表示。押したら状態を進める */}
+        {isScreenRecording && stimulusUrl && !serviceOpened && (
+          <div className="space-y-1">
+            <a
+              href={stimulusUrl}
+              target="uservoice-service"
+              rel="noopener noreferrer"
+              onClick={() => setServiceOpened(true)}
+              className="w-full inline-flex items-center justify-center gap-2 bg-gray-900 hover:bg-gray-800 text-white py-2.5 rounded-lg text-sm font-semibold transition-colors"
+            >
+              <Globe className="w-4 h-4" strokeWidth={2} />
+              サービスを開く（新しいタブ）
+            </a>
+            <p className="text-[10px] text-gray-500 text-center leading-snug">
+              新しいタブでサービスが開きます。操作を試してください
             </p>
-            <p className="text-amber-800/80">録画なしでタスクを完了しますか？</p>
-            <div className="flex gap-2">
-              <button
-                onClick={() => setWarnNoRecord(false)}
-                className="flex-1 bg-amber-600 hover:bg-amber-700 text-white py-1.5 rounded-md text-xs font-medium transition-colors"
-              >
-                録画してから完了
-              </button>
-              <button
-                onClick={() => finalize(pendingOutcomeRef.current)}
-                className="flex-1 bg-white border border-amber-300 hover:border-amber-500 text-amber-800 py-1.5 rounded-md text-xs transition-colors"
-              >
-                このまま完了
-              </button>
-            </div>
           </div>
         )}
 
-        {/* ③ タスク結果: 達成 / できなかった（操作が終わったら押す） */}
-        <p className="text-[10px] text-gray-500 text-center leading-snug pt-1">
-          操作が終わったら押してください
-        </p>
-        <div className="flex gap-2">
-          <button
-            onClick={() => handleOutcome('completed')}
-            className="flex-1 inline-flex items-center justify-center gap-1.5 bg-gray-900 hover:bg-gray-800 active:bg-black text-white py-2.5 rounded-lg text-sm font-semibold transition-colors"
-          >
-            <span className="bg-white/25 text-white text-[10px] font-bold w-4 h-4 flex items-center justify-center rounded-full leading-none">3</span>
-            <Check className="w-4 h-4" strokeWidth={2.5} />
-            達成して{isLastTask ? '質問へ' : '次へ'}
-          </button>
-          <button
-            onClick={() => handleOutcome('gave_up')}
-            className="flex-1 inline-flex items-center justify-center gap-1.5 bg-white border border-gray-300 hover:border-gray-400 text-gray-700 hover:text-gray-900 py-2.5 rounded-lg text-sm font-medium transition-colors"
-          >
-            できなかった
-          </button>
-        </div>
+        {/* 結果ボタン: サービスを開いた後（サービス URL 未設定なら録画開始後）に初めて表示 */}
+        {isScreenRecording && (serviceOpened || !stimulusUrl) && (
+          <>
+            {stimulusUrl && (
+              <div className="flex items-center justify-center gap-1.5 text-xs text-emerald-700">
+                <CheckCircle2 className="w-3.5 h-3.5" strokeWidth={2} />
+                <span>サービスを開いています</span>
+                <a
+                  href={stimulusUrl}
+                  target="uservoice-service"
+                  rel="noopener noreferrer"
+                  className="text-gray-500 hover:text-gray-800 underline underline-offset-2"
+                >
+                  開き直す
+                </a>
+              </div>
+            )}
 
-        {/* セッション終了 */}
+            {/* 録画未開始の警告（録画が途中で止まった等の保険） */}
+            {warnNoRecord && (
+              <div className="bg-amber-50 border border-amber-300 rounded-lg p-3 text-xs text-amber-900 space-y-2">
+                <p className="flex items-center gap-1.5 font-semibold">
+                  <AlertTriangle className="w-3.5 h-3.5" strokeWidth={2} />
+                  画面録画が開始されていません
+                </p>
+                <p className="text-amber-800/80">録画なしでタスクを完了しますか？</p>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => setWarnNoRecord(false)}
+                    className="flex-1 bg-amber-600 hover:bg-amber-700 text-white py-1.5 rounded-md text-xs font-medium transition-colors"
+                  >
+                    録画してから完了
+                  </button>
+                  <button
+                    onClick={() => finalize(pendingOutcomeRef.current)}
+                    className="flex-1 bg-white border border-amber-300 hover:border-amber-500 text-amber-800 py-1.5 rounded-md text-xs transition-colors"
+                  >
+                    このまま完了
+                  </button>
+                </div>
+              </div>
+            )}
+
+            <p className="text-[10px] text-gray-500 text-center leading-snug pt-1">
+              操作が終わったら押してください
+            </p>
+            <div className="flex gap-2">
+              <button
+                onClick={() => handleOutcome('completed')}
+                className="flex-1 inline-flex items-center justify-center gap-1.5 bg-gray-900 hover:bg-gray-800 active:bg-black text-white py-2.5 rounded-lg text-sm font-semibold transition-colors"
+              >
+                <Check className="w-4 h-4" strokeWidth={2.5} />
+                達成して{isLastTask ? '質問へ' : '次へ'}
+              </button>
+              <button
+                onClick={() => handleOutcome('gave_up')}
+                className="flex-1 inline-flex items-center justify-center gap-1.5 bg-white border border-gray-300 hover:border-gray-400 text-gray-700 hover:text-gray-900 py-2.5 rounded-lg text-sm font-medium transition-colors"
+              >
+                できなかった
+              </button>
+            </div>
+          </>
+        )}
+
+        {/* セッション終了は常に押せる脱出口として最下部に常時表示（録画を始めない参加者が
+            中断できず詰むのを防ぐ）。控えめな枠線ボタンなので黒い主 CTA とは競合しない。 */}
         <button
           onClick={endSession}
           className="w-full inline-flex items-center justify-center gap-1.5 border border-gray-300 hover:border-gray-400 text-gray-600 hover:text-gray-900 py-2 rounded-lg text-xs transition-colors"
