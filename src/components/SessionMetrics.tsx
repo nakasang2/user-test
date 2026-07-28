@@ -18,6 +18,8 @@ export interface AnswerData {
   type: string             // open | rating | nps
   valueNum?: number | null
   valueText?: string | null
+  /** AI が追加で掘り下げた回数（自由回答のみ） */
+  followUpCount?: number | null
 }
 
 /** 秒を「1分23秒」形式に */

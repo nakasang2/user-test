@@ -9,6 +9,7 @@ import FloatingAgentChat from '@/components/FloatingAgentChat'
 import StatusBadge from '@/components/StatusBadge'
 import InterviewMetrics from '@/components/InterviewMetrics'
 import TranscriptSearch from '@/components/TranscriptSearch'
+import AnswerMatrix from '@/components/AnswerMatrix'
 import { type TaskResultData, type AnswerData } from '@/components/SessionMetrics'
 
 type SortKey = 'date-desc' | 'date-asc' | 'name-asc' | 'status'
@@ -300,6 +301,9 @@ export default function InterviewComparePage(props: { params: Promise<{ id: stri
             </div>
           )}
         </div>
+
+        {/* 回答の比較（質問 × 参加者）。深掘りは元の質問にまとめて紐づくので列は崩れない */}
+        <AnswerMatrix sessions={realSessions} questions={interview.questions} />
 
         {/* 定量集計（タスク成功率・スコア）。AI 分析の完了を待たずに出せるので done で絞らない */}
         <InterviewMetrics sessions={realSessions} />

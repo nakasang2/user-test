@@ -33,6 +33,7 @@ type AnswerInput = {
   type: string
   valueNum?: number | null
   valueText?: string | null
+  followUpCount?: number | null
   answeredAt?: number | null
 }
 
@@ -99,6 +100,10 @@ export async function POST(req: NextRequest, props: { params: Promise<{ id: stri
         type: a.type,
         valueNum: num(a.valueNum),
         valueText: typeof a.valueText === 'string' ? a.valueText.slice(0, 4000) : null,
+        followUpCount: (() => {
+          const v = num(a.followUpCount)
+          return v !== null && Number.isInteger(v) && v >= 0 && v <= 50 ? v : null
+        })(),
         answeredAt: num(a.answeredAt),
       }))
 
