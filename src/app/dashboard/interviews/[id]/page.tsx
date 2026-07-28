@@ -3,7 +3,7 @@
 import { useState, useEffect, use, useMemo } from 'react'
 import Link from 'next/link'
 import { RadarChart, Radar, PolarGrid, PolarAngleAxis, ResponsiveContainer, Tooltip } from 'recharts'
-import { Search, X, Pencil, Download, FlaskConical } from 'lucide-react'
+import { Search, X, Pencil, Download, FlaskConical, RefreshCw } from 'lucide-react'
 import EditInterviewModal from '@/components/EditInterviewModal'
 import FloatingAgentChat from '@/components/FloatingAgentChat'
 import StatusBadge from '@/components/StatusBadge'
@@ -76,6 +76,31 @@ export default function InterviewComparePage(props: { params: Promise<{ id: stri
   const [editing, setEditing] = useState(false)
   const [pilotStarting, setPilotStarting] = useState(false)
   const [backfilling, setBackfilling] = useState(false)
+  const [reanalyzing, setReanalyzing] = useState(false)
+
+  // 全セッションをまとめて再分析する。
+  // AI へのプロンプトを変えた後（要約の日本語化など）に既存セッションを追随させる用途。
+  async function reanalyzeAll() {
+    if (!confirm('このテストの全セッションをAIで再分析します。\n要約・テーマ・感情判定が作り直されます（録画と表情データは変更しません）。\n\n5件ずつ処理します。よろしいですか？')) return
+    setReanalyzing(true)
+    try {
+      const res = await fetch(`/api/interviews/${id}/reanalyze`, { method: 'POST' })
+      const data = await res.json().catch(() => null)
+      if (!res.ok || !data) {
+        alert(data?.error ?? '再分析が途中で終了しました。保存できた分を反映します。残りがあれば、もう一度実行してください。')
+        window.location.reload()
+        return
+      }
+      const rest = data.remaining > 0 ? `\n残り ${data.remaining} 件は、もう一度実行してください。` : ''
+      const ng = data.failed > 0 ? `\n${data.failed} 件は失敗しました。` : ''
+      alert(`${data.done} 件を再分析しました。${ng}${rest}`)
+      window.location.reload()
+    } catch {
+      alert('再分析に失敗しました')
+    } finally {
+      setReanalyzing(false)
+    }
+  }
 
   // 文字起こししか無い過去セッションから、質問ごとの回答を復元する
   async function backfillAnswers() {
@@ -244,6 +269,15 @@ export default function InterviewComparePage(props: { params: Promise<{ id: stri
               <Download className="w-3.5 h-3.5" strokeWidth={2} />
               CSV出力
             </a>
+            <button
+              onClick={reanalyzeAll}
+              disabled={reanalyzing}
+              className="inline-flex items-center gap-1.5 border border-gray-300 hover:border-gray-400 disabled:opacity-50 text-gray-700 hover:text-gray-900 px-3 py-1.5 rounded-md text-sm transition-colors"
+              title="全セッションの要約・テーマ・感情判定をAIで作り直します（要約が英語のままのものを日本語にし直す用途）"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${reanalyzing ? 'animate-spin' : ''}`} strokeWidth={2} />
+              {reanalyzing ? '再分析中…' : '全件を再分析'}
+            </button>
             <button
               onClick={runPilot}
               disabled={pilotStarting}
