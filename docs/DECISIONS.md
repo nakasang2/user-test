@@ -85,6 +85,13 @@
 - 補足: 感情分析用の faceExpressionNet は読まず tinyFaceDetector のみロード（軽量化）。見切れ=顔 boxが映像端±1.5%に接触で判定。補助機能なのでモデルロード失敗時も録画は継続
 - 適用範囲拡大(2026-07-27): 小窓だけでなく全モードに適用。メイン画面のカメラ（プロトタイプ時=右下の小型PiP／通常インタビュー時=全画面）にも同じ警告を表示。メインは既存 useEmotionDetection の感情検出ループ（5秒ごと）から顔 box を算出して二重処理を回避（小窓は独立ルートなので2.5秒の専用ループ）。バナー位置はカメラ映像の位置（PiP/全画面）に追従
 
+## 2026-07-28 prisma は db push 方式に統一（マイグレーション削除）
+- 背景: schema.prisma は postgresql、`prisma/migrations` は sqlite という矛盾が未解決だった
+- 実態調査: 残っていたマイグレーションはテーブル 7 個ぶんのみで、現在のスキーマ（17 モデル）を再現できない。lock も sqlite のまま。デプロイは `prisma db push --accept-data-loss`（build スクリプト）で行っており、マイグレーションは一切使われていなかった
+- 決定: `prisma/migrations` を削除し、**db push 方式であることを schema.prisma の冒頭に明記**する。`prisma migrate` を実行すると失敗するか壊れた DB ができる罠だったため
+- 却下: 稼働中DBから baseline を作って migrate 方式へ移行 — 動いている本番のデプロイ経路を変えるリスクが大きく、現状の運用規模に見合わないため。将来必要になった時点で baseline から始める
+- 補足: `prisma/dev.db`（SQLite 時代の残骸）は .gitignore 済みでリポジトリには入っていない
+
 ## 2026-07-27 prisma の PostgreSQL 移行マイグレーションを破棄
 - 決定: 未コミットだった prisma/migrations の PostgreSQL 移行分（20260520051124_init 削除 → 20260101000000_init 追加、lock を postgresql 化）を破棄し、SQLite 版マイグレーションに戻した。schema.prisma には手を付けず（すでに postgresql のままで、マイグレーション履歴と不整合が残る）
 - 補足: schema.prisma(postgresql) とマイグレーション(sqlite) の食い違いは未解決。今後 prisma migrate 実行時にエラーになりうる。揃える方針（sqlite に戻す / postgres 移行をやり直す）は別途相談
