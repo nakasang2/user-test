@@ -35,6 +35,11 @@ interface Props {
   currentTime?: number
   /** グラフのある時点をクリックしたときに呼ばれるコールバック */
   onSeek?: (timestamp: number) => void
+  /**
+   * 時系列グラフだけを表示する。画面上部に固定して「動画のシークバー」として
+   * 使う場所では、%カードや平均分布まで出すと背が高くなりすぎるため。
+   */
+  compact?: boolean
 }
 
 const EMOTION_COLORS = {
@@ -61,7 +66,7 @@ function formatTime(seconds: number) {
   return `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, '0')}`
 }
 
-export default function EmotionChart({ emotions, currentTime, onSeek }: Props) {
+export default function EmotionChart({ emotions, currentTime, onSeek, compact }: Props) {
   // グラフの描画領域を実測してクリック位置から時刻を求めるため（フック規則上ここで宣言）
   const chartBoxRef = useRef<HTMLDivElement>(null)
 
@@ -127,8 +132,9 @@ export default function EmotionChart({ emotions, currentTime, onSeek }: Props) {
   const dominant = avgEmotions.reduce((a, b) => (a.value > b.value ? a : b))
 
   return (
-    <div className="space-y-6">
+    <div className={compact ? 'space-y-3' : 'space-y-6'}>
       {/* 補助指標であることの注記（表情推定の限界を明示） */}
+      {!compact && (
       <div className="flex items-start gap-2 text-xs text-gray-500 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2.5 leading-relaxed">
         <Info className="w-3.5 h-3.5 mt-0.5 flex-shrink-0 text-gray-400" strokeWidth={2} />
         <span>
@@ -137,7 +143,9 @@ export default function EmotionChart({ emotions, currentTime, onSeek }: Props) {
           （検出 {emotions.length} 件 / 約5秒間隔・顔未検出時はスキップ）。
         </span>
       </div>
+      )}
 
+      {!compact && (
       <div className="grid grid-cols-4 gap-3">
         {avgEmotions
           .sort((a, b) => b.value - a.value)
@@ -151,16 +159,19 @@ export default function EmotionChart({ emotions, currentTime, onSeek }: Props) {
             </div>
           ))}
       </div>
+      )}
 
+      {!compact && (
       <div className="bg-white border border-gray-200 rounded-lg p-4">
         <div className="text-xs font-medium uppercase tracking-wide text-gray-500 mb-1">最も多く検出された表情</div>
         <div className="font-semibold tracking-tight" style={{ color: dominant.color }}>
           {dominant.emotion} ({dominant.value}%)
         </div>
       </div>
+      )}
 
-      <div className="bg-white border border-gray-200 rounded-lg p-6">
-        <div className="flex items-center justify-between mb-4">
+      <div className={`bg-white border border-gray-200 rounded-lg ${compact ? 'p-4' : 'p-6'}`}>
+        <div className="flex items-center justify-between mb-3">
           <h3 className="text-sm font-semibold tracking-tight text-gray-900">表情推定値の推移（参考・時系列）</h3>
           {onSeek && (
             <span className="text-[10px] text-gray-500">
@@ -172,7 +183,7 @@ export default function EmotionChart({ emotions, currentTime, onSeek }: Props) {
             recharts の onClick はホバー状態（activeIndex）に依存し、2系にあった
             activePayload も 3系では渡ってこないため、描画領域の実測値から自前で算出する。 */}
         <div ref={chartBoxRef} onClick={handleChartClick}>
-        <ResponsiveContainer width="100%" height={280}>
+        <ResponsiveContainer width="100%" height={compact ? 210 : 280}>
           <LineChart
             data={chartData}
             margin={{ top: 5, right: 20, left: 0, bottom: 5 }}
@@ -212,6 +223,7 @@ export default function EmotionChart({ emotions, currentTime, onSeek }: Props) {
         </div>
       </div>
 
+      {!compact && (
       <div className="bg-white border border-gray-200 rounded-lg p-6">
         <h3 className="text-sm font-semibold tracking-tight text-gray-900 mb-4">表情推定値の平均分布（参考）</h3>
         <ResponsiveContainer width="100%" height={200}>
@@ -230,6 +242,7 @@ export default function EmotionChart({ emotions, currentTime, onSeek }: Props) {
           </BarChart>
         </ResponsiveContainer>
       </div>
+      )}
     </div>
   )
 }

@@ -508,36 +508,14 @@ export default function SessionDetail(props: { params: Promise<{ id: string }> }
           </div>
         )}
 
-        {/* ── メインコンテンツ 2カラム ── */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
-
-          {/* 左: 文字起こし */}
-          <div>
-            <SectionLabel>文字起こし</SectionLabel>
-            <TranscriptView
-              transcript={session.transcript}
-              questions={session.interview.questions}
-              onSeek={videoSrc ? seekVideo : undefined}
-              currentTime={videoSrc ? videoCurrentTime : undefined}
-              onHighlight={addHighlight}
-              highlightedSegmentIds={new Set(highlights.map((h) => h.segmentId).filter((v): v is string => !!v))}
-            />
-
-            {/* ハイライト（引用＋メモ＋タグ）: 定性分析の作業場 */}
-            <div className="mt-6">
-              <SectionLabel>ハイライト</SectionLabel>
-              <HighlightPanel
-                highlights={highlights}
-                onUpdate={updateHighlight}
-                onDelete={deleteHighlight}
-                onSeek={videoSrc ? seekVideo : undefined}
-              />
-            </div>
-          </div>
-
-          {/* 右: 表情エンゲージメント指標 + 動画 */}
-          <div>
-            <SectionLabel>表情エンゲージメント指標（参考）</SectionLabel>
+        {/* ── 上部: 録画と表情グラフ（時間軸は横） ──
+            画面上部に固定し、実質的に動画のシークバーとして使う。
+            会話ログは時間軸が縦なので、横に並べると向きが競合して見比べにくい。
+            上下に分けることで両方を全幅で見せられる。 */}
+        <div className="lg:sticky lg:top-0 z-20 bg-white lg:pt-3 lg:pb-4 mb-6 lg:border-b lg:border-gray-200">
+          <SectionLabel>録画と表情エンゲージメント指標（参考）</SectionLabel>
+          {/* 動画は左、時系列グラフは右。グラフに横幅を与えて山谷を読みやすくする */}
+          <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,32rem)_1fr] gap-4 items-start">
 
             {/* 動画プレーヤー or ファイルピッカー */}
             {videoSrc ? (
@@ -597,7 +575,9 @@ export default function SessionDetail(props: { params: Promise<{ id: string }> }
               </div>
             )}
 
+            <div className="min-w-0">
             <EmotionChart
+              compact
               emotions={session.emotions}
               currentTime={videoSrc ? videoCurrentTime : undefined}
               onSeek={videoSrc ? (ts) => {
@@ -607,7 +587,39 @@ export default function SessionDetail(props: { params: Promise<{ id: string }> }
                 }
               } : undefined}
             />
+            </div>
           </div>
+        </div>
+
+        {/* ── 下部: 会話ログとハイライト（全幅） ── */}
+        <div>
+            <SectionLabel>文字起こし</SectionLabel>
+            <TranscriptView
+              transcript={session.transcript}
+              questions={session.interview.questions}
+              onSeek={videoSrc ? seekVideo : undefined}
+              currentTime={videoSrc ? videoCurrentTime : undefined}
+              onHighlight={addHighlight}
+              highlightedSegmentIds={new Set(highlights.map((h) => h.segmentId).filter((v): v is string => !!v))}
+            />
+
+            {/* ハイライト（引用＋メモ＋タグ）: 定性分析の作業場 */}
+            <div className="mt-6">
+              <SectionLabel>ハイライト</SectionLabel>
+              <HighlightPanel
+                highlights={highlights}
+                onUpdate={updateHighlight}
+                onDelete={deleteHighlight}
+                onSeek={videoSrc ? seekVideo : undefined}
+              />
+            </div>
+
+            {/* 表情の詳しい指標（平均・最頻・注記）。上部は時系列だけに絞っているので、
+                じっくり見る内容はスクロール下に置く */}
+            <div className="mt-8">
+              <SectionLabel>表情の詳しい指標（参考）</SectionLabel>
+              <EmotionChart emotions={session.emotions} />
+            </div>
         </div>
       </div>
 
