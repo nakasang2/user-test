@@ -21,6 +21,12 @@ type Role = 'user' | 'assistant'
 type InterviewType = 'interview' | 'impression' | 'usability'
 interface Message { role: Role; content: string }
 interface Question { text: string; type: string }
+/** AI が生成する質問は自由回答固定なので、保存前にここで形式を選べるようにする */
+const Q_TYPES: { value: string; label: string }[] = [
+  { value: 'open',   label: '自由回答' },
+  { value: 'rating', label: '5段階評価' },
+  { value: 'nps',    label: 'NPS（0〜10）' },
+]
 interface TaskItem  { text: string; order: number }
 interface InterviewPlot {
   title: string
@@ -148,6 +154,13 @@ export default function DesignPage() {
     if (!plot) return
     const updated = [...plot.questions]
     updated[index] = { ...updated[index], text }
+    setPlot({ ...plot, questions: updated })
+  }
+
+  function updateQuestionType(index: number, type: string) {
+    if (!plot) return
+    const updated = [...plot.questions]
+    updated[index] = { ...updated[index], type }
     setPlot({ ...plot, questions: updated })
   }
 
@@ -473,12 +486,23 @@ export default function DesignPage() {
                   {plot.questions.map((q, i) => (
                     <div key={i} className="flex gap-2 items-start group">
                       <span className="text-gray-400 text-xs mt-2.5 w-4 shrink-0 text-right">{i + 1}</span>
-                      <textarea
-                        value={q.text}
-                        onChange={(e) => updateQuestion(i, e.target.value)}
-                        rows={2}
-                        className="flex-1 bg-white border border-gray-300 focus:border-gray-900 focus:ring-1 focus:ring-gray-900 focus:outline-none rounded-md px-3 py-2 text-sm text-gray-900 resize-none"
-                      />
+                      <div className="flex-1 space-y-1.5">
+                        <textarea
+                          value={q.text}
+                          onChange={(e) => updateQuestion(i, e.target.value)}
+                          rows={2}
+                          aria-label={`質問 ${i + 1}`}
+                          className="w-full bg-white border border-gray-300 focus:border-gray-900 focus:ring-1 focus:ring-gray-900 focus:outline-none rounded-md px-3 py-2 text-sm text-gray-900 resize-none"
+                        />
+                        <select
+                          value={q.type ?? 'open'}
+                          onChange={(e) => updateQuestionType(i, e.target.value)}
+                          aria-label={`質問 ${i + 1} の形式`}
+                          className="bg-white border border-gray-300 text-xs text-gray-700 rounded-md px-2 py-1 focus:outline-none focus:border-gray-900"
+                        >
+                          {Q_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
+                        </select>
+                      </div>
                       <button
                         onClick={() => removeQuestion(i)}
                         className="text-gray-300 hover:text-red-600 mt-2 transition-colors p-1 opacity-0 group-hover:opacity-100">
