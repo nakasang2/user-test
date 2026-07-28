@@ -14,7 +14,7 @@ export async function PATCH(
   props: { params: Promise<{ userId: string }> },
 ) {
   try {
-    const { userId: callerId, orgId, role: callerRole } = await requireRole('admin')
+    const { orgId, role: callerRole } = await requireRole('admin')
     const { userId: targetUserId } = await props.params
 
     const body = await req.json()

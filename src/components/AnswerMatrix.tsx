@@ -212,7 +212,7 @@ export default function AnswerMatrix({
             onChange={(e) => setFilter(e.target.value)}
             placeholder="回答を絞り込む"
             aria-label="回答を絞り込む"
-            className="bg-white border border-gray-300 focus:border-gray-900 rounded-md pl-8 pr-7 py-1.5 text-xs placeholder-gray-400 focus:outline-none transition-colors"
+            className="bg-white border border-gray-300 focus:border-gray-900 rounded-md pl-8 pr-7 py-1.5 text-xs placeholder-gray-500 focus:outline-none transition-colors"
           />
           {filter && (
             <button onClick={() => setFilter('')} aria-label="絞り込みをクリア" className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-700">

@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useRef, Suspense } from 'react'
+import { useEffect, useState, useRef, useMemo, Suspense } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { Monitor, Check, X, AlertTriangle, CheckCircle2, Globe } from 'lucide-react'
 import SeqScale from '@/components/SeqScale'
@@ -20,7 +20,10 @@ function WidgetContent() {
   const stimulusUrl = searchParams.get('stimulus') ?? ''
   const seqEnabled  = searchParams.get('seq') === '1'
 
-  const [tasks, setTasks]                       = useState<Task[]>([])
+  // タスクは URL パラメータから決まるので state に持たない（effect での setState も不要になる）
+  const tasks = useMemo<Task[]>(() => {
+    try { return JSON.parse(decodeURIComponent(atob(tasksRaw))) } catch { return [] }
+  }, [tasksRaw])
   const [currentTaskIndex, setCurrentTaskIndex] = useState(initialIdx)
   const [widgetPhase, setWidgetPhase]           = useState<WidgetPhase>('task')
   const [doneMessage, setDoneMessage]           = useState('')
@@ -45,8 +48,6 @@ function WidgetContent() {
 
   /* ── 初期化 ─────────────────────────────────────────────── */
   useEffect(() => {
-    try { setTasks(JSON.parse(decodeURIComponent(atob(tasksRaw)))) } catch { setTasks([]) }
-
     // BroadcastChannel
     if (sessionId) {
       const channel = new BroadcastChannel(`uservoice-widget-${sessionId}`)

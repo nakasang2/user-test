@@ -23,6 +23,7 @@ import {
   Copy,
 } from 'lucide-react'
 import SeqScale from '@/components/SeqScale'
+import { elapsedSec, nowMs, cacheBustToken } from '@/lib/elapsed'
 
 interface Question {
   id?: string
@@ -94,7 +95,7 @@ export default function InterviewRoom({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const speechRef = useRef<any>(null)
   const silenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const startTimeRef = useRef<number>(Date.now())
+  const startTimeRef = useRef<number>(nowMs())
   const transcriptRef = useRef<TranscriptEntry[]>([])
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const recordedChunksRef = useRef<Blob[]>([])
@@ -110,9 +111,14 @@ export default function InterviewRoom({
   const { status: emotionStatus, lastEmotion, faceStatus, startDetection, stopDetection, getSnapshots } = useEmotionDetection(5000)
   const [cameraReady, setCameraReady] = useState(false)
   // リアルタイムグラフ用：lastEmotion が更新されるたびに履歴に追加（最大 30 件 ≈ 2.5 分）
+  //
+  // 時間経過とともに値を積み上げる性質のため、レンダー中に算出できない
+  //（過去の検出結果はどこにも残らず、この履歴だけが保持している）。
+  // 検出フックの更新に反応して追記するのが唯一の方法なので、規則を個別に外す。
   const [emotionHistory, setEmotionHistory] = useState<EmotionSnapshot[]>([])
   useEffect(() => {
     if (lastEmotion) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setEmotionHistory((prev) => [...prev, lastEmotion].slice(-30))
       // 途中離脱でも残るよう、感情スナップショットを逐次サーバー保存（失敗は無視）。
       // 最終的には submitResults→/process が全件で上書きする。
@@ -139,7 +145,6 @@ export default function InterviewRoom({
   const [notice, setNotice] = useState<string | null>(null)
   const noticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [aiThinking, setAiThinking] = useState(false)
-  const [ratingValue, setRatingValue] = useState<number | null>(null) // Feature 5: 評価質問用
   const [textInput, setTextInput] = useState('')
   // null = チェック前（初回レンダリング）、true/false = チェック済み
   const [speechSupported, setSpeechSupported] = useState<boolean | null>(null)
@@ -165,7 +170,7 @@ export default function InterviewRoom({
     currentTaskIndexRef.current = idx
     setCurrentTaskIndex(idx)
     // 次タスクの計測開始（前タスクの終了時刻＝次タスクの開始時刻）
-    taskStartedAtRef.current = (Date.now() - startTimeRef.current) / 1000
+    taskStartedAtRef.current = elapsedSec(startTimeRef.current)
     firstTaskStartedRef.current = true
   }
   // 測定結果（定量データ）。文字起こしとは別に /results へ構造化保存する
@@ -190,7 +195,7 @@ export default function InterviewRoom({
   function markFirstTaskStart() {
     if (firstTaskStartedRef.current) return
     firstTaskStartedRef.current = true
-    taskStartedAtRef.current = (Date.now() - startTimeRef.current) / 1000
+    taskStartedAtRef.current = elapsedSec(startTimeRef.current)
   }
   const [stimulusCountdown, setStimulusCountdown] = useState(0)
   const [stimulusError, setStimulusError] = useState(false)
@@ -212,9 +217,14 @@ export default function InterviewRoom({
   const endedRef = useRef(false)    // endInterview の二重実行防止（結果の二重送信を防ぐ）
 
   // 音声認識サポート確認（マウント時）
+  //
+  // window の API 有無はサーバー側では判定できない。初期値で判定しようとすると
+  // サーバーとクライアントで結果が変わりハイドレーションのズレになるため、
+  // マウント後に確定させる必要がある。規則を個別に外す。
   useEffect(() => {
     if (typeof window !== 'undefined') {
       const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition // eslint-disable-line @typescript-eslint/no-explicit-any
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setSpeechSupported(!!SR)
     }
   }, [])
@@ -259,7 +269,7 @@ export default function InterviewRoom({
     const entry: TranscriptEntry = {
       speaker: 'Interviewer',
       text,
-      start: (Date.now() - startTimeRef.current) / 1000,
+      start: elapsedSec(startTimeRef.current),
     }
     transcriptRef.current = [...transcriptRef.current, entry]
     setTranscript([...transcriptRef.current])
@@ -391,8 +401,8 @@ export default function InterviewRoom({
     const entry: TranscriptEntry = {
       speaker: 'Participant',
       text,
-      start: (Date.now() - startTimeRef.current) / 1000,
-      end: (Date.now() - startTimeRef.current) / 1000,
+      start: elapsedSec(startTimeRef.current),
+      end: elapsedSec(startTimeRef.current),
     }
     transcriptRef.current = [...transcriptRef.current, entry]
     setTranscript([...transcriptRef.current])
@@ -423,7 +433,7 @@ export default function InterviewRoom({
     speechRef.current = recognition
 
     let finalText = ''
-    const startTime = (Date.now() - startTimeRef.current) / 1000
+    const startTime = elapsedSec(startTimeRef.current)
 
     // 沈黙タイムアウト開始（60秒）— 考える時間・沈黙して内省する時間を確保する
     if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current)
@@ -470,7 +480,7 @@ export default function InterviewRoom({
           speaker: 'Participant',
           text: finalText.trim(),
           start: startTime,
-          end: (Date.now() - startTimeRef.current) / 1000,
+          end: elapsedSec(startTimeRef.current),
         }
         transcriptRef.current = [...transcriptRef.current, entry]
         setTranscript([...transcriptRef.current])
@@ -503,12 +513,11 @@ export default function InterviewRoom({
     const entry: TranscriptEntry = {
       speaker: 'Participant',
       text: answerText,
-      start: (Date.now() - startTimeRef.current) / 1000,
+      start: elapsedSec(startTimeRef.current),
     }
     transcriptRef.current = [...transcriptRef.current, entry]
     setTranscript([...transcriptRef.current])
     conversationBufferRef.current += `\n参加者: ${answerText}`
-    setRatingValue(null)
     saveProgress()
 
     // 評価スコアは数値として構造化保存（平均・NPS 集計用）
@@ -603,7 +612,7 @@ export default function InterviewRoom({
         type: 'open',
         valueText: said,
         followUpCount,
-        answeredAt: (Date.now() - startTimeRef.current) / 1000,
+        answeredAt: elapsedSec(startTimeRef.current),
       },
     ]
     saveResults()
@@ -657,7 +666,7 @@ export default function InterviewRoom({
     const tasksEncoded = encodeURIComponent(btoa(encodeURIComponent(JSON.stringify(tasks ?? []))))
     // 小窓（別ウィンドウの iframe）が古い版をキャッシュして表示するのを防ぐため、
     // 開くたびに一意なパラメータを付けて必ず最新を読み込ませる。
-    const cacheBust = `${Date.now()}${Math.round(performance.now())}`
+    const cacheBust = cacheBustToken()
     // サービス起動も小窓に一本化するため、対象サービスの URL を小窓へ渡す。
     const stimulusParam = stimulusUrl ? `&stimulus=${encodeURIComponent(stimulusUrl)}` : ''
     const seqParam = seqEnabled ? '&seq=1' : ''
@@ -699,7 +708,7 @@ export default function InterviewRoom({
     const task = tasks?.[idx]
     if (task) {
       // 定量データとして構造化保存（成功率・所要時間の集計用）
-      const now = (Date.now() - startTimeRef.current) / 1000
+      const now = elapsedSec(startTimeRef.current)
       taskResultsRef.current = [
         ...taskResultsRef.current.filter((r) => r.order !== idx + 1), // 同一タスクの再記録は上書き
         {
@@ -719,7 +728,7 @@ export default function InterviewRoom({
       const entry: TranscriptEntry = {
         speaker: 'System',
         text,
-        start: (Date.now() - startTimeRef.current) / 1000,
+        start: elapsedSec(startTimeRef.current),
       }
       transcriptRef.current = [...transcriptRef.current, entry]
       setTranscript([...transcriptRef.current])
@@ -770,7 +779,7 @@ export default function InterviewRoom({
     // 経過時間の基準を「開始ボタンを押した瞬間」に揃える。
     // マウント時のままだとガイド画面の滞在時間が所要時間に混入し、
     // 文字起こしのタイムスタンプも録画の再生位置とずれる。
-    startTimeRef.current = Date.now()
+    startTimeRef.current = nowMs()
     taskStartedAtRef.current = 0
     setIsRecording(true)
     startMediaRecorder()
@@ -1812,7 +1821,7 @@ export default function InterviewRoom({
                   onChange={(e) => setTextInput(e.target.value)}
                   onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); submitTextAnswer() } }}
                   placeholder={speechSupported ? 'テキストでも入力できます' : '回答を入力...'}
-                  className="flex-1 bg-white border border-gray-300 focus:border-gray-900 focus:ring-1 focus:ring-gray-900 rounded-md px-2.5 py-1.5 text-xs text-gray-900 placeholder-gray-400 focus:outline-none"
+                  className="flex-1 bg-white border border-gray-300 focus:border-gray-900 focus:ring-1 focus:ring-gray-900 rounded-md px-2.5 py-1.5 text-xs text-gray-900 placeholder-gray-500 focus:outline-none"
                 />
                 <button
                   onClick={submitTextAnswer}

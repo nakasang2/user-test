@@ -307,7 +307,7 @@ export default function InterviewComparePage(props: { params: Promise<{ id: stri
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="参加者名で検索"
-                className="bg-white border border-gray-300 focus:border-gray-900 focus:ring-1 focus:ring-gray-900 rounded-md pl-8 pr-3 py-1.5 text-sm text-gray-900 placeholder-gray-400 focus:outline-none transition-colors"
+                className="bg-white border border-gray-300 focus:border-gray-900 focus:ring-1 focus:ring-gray-900 rounded-md pl-8 pr-3 py-1.5 text-sm text-gray-900 placeholder-gray-500 focus:outline-none transition-colors"
               />
               {search && (
                 <button onClick={() => setSearch('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">

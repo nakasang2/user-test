@@ -88,7 +88,7 @@ export default function TranscriptSearch({ interviewId }: { interviewId: string 
             onChange={(e) => setQuery(e.target.value)}
             placeholder="全参加者の発言から検索（例: 価格、迷った、わかりにくい）"
             aria-label="全参加者の発言を検索"
-            className="w-full bg-white border border-gray-300 focus:border-gray-900 rounded-md pl-8 pr-8 py-2 text-sm placeholder-gray-400 focus:outline-none transition-colors"
+            className="w-full bg-white border border-gray-300 focus:border-gray-900 rounded-md pl-8 pr-8 py-2 text-sm placeholder-gray-500 focus:outline-none transition-colors"
           />
           {query && (
             <button type="button" onClick={clear} aria-label="クリア" className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-700">

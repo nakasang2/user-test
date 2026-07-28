@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState, useCallback } from 'react'
+import { nowMs, elapsedSec } from '@/lib/elapsed'
 
 export interface EmotionSnapshot {
   timestamp: number
@@ -13,24 +14,25 @@ export interface EmotionSnapshot {
   neutral: number
 }
 
-type DetectionStatus = 'idle' | 'loading' | 'ready' | 'error'
+// マウント直後に必ずモデルのロードを始めるため、初期状態は 'loading'
+// （'idle' は使わないので型からも外す）
+type DetectionStatus = 'loading' | 'ready' | 'error'
 // 顔フレーミング: null=判定前 / 'ok'=正常 / 'no_face'=写っていない / 'cut_off'=見切れ
 export type FaceFraming = 'ok' | 'no_face' | 'cut_off' | null
 
 export function useEmotionDetection(intervalMs = 5000) {
-  const [status, setStatus] = useState<DetectionStatus>('idle')
+  const [status, setStatus] = useState<DetectionStatus>('loading')
   const [lastEmotion, setLastEmotion] = useState<EmotionSnapshot | null>(null)
   const [faceStatus, setFaceStatus] = useState<FaceFraming>(null)
   const snapshotsRef = useRef<EmotionSnapshot[]>([])
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
-  const startTimeRef = useRef<number>(Date.now())
+  const startTimeRef = useRef<number>(nowMs())
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const faceApiRef = useRef<any>(null)
 
   // モデルを非同期ロード
   useEffect(() => {
     let cancelled = false
-    setStatus('loading')
 
     async function loadModels() {
       try {
@@ -59,7 +61,7 @@ export function useEmotionDetection(intervalMs = 5000) {
   // 検出開始
   const startDetection = useCallback((videoEl: HTMLVideoElement) => {
     if (status !== 'ready' || !faceApiRef.current) return
-    startTimeRef.current = Date.now()
+    startTimeRef.current = nowMs()
 
     intervalRef.current = setInterval(async () => {
       if (!faceApiRef.current) return
@@ -84,7 +86,7 @@ export function useEmotionDetection(intervalMs = 5000) {
 
         const expr = detection.expressions
         const snapshot: EmotionSnapshot = {
-          timestamp: (Date.now() - startTimeRef.current) / 1000,
+          timestamp: elapsedSec(startTimeRef.current),
           happy: expr.happy,
           sad: expr.sad,
           angry: expr.angry,

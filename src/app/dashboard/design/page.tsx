@@ -239,7 +239,7 @@ export default function DesignPage() {
                 placeholder="メッセージを入力 (Enter で送信)"
                 rows={2}
                 disabled={loading}
-                className="flex-1 bg-white border border-gray-300 focus:border-gray-900 focus:ring-1 focus:ring-gray-900 focus:outline-none rounded-lg px-3 py-2 text-sm text-gray-900 placeholder-gray-400 resize-none transition-colors disabled:opacity-50"
+                className="flex-1 bg-white border border-gray-300 focus:border-gray-900 focus:ring-1 focus:ring-gray-900 focus:outline-none rounded-lg px-3 py-2 text-sm text-gray-900 placeholder-gray-500 resize-none transition-colors disabled:opacity-50"
               />
               <button type="submit" disabled={loading || !input.trim()}
                 className="inline-flex items-center gap-1.5 bg-gray-900 hover:bg-gray-800 text-white disabled:opacity-40 px-3.5 py-2 rounded-lg text-sm font-medium transition-colors shrink-0">
@@ -361,7 +361,7 @@ export default function DesignPage() {
                     <label className="block text-xs text-gray-500 mb-1.5 font-medium uppercase tracking-wide">画像URL</label>
                     <input type="url" value={stimulusUrl} onChange={(e) => setStimulusUrl(e.target.value)}
                       placeholder="https://example.com/image.png"
-                      className="w-full bg-white border border-gray-300 focus:border-gray-900 focus:ring-1 focus:ring-gray-900 focus:outline-none rounded-md px-3 py-2 text-sm text-gray-900 placeholder-gray-400" />
+                      className="w-full bg-white border border-gray-300 focus:border-gray-900 focus:ring-1 focus:ring-gray-900 focus:outline-none rounded-md px-3 py-2 text-sm text-gray-900 placeholder-gray-500" />
                   </div>
                   <div>
                     <label className="block text-xs text-gray-500 mb-1.5 font-medium uppercase tracking-wide">表示秒数</label>
@@ -380,7 +380,7 @@ export default function DesignPage() {
                   </label>
                   <input type="url" value={stimulusUrl} onChange={(e) => setStimulusUrl(e.target.value)}
                     placeholder={usabilityMode === 'prototype' ? 'https://www.figma.com/proto/...' : 'https://example.com'}
-                    className="w-full bg-white border border-gray-300 focus:border-gray-900 focus:ring-1 focus:ring-gray-900 focus:outline-none rounded-md px-3 py-2 text-sm text-gray-900 placeholder-gray-400" />
+                    className="w-full bg-white border border-gray-300 focus:border-gray-900 focus:ring-1 focus:ring-gray-900 focus:outline-none rounded-md px-3 py-2 text-sm text-gray-900 placeholder-gray-500" />
                   <p className="text-xs text-gray-500 mt-1">
                     {usabilityMode === 'prototype' ? 'Figma / ProtoPie などのプロトタイプ共有URLを入力してください' : '実際に操作するサービスのURL（メモ用）'}
                   </p>
@@ -417,7 +417,7 @@ export default function DesignPage() {
                         onChange={(e) => setTaskBulkText(e.target.value)}
                         placeholder={'タスクを1行ずつ入力してください\n\n例:\nログインする\n商品を検索して詳細ページを開く\nカートに追加して購入する'}
                         rows={6}
-                        className="w-full bg-white border border-gray-300 focus:border-gray-900 focus:ring-1 focus:ring-gray-900 focus:outline-none rounded-md px-3 py-2 text-sm text-gray-900 placeholder-gray-400 resize-none"
+                        className="w-full bg-white border border-gray-300 focus:border-gray-900 focus:ring-1 focus:ring-gray-900 focus:outline-none rounded-md px-3 py-2 text-sm text-gray-900 placeholder-gray-500 resize-none"
                       />
                       <p className="text-[10px] text-gray-500 mt-1">
                         1行 = 1タスク。空行は無視されます。
@@ -437,7 +437,7 @@ export default function DesignPage() {
                                 setTasks(next)
                               }}
                               placeholder={`タスク ${i + 1}`}
-                              className="flex-1 bg-white border border-gray-300 focus:border-gray-900 focus:ring-1 focus:ring-gray-900 focus:outline-none rounded-md px-3 py-2 text-sm text-gray-900 placeholder-gray-400" />
+                              className="flex-1 bg-white border border-gray-300 focus:border-gray-900 focus:ring-1 focus:ring-gray-900 focus:outline-none rounded-md px-3 py-2 text-sm text-gray-900 placeholder-gray-500" />
                             {tasks.length > 1 && (
                               <button type="button" onClick={() => setTasks(tasks.filter((_, j) => j !== i))}
                                 className="text-gray-300 hover:text-red-600 transition-colors p-1">

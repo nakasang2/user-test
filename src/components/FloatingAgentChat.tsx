@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef, useEffect, useCallback } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { Sparkles, X, Send, GripHorizontal } from 'lucide-react'
 
 interface Message {
@@ -35,13 +35,10 @@ export default function FloatingAgentChat({ sessionId, interviewId }: Props) {
   // ドラッグ状態（ref で管理して再レンダリングを抑制）
   const drag = useRef({ active: false, startX: 0, startY: 0, originX: 0, originY: 0 })
 
-  // 初期位置: 画面右上（右端から少し内側）
-  useEffect(() => {
-    setPos({
-      x: Math.max(0, window.innerWidth - PANEL_W - 24),
-      y: 80,
-    })
-  }, [])
+  // 初期位置は CSS（右上）に任せる。以前は effect で window の幅から
+  // 算出していたが、レンダー中の setState と判定されるうえ、
+  // pos が入るまでパネルが表示されない（open しても一瞬出ない）問題もあった。
+  // ドラッグされて初めて pos が入り、そこからは座標指定に切り替わる。
 
   // メッセージ追加時に一番下へスクロール
   useEffect(() => {
@@ -54,33 +51,44 @@ export default function FloatingAgentChat({ sessionId, interviewId }: Props) {
   }, [open])
 
   // ── ドラッグ（Pointer Events でマウス・タッチ両対応）──────────
-  const onPointerMove = useCallback((e: PointerEvent) => {
-    if (!drag.current.active) return
-    const newX = Math.max(0, Math.min(window.innerWidth - PANEL_W, drag.current.originX + e.clientX - drag.current.startX))
-    const newY = Math.max(0, Math.min(window.innerHeight - 48,     drag.current.originY + e.clientY - drag.current.startY))
-    setPos({ x: newX, y: newY })
-  }, [])
-
-  const onPointerUp = useCallback(() => {
-    drag.current.active = false
-    window.removeEventListener('pointermove', onPointerMove)
-    window.removeEventListener('pointerup', onPointerUp)
-  }, [onPointerMove])
+  // ハンドラはドラッグ開始時にその場で作る。useCallback で外に出すと
+  // pointerup 側が自分自身を参照することになり（解除のため）、
+  // 宣言前アクセスと依存関係の循環が生じるため。
+  const cleanupDragRef = useRef<(() => void) | null>(null)
 
   function onDragStart(e: React.PointerEvent) {
-    if (!pos) return
     e.preventDefault()
-    drag.current = { active: true, startX: e.clientX, startY: e.clientY, originX: pos.x, originY: pos.y }
-    window.addEventListener('pointermove', onPointerMove)
-    window.addEventListener('pointerup', onPointerUp)
+    // 初回は CSS 配置なので、実際の描画位置を測って基点にする
+    const panel = (e.currentTarget as HTMLElement).parentElement
+    const rect = panel?.getBoundingClientRect()
+    const originX = pos?.x ?? rect?.left ?? 0
+    const originY = pos?.y ?? rect?.top ?? 0
+    drag.current = { active: true, startX: e.clientX, startY: e.clientY, originX, originY }
+
+    const onMove = (ev: PointerEvent) => {
+      if (!drag.current.active) return
+      const newX = Math.max(0, Math.min(window.innerWidth - PANEL_W, drag.current.originX + ev.clientX - drag.current.startX))
+      const newY = Math.max(0, Math.min(window.innerHeight - 48,     drag.current.originY + ev.clientY - drag.current.startY))
+      setPos({ x: newX, y: newY })
+    }
+    const detach = () => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+      cleanupDragRef.current = null
+    }
+    const onUp = () => {
+      drag.current.active = false
+      detach()
+    }
+
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+    // アンマウント時に確実に解除できるよう覚えておく
+    cleanupDragRef.current = detach
   }
 
-  useEffect(() => {
-    return () => {
-      window.removeEventListener('pointermove', onPointerMove)
-      window.removeEventListener('pointerup', onPointerUp)
-    }
-  }, [onPointerMove, onPointerUp])
+  // ドラッグ中にアンマウントされてもリスナーを残さない
+  useEffect(() => () => { cleanupDragRef.current?.() }, [])
 
   // ── メッセージ送信 ────────────────────────────────────
   async function sendMessage() {
@@ -109,10 +117,12 @@ export default function FloatingAgentChat({ sessionId, interviewId }: Props) {
   return (
     <>
       {/* ドラッグ可能フローティングチャットウィンドウ */}
-      {open && pos && (
+      {open && (
         <div
-          className="fixed z-50 flex flex-col bg-white border border-gray-200 rounded-xl shadow-2xl overflow-hidden"
-          style={{ left: pos.x, top: pos.y, width: PANEL_W, height: PANEL_H }}
+          className={`fixed z-50 flex flex-col bg-white border border-gray-200 rounded-xl shadow-2xl overflow-hidden ${pos ? '' : 'right-6 top-20'}`}
+          style={pos
+            ? { left: pos.x, top: pos.y, width: PANEL_W, height: PANEL_H }
+            : { width: PANEL_W, height: PANEL_H }}
         >
           {/* ヘッダー（ドラッグハンドル） */}
           <div
@@ -174,7 +184,7 @@ export default function FloatingAgentChat({ sessionId, interviewId }: Props) {
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && sendMessage()}
               placeholder="質問を入力..."
-              className="flex-1 bg-white border border-gray-300 rounded-md px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:border-gray-900 focus:ring-1 focus:ring-gray-900 focus:outline-none"
+              className="flex-1 bg-white border border-gray-300 rounded-md px-3 py-2 text-sm text-gray-900 placeholder-gray-500 focus:border-gray-900 focus:ring-1 focus:ring-gray-900 focus:outline-none"
             />
             <button
               onClick={sendMessage}
