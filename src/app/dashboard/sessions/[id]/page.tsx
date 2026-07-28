@@ -530,18 +530,21 @@ export default function SessionDetail(props: { params: Promise<{ id: string }> }
             {/* 動画プレーヤー or ファイルピッカー */}
             {videoSrc ? (
               <div className="mb-4 bg-white border border-gray-200 rounded-lg overflow-hidden">
-                <div className="px-4 py-2.5 border-b border-gray-200 flex items-center justify-between">
-                  <p className="text-xs text-gray-500">
-                    グラフをクリック → その時刻にジャンプ · 再生位置がグラフに反映されます
-                  </p>
-                  <button
-                    onClick={clearLocalVideo}
-                    className="text-xs text-gray-500 hover:text-gray-900 transition-colors ml-4 flex-shrink-0 flex items-center gap-1"
-                  >
-                    <X className="w-3 h-3" strokeWidth={2} />
-                    別のファイル
-                  </button>
-                </div>
+                {/* 操作の説明はグラフ側に出しているので、ここでは繰り返さない。
+                    「別のファイル」はローカル読み込み中にしか意味がない
+                    （サーバー録画のときは押しても何も起きない）ため、その場合だけ出す。 */}
+                {localVideoUrl && (
+                  <div className="px-4 py-2 border-b border-gray-200 flex items-center justify-between">
+                    <p className="text-xs text-gray-500">読み込んだローカルファイルを再生中</p>
+                    <button
+                      onClick={clearLocalVideo}
+                      className="text-xs text-gray-500 hover:text-gray-900 transition-colors ml-4 flex-shrink-0 flex items-center gap-1"
+                    >
+                      <X className="w-3 h-3" strokeWidth={2} />
+                      別のファイル
+                    </button>
+                  </div>
+                )}
                 <video
                   ref={videoRef}
                   controls

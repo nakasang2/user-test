@@ -176,7 +176,7 @@ export default function EmotionChart({ emotions, currentTime, onSeek, variant = 
           <h3 className="text-sm font-semibold tracking-tight text-gray-900">表情推定値の推移（参考・時系列）</h3>
           {onSeek && (
             <span className="text-[10px] text-gray-500">
-              グラフをクリックすると動画がその時刻にジャンプします
+              クリックでその時刻にジャンプ／再生位置はグラフと会話ログに反映されます
             </span>
           )}
         </div>
