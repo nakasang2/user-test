@@ -93,12 +93,12 @@ export async function GET(_req: NextRequest, props: { params: Promise<{ id: stri
 
     // 3) 回答（スコアと自由回答）
     rows.push(['# 回答'])
-    rows.push(['participant', 'questionOrder', 'question', 'type', 'value', 'text'].map(q))
+    rows.push(['participant', 'questionOrder', 'question', 'type', 'value', 'text', 'followUpCount'].map(q))
     for (const s of interview.sessions) {
       for (const a of s.answers) {
         rows.push([
           q(name(s)), q(a.order), q(a.text), q(a.type),
-          q(a.valueNum ?? ''), q(a.valueText ?? ''),
+          q(a.valueNum ?? ''), q(a.valueText ?? ''), q(a.followUpCount ?? ''),
         ])
       }
     }

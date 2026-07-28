@@ -64,6 +64,7 @@ interface AnswerEntry {
   type: 'open' | 'rating' | 'nps'
   valueNum?: number | null
   valueText?: string | null
+  followUpCount?: number
   answeredAt: number
 }
 
@@ -583,13 +584,17 @@ export default function InterviewRoom({
     const qIdx = currentQuestionIndexRef.current
     const q = questions[qIdx]
     if (!q || q.type !== 'open') return
-    const said = conversationBufferRef.current
+    const utterances = conversationBufferRef.current
       .split('\n')
       .filter((l) => l.startsWith('参加者: '))
       .map((l) => l.slice('参加者: '.length).trim())
       .filter(Boolean)
-      .join(' / ')
+    const said = utterances.join(' / ')
     if (!said) return
+    // AI が実際に深掘りした回数。発話数から数えると、深掘りされたが
+    // 沈黙・手動スキップで答えなかった分が抜けるため、カウンタの値を使う。
+    // ※この関数は followUpCountRef のリセット前に呼ばれる前提（moveToNextPlannedQuestion 参照）
+    const followUpCount = followUpCountRef.current
     answersRef.current = [
       ...answersRef.current.filter((a) => a.order !== qIdx + 1),
       {
@@ -598,6 +603,7 @@ export default function InterviewRoom({
         text: q.text,
         type: 'open',
         valueText: said,
+        followUpCount,
         answeredAt: (Date.now() - startTimeRef.current) / 1000,
       },
     ]

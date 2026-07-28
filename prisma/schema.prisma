@@ -204,7 +204,9 @@ model Answer {
   text       String    // 質問文のスナップショット
   type       String    // open | rating | nps
   valueNum   Float?    // rating(1-5) / nps(0-10) の数値
-  valueText  String?   // 自由回答
+  valueText  String?   // 自由回答（深掘りのやり取りを含めた回答全体）
+  // AI が追加で掘り下げた回数。0 = 一度で答えきった。人によって変わるため比較の材料になる。
+  followUpCount Int?
   answeredAt Float?    // セッション開始からの経過秒
   createdAt  DateTime  @default(now())
 
