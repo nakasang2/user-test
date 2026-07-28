@@ -230,11 +230,12 @@ export default function SessionDetail(props: { params: Promise<{ id: string }> }
 
     // 測定結果（定量）を先頭に。表計算ソフトで成功率・スコアを扱えるようにする
     if (session.taskResults?.length) {
-      rows.push(['# タスク結果'], ['order', 'task', 'outcome', 'durationSec'])
+      rows.push(['# タスク結果'], ['order', 'task', 'outcome', 'durationSec', 'seq'])
       session.taskResults.forEach((t) => rows.push([
         String(t.order), q(t.text),
         t.outcome === 'completed' ? '達成' : 'できなかった',
         t.durationSec != null ? String(Math.round(t.durationSec)) : '',
+        t.seq != null ? String(t.seq) : '',
       ]))
       rows.push([])
     }

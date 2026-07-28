@@ -62,13 +62,14 @@ export async function GET(_req: NextRequest, props: { params: Promise<{ id: stri
 
     // 2) タスク結果（成功率・所要時間の集計用。1行1タスク×参加者）
     rows.push(['# タスク結果'])
-    rows.push(['participant', 'taskOrder', 'task', 'outcome', 'durationSec'].map(q))
+    rows.push(['participant', 'taskOrder', 'task', 'outcome', 'durationSec', 'seq'].map(q))
     for (const s of interview.sessions) {
       for (const t of s.taskResults) {
         rows.push([
           q(name(s)), q(t.order), q(t.text),
           q(t.outcome === 'completed' ? '達成' : 'できなかった'),
           q(t.durationSec != null ? Math.round(t.durationSec) : ''),
+          q(t.seq ?? ''),
         ])
       }
     }

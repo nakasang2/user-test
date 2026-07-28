@@ -26,13 +26,14 @@ export default function InterviewMetrics({ sessions }: { sessions: SessionLike[]
   const allAnswers = sessions.flatMap((s) => s.answers ?? [])
 
   // タスク単位に集約（order をキーに、文言は最初に出たものを採用）
-  const taskMap = new Map<number, { text: string; completed: number; total: number; durations: number[] }>()
+  const taskMap = new Map<number, { text: string; completed: number; total: number; durations: number[]; seqs: number[] }>()
   withResults.forEach((s) => {
     s.taskResults?.forEach((t) => {
-      const cur = taskMap.get(t.order) ?? { text: t.text, completed: 0, total: 0, durations: [] }
+      const cur = taskMap.get(t.order) ?? { text: t.text, completed: 0, total: 0, durations: [], seqs: [] }
       cur.total += 1
       if (t.outcome === 'completed') cur.completed += 1
       if (typeof t.durationSec === 'number' && t.durationSec > 0) cur.durations.push(t.durationSec)
+      if (typeof t.seq === 'number') cur.seqs.push(t.seq)
       taskMap.set(t.order, cur)
     })
   })
@@ -82,6 +83,11 @@ export default function InterviewMetrics({ sessions }: { sessions: SessionLike[]
                       <span className="font-semibold text-gray-900">{rate}%</span>
                       <span className="text-gray-400"> ({t.completed}/{t.total})</span>
                       {avgDur !== null && <span className="ml-2 text-gray-500">平均 {formatDuration(avgDur)}</span>}
+                      {t.seqs.length > 0 && (
+                        <span className="ml-2 text-gray-500" title="SEQ: 操作の簡単さの平均（7が最も簡単）">
+                          SEQ {(t.seqs.reduce((a, b) => a + b, 0) / t.seqs.length).toFixed(1)}
+                        </span>
+                      )}
                     </p>
                   </div>
                   <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">

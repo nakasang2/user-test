@@ -34,6 +34,7 @@ const patchSchema = z.object({
   description:      z.string().max(1000).nullable().optional(),
   stimulusUrl:      z.string().url().nullable().optional().or(z.literal('')),
   stimulusDuration: z.number().int().min(1).max(60).nullable().optional(),
+  seqEnabled:       z.boolean().optional(),
   // id 付き = 既存を更新（過去の回答との紐づけを保つ）、id 無し = 新規追加。
   // 送られてこなかった既存項目は削除される。
   questions: z.array(z.object({
@@ -69,7 +70,7 @@ export async function PATCH(req: NextRequest, props: { params: Promise<{ id: str
     if (!parsed.success) {
       return NextResponse.json({ error: parsed.error.issues[0]?.message ?? 'Invalid body' }, { status: 400 })
     }
-    const { title, description, stimulusUrl, stimulusDuration, questions, tasks } = parsed.data
+    const { title, description, stimulusUrl, stimulusDuration, seqEnabled, questions, tasks } = parsed.data
 
     // 他インタビューの id を送られても触らないよう、自分の配下だけを対象にする
     const ownQuestionIds = new Set(existing.questions.map((q) => q.id))
@@ -108,6 +109,7 @@ export async function PATCH(req: NextRequest, props: { params: Promise<{ id: str
     if (description !== undefined) data.description = description || null
     if (stimulusUrl !== undefined) data.stimulusUrl = stimulusUrl || null
     if (stimulusDuration !== undefined) data.stimulusDuration = stimulusDuration
+    if (seqEnabled !== undefined) data.seqEnabled = seqEnabled
     if (Object.keys(data).length > 0) {
       ops.push(prisma.interview.update({ where: { id }, data }))
     }

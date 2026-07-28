@@ -7,6 +7,7 @@ export interface TaskResultData {
   text: string
   outcome: string          // completed | gave_up
   durationSec?: number | null
+  seq?: number | null
 }
 
 export interface AnswerData {
@@ -93,6 +94,11 @@ export default function SessionMetrics({
                       <p className="text-[11px] text-gray-500 flex items-center gap-1 justify-end mt-0.5">
                         <Clock className="w-3 h-3" strokeWidth={2} />
                         {formatDuration(t.durationSec)}
+                      </p>
+                    )}
+                    {typeof t.seq === 'number' && (
+                      <p className="text-[11px] text-gray-500 mt-0.5" title="SEQ: 操作の簡単さ（1=とても難しい 〜 7=とても簡単）">
+                        SEQ {t.seq}<span className="text-gray-400"> / 7</span>
                       </p>
                     )}
                   </div>

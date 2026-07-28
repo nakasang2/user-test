@@ -10,6 +10,7 @@ export interface EditableInterview {
   title: string
   description: string | null
   type: string
+  seqEnabled?: boolean
   questions: { id: string; text: string; order: number; type: string }[]
   tasks?: { id: string; text: string; order: number }[]
 }
@@ -45,6 +46,7 @@ export default function EditInterviewModal({
   const [tasks, setTasks] = useState<Row[]>(
     (interview.tasks ?? []).map((t) => ({ id: t.id, text: t.text, type: 'open' }))
   )
+  const [seqEnabled, setSeqEnabled] = useState(interview.seqEnabled ?? false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -71,7 +73,10 @@ export default function EditInterviewModal({
             .filter((q) => q.text.trim())
             .map((q) => ({ id: q.id, text: q.text.trim(), type: q.type })),
           ...(isUsability
-            ? { tasks: tasks.filter((t) => t.text.trim()).map((t) => ({ id: t.id, text: t.text.trim() })) }
+            ? {
+                tasks: tasks.filter((t) => t.text.trim()).map((t) => ({ id: t.id, text: t.text.trim() })),
+                seqEnabled,
+              }
             : {}),
         }),
       })
@@ -135,6 +140,22 @@ export default function EditInterviewModal({
               className="w-full border border-gray-300 focus:border-gray-900 rounded-md px-3 py-2 text-sm focus:outline-none resize-y"
             />
           </div>
+
+          {isUsability && (
+            <label className="flex items-start gap-2 cursor-pointer bg-gray-50 border border-gray-200 rounded-md p-3">
+              <input
+                type="checkbox"
+                checked={seqEnabled}
+                onChange={(e) => setSeqEnabled(e.target.checked)}
+                className="mt-0.5"
+              />
+              <span className="text-xs text-gray-700 leading-relaxed">
+                <span className="font-medium text-gray-900">各タスクの直後に「どれくらい簡単でしたか」を聞く（SEQ）</span>
+                <br />
+                1〜7 の7段階。成功率だけでは見えない「できたけれど、つらかった」タスクを拾えます。
+              </span>
+            </label>
+          )}
 
           {isUsability && (
             <RowEditor

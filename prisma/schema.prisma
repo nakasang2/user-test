@@ -88,6 +88,9 @@ model Interview {
   // insightsCount = キャッシュ生成時点の done セッション数（増減で再生成を判定）。
   commonInsights   String?
   insightsCount    Int?
+  // 各タスク直後に SEQ（Single Ease Question: 1〜7 の主観的な易しさ）を聞くか。
+  // 既存調査の進行を変えないため既定は無効。
+  seqEnabled       Boolean       @default(false)
   createdAt        DateTime      @default(now())
   updatedAt        DateTime      @updatedAt
 }
@@ -130,6 +133,8 @@ model TaskResult {
   startedAt   Float?   // セッション開始からの経過秒
   endedAt     Float?
   durationSec Float?   // 所要時間（time on task）
+  // SEQ: タスク直後の「どれくらい簡単でしたか」1（とても難しい）〜7（とても簡単）
+  seq         Int?
   createdAt   DateTime @default(now())
 
   // 1セッション1タスク1行。並行リクエストによる重複行を DB 側で防ぐ

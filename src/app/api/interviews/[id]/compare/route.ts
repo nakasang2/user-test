@@ -19,6 +19,7 @@ export async function GET(req: NextRequest, props: { params: Promise<{ id: strin
       commonInsights: true,
       insightsCount: true,
       type: true,
+      seqEnabled: true,
       tasks: { orderBy: { order: 'asc' }, select: { id: true, text: true, order: true } },
       questions: { orderBy: { order: 'asc' }, select: { id: true, text: true, order: true, type: true } },
       // 一覧表示のため全ステータスのセッションを返す（分析・レーダーは done のみで算出）
@@ -32,7 +33,7 @@ export async function GET(req: NextRequest, props: { params: Promise<{ id: strin
           transcript: { select: { summary: true, themes: true, _count: { select: { segments: true } } } },
           emotions: { select: { happy: true, neutral: true, sad: true, surprised: true } },
           // 定量集計（タスク成功率・スコア平均）用
-          taskResults: { orderBy: { order: 'asc' }, select: { order: true, text: true, outcome: true, durationSec: true } },
+          taskResults: { orderBy: { order: 'asc' }, select: { order: true, text: true, outcome: true, durationSec: true, seq: true } },
           answers: { orderBy: { order: 'asc' }, select: { order: true, text: true, type: true, valueNum: true } },
           // 人が付けたタグの横断集計（アフィニティ分析）用
           highlights: { select: { tags: true } },
@@ -49,6 +50,7 @@ export async function GET(req: NextRequest, props: { params: Promise<{ id: strin
     title: interview.title,
     description: interview.description,
     type: interview.type,
+    seqEnabled: interview.seqEnabled,
     questions: interview.questions,
     tasks: interview.tasks,
   }
