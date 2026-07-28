@@ -508,12 +508,22 @@ export default function SessionDetail(props: { params: Promise<{ id: string }> }
           </div>
         )}
 
-        {/* ── 上部: 録画と表情グラフ（時間軸は横） ──
+        {/* 表情の総括指標（平均％・最頻表情・平均分布）。
+            セッション全体を要約する情報なので、会話ログより前・測定結果の隣に置く。
+            時系列グラフは下の録画ブロックにあるので、ここでは出さない（重複防止）。 */}
+        {session.emotions.length > 0 && (
+          <div className="mb-6">
+            <SectionLabel>表情エンゲージメント指標（参考）</SectionLabel>
+            <EmotionChart variant="summary" emotions={session.emotions} />
+          </div>
+        )}
+
+        {/* ── 録画と表情グラフ（時間軸は横） ──
             画面上部に固定し、実質的に動画のシークバーとして使う。
             会話ログは時間軸が縦なので、横に並べると向きが競合して見比べにくい。
             上下に分けることで両方を全幅で見せられる。 */}
         <div className="lg:sticky lg:top-0 z-20 bg-white lg:pt-3 lg:pb-4 mb-6 lg:border-b lg:border-gray-200">
-          <SectionLabel>録画と表情エンゲージメント指標（参考）</SectionLabel>
+          <SectionLabel>録画と表情の推移（クリックでその時刻へ）</SectionLabel>
           {/* 動画は左、時系列グラフは右。グラフに横幅を与えて山谷を読みやすくする */}
           <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,32rem)_1fr] gap-4 items-start">
 
@@ -577,7 +587,7 @@ export default function SessionDetail(props: { params: Promise<{ id: string }> }
 
             <div className="min-w-0">
             <EmotionChart
-              compact
+              variant="timeline"
               emotions={session.emotions}
               currentTime={videoSrc ? videoCurrentTime : undefined}
               onSeek={videoSrc ? (ts) => {
@@ -614,12 +624,6 @@ export default function SessionDetail(props: { params: Promise<{ id: string }> }
               />
             </div>
 
-            {/* 表情の詳しい指標（平均・最頻・注記）。上部は時系列だけに絞っているので、
-                じっくり見る内容はスクロール下に置く */}
-            <div className="mt-8">
-              <SectionLabel>表情の詳しい指標（参考）</SectionLabel>
-              <EmotionChart emotions={session.emotions} />
-            </div>
         </div>
       </div>
 
