@@ -4,7 +4,9 @@
 - `prisma db push` は directUrl（DB直結）経由で実行する。ビルド時の pooler 経由接続は P1017 で不安定（2026-06 に3回失敗して確立したルール）
 - push 前のローカルビルド検証（`npx tsc --noEmit` + `npx next build`）を省略しない
 - **本番URL**: https://user-test-nakasang2s-projects.vercel.app/ （Vercel: user-test / GitHub: nakasang2/user-test → main が本番）。反映確認はここで行う。※ `user-test.vercel.app`（末尾に -projects なし）は別の create-react-app 製サイトで無関係
-- このセッション種別（sandbox）からは `git push` / `next build`（Google Fonts遮断）/ Vercel URLへの画面遷移 が不可。push・merge はユーザーのローカル端末、本番確認は preview ブラウザの `fetch`（外部到達可）で行う
+- セッション種別によって実行できることが違う。**開始時に一度試して確かめる**（2026-07-28 のローカル実行では `git push` / `next build` / `gh pr create` すべて可能だった。過去の sandbox セッションでは不可だった）
+- `gh pr merge` は安全分類器にブロックされる（本番に影響する操作のため）。**PR 作成までを Claude が行い、マージはユーザーが GitHub で実施する**
+- **マージ待ちの PR がある間に追加コミットを push すると、先にマージされて取り残される**。ユーザーには「全部 push し終わった」と明言してからマージを依頼する（2026-07-28 に PR #8/#15/#17/#18/#19/#20/#21 で7回発生）
 
 ## 並行セッションの担当
 - （現在なし）
