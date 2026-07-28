@@ -91,6 +91,79 @@ Analyze this interview and return a JSON object.`,
   }
 }
 
+/**
+ * 自由回答ごとに、評価対象への肯定/否定を判定する。
+ *
+ * 文字起こし全体の分析とは別呼び出しにしている。出力が回答数に比例するので
+ * 同じ呼び出しに混ぜると上限超過で要約まで壊れるリスクがあるため（過去に発生）。
+ * ここが失敗しても判定が付かないだけで、他の分析は無傷。
+ *
+ * 返すのは入力 index → 判定 のマップ。範囲外の index は捨てる。
+ */
+export async function classifyAnswerSentiments(
+  items: { question: string; answer: string }[]
+): Promise<Record<string, 'positive' | 'neutral' | 'negative'>> {
+  if (items.length === 0) return {}
+
+  // 1リクエストで判定する上限。検証の境界もこの件数に揃える（送っていない index を弾くため）
+  const MAX_ITEMS = 100
+  const sent = items.slice(0, MAX_ITEMS)
+  const listed = sent
+    .map((it, i) => `#${i}\nQ: ${clampText(it.question, LIMITS.question)}\nA: ${clampText(it.answer, 2000)}`)
+    .join('\n\n')
+
+  const response = await getOpenAI().chat.completions.create({
+    model: 'gpt-4o',
+    // 整形 JSON では1件あたり 20 トークン強かかる。上限の 100 件でも切れないよう余裕を取る。
+    // 途中で切れると JSON が壊れ、判定が丸ごと失われるため。
+    max_tokens: 8192,
+    response_format: { type: 'json_object' },
+    messages: [
+      {
+        role: 'system',
+        content: `You are an expert UX researcher classifying interview answers.
+For EACH answer, judge the participant's stance toward the product or experience being discussed
+— not their general mood. Return JSON: {"results": [{"i": <index>, "s": "positive"|"neutral"|"negative"}]}
+- "positive": satisfied, found it easy, praised something
+- "negative": frustrated, confused, complained, found it hard
+- "neutral": factual or descriptive with no clear evaluation
+If an answer contains both praise and complaint, judge by which one dominates the participant's overall stance.
+Return exactly one entry per input index. No other keys, no explanations.
+${UNTRUSTED_DATA_GUARD}`,
+      },
+      { role: 'user', content: wrapUntrusted(listed, LIMITS.transcript) },
+    ],
+  })
+
+  if (response.choices[0].finish_reason === 'length') {
+    console.error('[classifyAnswerSentiments] 出力が max_tokens で打ち切られました')
+  }
+
+  // パース失敗を「判定なし」と同一視すると、呼び出し側が既存の判定を
+  // すべて null で上書きしてしまう。失敗は失敗として投げ、呼び出し側に保持させる。
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(response.choices[0].message.content ?? '')
+  } catch {
+    throw new Error('[classifyAnswerSentiments] 応答が JSON として読めませんでした')
+  }
+  const arr = (parsed as { results?: unknown })?.results
+  if (!Array.isArray(arr)) {
+    throw new Error('[classifyAnswerSentiments] 応答に results 配列がありません')
+  }
+
+  const out: Record<string, 'positive' | 'neutral' | 'negative'> = {}
+  for (const item of arr.slice(0, MAX_ITEMS * 2)) {
+    const idx = typeof item?.i === 'number' ? item.i : Number(item?.i)
+    const s = normalizeSentiment(item?.s)
+    // AI が返した添字は信用せず、実際に送った範囲内かを検証する
+    if (Number.isInteger(idx) && idx >= 0 && idx < sent.length && s) {
+      out[String(idx)] = s
+    }
+  }
+  return out
+}
+
 export async function chatWithAgent(
   messages: Array<{ role: 'user' | 'assistant'; content: string }>,
   context: string

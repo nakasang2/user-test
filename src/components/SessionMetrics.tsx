@@ -20,6 +20,8 @@ export interface AnswerData {
   valueText?: string | null
   /** AI が追加で掘り下げた回数（自由回答のみ） */
   followUpCount?: number | null
+  /** 自由回答に対する AI の肯定/否定判定 */
+  sentiment?: string | null
 }
 
 /** 秒を「1分23秒」形式に */
