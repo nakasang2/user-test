@@ -50,8 +50,10 @@ export async function POST(_req: NextRequest, props: { params: Promise<{ id: str
 
     const transcript = await prisma.transcript.upsert({
       where: { sessionId: id },
-      create: { sessionId: id, fullText, summary, themes },
-      update: { fullText, summary, themes },
+      // 全体トーンは発言単位の判定と一緒に /process が算出する。
+      // 再文字起こしでは中身が変わるため、古い判定を残さず必ずクリアする。
+      create: { sessionId: id, fullText, summary, themes, sentiment: null, sentimentNote: null },
+      update: { fullText, summary, themes, sentiment: null, sentimentNote: null },
     })
 
     // System セグメント（タスク達成記録など）は音声として発話されていないため、

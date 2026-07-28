@@ -1,6 +1,8 @@
 'use client'
 
-import { FileText } from 'lucide-react'
+import { useState } from 'react'
+import { FileText, Search, X, Highlighter } from 'lucide-react'
+import { normalizeSentiment } from '@/lib/sentiment'
 
 interface Segment {
   id: string
@@ -15,6 +17,8 @@ interface Transcript {
   fullText: string
   summary: string | null
   themes: string | null
+  sentiment?: string | null       // インタビュー全体のトーン
+  sentimentNote?: string | null   // その根拠の短い説明
   segments: Segment[]
 }
 
@@ -27,9 +31,16 @@ interface Question {
 interface Props {
   transcript: Transcript | null
   questions: Question[]
+  /** 発言をハイライトに追加する。未指定なら「引用」ボタンを出さない（共有ページなど） */
+  onHighlight?: (seg: { id: string; text: string; startTime: number }) => void
+  /** 既にハイライト済みの発言 id（ボタンの状態表示に使う） */
+  highlightedSegmentIds?: Set<string>
 }
 
-export default function TranscriptView({ transcript, questions }: Props) {
+export default function TranscriptView({ transcript, questions, onHighlight, highlightedSegmentIds }: Props) {
+  // 検索語（フック規則のため早期 return より前に宣言する）
+  const [query, setQuery] = useState('')
+
   if (!transcript) {
     return (
       <div className="p-8 text-center bg-white border border-gray-200 rounded-lg">
@@ -46,11 +57,40 @@ export default function TranscriptView({ transcript, questions }: Props) {
     return `${m}:${String(s).padStart(2, '0')}`
   }
 
-  const sentimentColor = (s: string | null) => {
-    if (!s) return 'text-gray-500'
-    if (s === 'positive') return 'text-emerald-700'
-    if (s === 'negative') return 'text-red-700'
-    return 'text-gray-500'
+  // 過去データには "positive - the participant..." のような説明付きの値が入っているため、
+  // 完全一致ではなく正規化してから判定する（表示が英語の生文字列になるのを防ぐ）。
+  const normalize = normalizeSentiment
+
+  const sentimentChip = (s: string | null) => {
+    const v = normalize(s)
+    if (v === 'positive') return 'bg-emerald-50 text-emerald-700 border-emerald-200'
+    if (v === 'negative') return 'bg-red-50 text-red-700 border-red-200'
+    return 'bg-gray-100 text-gray-600 border-gray-200'
+  }
+
+  // 検索: 一致した発言だけに絞り込み、一致部分を黄色でハイライトする
+  const q = query.trim().toLowerCase()
+  const matchedSegments = q
+    ? transcript.segments.filter((s) => s.text.toLowerCase().includes(q))
+    : transcript.segments
+
+  const highlight = (text: string) => {
+    if (!q) return text
+    const parts: React.ReactNode[] = []
+    const lower = text.toLowerCase()
+    let from = 0
+    for (;;) {
+      const at = lower.indexOf(q, from)
+      if (at === -1) { parts.push(text.slice(from)); break }
+      if (at > from) parts.push(text.slice(from, at))
+      parts.push(
+        <mark key={`${at}`} className="bg-yellow-200 text-gray-900 rounded-sm px-0.5">
+          {text.slice(at, at + q.length)}
+        </mark>
+      )
+      from = at + q.length
+    }
+    return parts
   }
 
   const speakerLabel = (speaker: string) => {
@@ -61,11 +101,12 @@ export default function TranscriptView({ transcript, questions }: Props) {
     return speaker
   }
 
-  const sentimentLabel = (s: string | null) => {
-    if (s === 'positive') return 'ポジティブ'
-    if (s === 'negative') return 'ネガティブ'
-    if (s === 'neutral') return 'ニュートラル'
-    return s
+  const sentimentLabel = (s: string | null | undefined) => {
+    const v = normalize(s)
+    if (v === 'positive') return 'ポジティブ'
+    if (v === 'negative') return 'ネガティブ'
+    if (v === 'neutral') return 'ニュートラル'
+    return null   // 判定できない値は表示しない（英語の生文字列を出さない）
   }
 
   return (
@@ -76,6 +117,16 @@ export default function TranscriptView({ transcript, questions }: Props) {
             <div className="bg-white border border-gray-200 rounded-lg p-4">
               <div className="text-xs font-medium uppercase tracking-wide text-gray-500 mb-2">AI サマリー</div>
               <p className="text-sm text-gray-700 leading-relaxed">{transcript.summary}</p>
+              {sentimentLabel(transcript.sentiment) && (
+                <div className="mt-3 pt-3 border-t border-gray-100 flex items-start gap-2">
+                  <span className={`text-[11px] px-1.5 py-0.5 rounded border flex-shrink-0 ${sentimentChip(transcript.sentiment ?? null)}`}>
+                    全体: {sentimentLabel(transcript.sentiment)}
+                  </span>
+                  {transcript.sentimentNote && (
+                    <span className="text-xs text-gray-500 leading-snug">{transcript.sentimentNote}</span>
+                  )}
+                </div>
+              )}
             </div>
           )}
           {transcript.themes && (
@@ -94,9 +145,38 @@ export default function TranscriptView({ transcript, questions }: Props) {
       )}
 
       <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
-        <div className="px-4 py-3 border-b border-gray-200 flex items-center justify-between">
-          <h3 className="text-sm font-semibold tracking-tight text-gray-900">会話ログ</h3>
-          <span className="text-xs text-gray-500">{transcript.segments.length} セグメント</span>
+        <div className="px-4 py-3 border-b border-gray-200 space-y-2.5">
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-semibold tracking-tight text-gray-900">会話ログ</h3>
+            <span className="text-xs text-gray-500">
+              {q
+                ? <><span className="font-medium text-gray-900">{matchedSegments.length}</span> 件が一致 / 全 {transcript.segments.length}</>
+                : <>{transcript.segments.length} セグメント</>}
+            </span>
+          </div>
+          {/* 発言内の全文検索。セグメント未分割（全文のみ）のときは絞り込めないので出さない */}
+          {transcript.segments.length > 0 && (
+          <div className="relative">
+            <Search className="w-3.5 h-3.5 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" strokeWidth={2} />
+            <input
+              type="search"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="発言を検索（例: 価格、わかりにくい）"
+              aria-label="会話ログを検索"
+              className="w-full pl-8 pr-8 py-1.5 text-xs border border-gray-300 rounded-md focus:outline-none focus:border-gray-500 placeholder:text-gray-400"
+            />
+            {query && (
+              <button
+                onClick={() => setQuery('')}
+                aria-label="検索をクリア"
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-700"
+              >
+                <X className="w-3.5 h-3.5" strokeWidth={2} />
+              </button>
+            )}
+          </div>
+          )}
         </div>
         <div className="divide-y divide-gray-200">
           {transcript.segments.length === 0 ? (
@@ -105,8 +185,15 @@ export default function TranscriptView({ transcript, questions }: Props) {
                 {transcript.fullText}
               </pre>
             </div>
+          ) : matchedSegments.length === 0 ? (
+            <div className="p-8 text-center">
+              <p className="text-sm text-gray-700 mb-1">「{query}」に一致する発言はありません</p>
+              <button onClick={() => setQuery('')} className="text-xs text-gray-500 hover:text-gray-900 underline underline-offset-2">
+                検索をクリア
+              </button>
+            </div>
           ) : (
-            transcript.segments.map((seg) => (
+            matchedSegments.map((seg) => (
               <div
                 key={seg.id}
                 className={`p-4 flex gap-4 ${seg.speaker === 'Interviewer' ? 'bg-white' : 'bg-gray-50'}`}
@@ -121,9 +208,26 @@ export default function TranscriptView({ transcript, questions }: Props) {
                   <div className="text-xs text-gray-500">{formatTime(seg.startTime)}</div>
                 </div>
                 <div className="flex-1">
-                  <p className="text-sm text-gray-700 leading-relaxed">{seg.text}</p>
-                  {seg.sentiment && (
-                    <span className={`text-xs mt-1 inline-block ${sentimentColor(seg.sentiment)}`}>
+                  <div className="flex items-start gap-2">
+                    <p className="text-sm text-gray-700 leading-relaxed flex-1">{highlight(seg.text)}</p>
+                    {onHighlight && (
+                      highlightedSegmentIds?.has(seg.id) ? (
+                        <span className="flex-shrink-0 inline-flex items-center gap-1 text-[11px] text-yellow-700 bg-yellow-50 border border-yellow-200 px-1.5 py-0.5 rounded">
+                          <Highlighter className="w-3 h-3" strokeWidth={2} />引用済み
+                        </span>
+                      ) : (
+                        <button
+                          onClick={() => onHighlight({ id: seg.id, text: seg.text, startTime: seg.startTime })}
+                          title="この発言をハイライトに追加"
+                          className="flex-shrink-0 inline-flex items-center gap-1 text-[11px] text-gray-500 hover:text-gray-900 border border-gray-200 hover:border-gray-400 px-1.5 py-0.5 rounded transition-colors"
+                        >
+                          <Highlighter className="w-3 h-3" strokeWidth={2} />引用
+                        </button>
+                      )
+                    )}
+                  </div>
+                  {sentimentLabel(seg.sentiment) && (
+                    <span className={`text-[11px] mt-1.5 inline-block px-1.5 py-0.5 rounded border ${sentimentChip(seg.sentiment)}`}>
                       {sentimentLabel(seg.sentiment)}
                     </span>
                   )}

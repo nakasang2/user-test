@@ -32,6 +32,8 @@ export async function GET(req: NextRequest, props: { params: Promise<{ id: strin
           // 定量集計（タスク成功率・スコア平均）用
           taskResults: { orderBy: { order: 'asc' }, select: { order: true, text: true, outcome: true, durationSec: true } },
           answers: { orderBy: { order: 'asc' }, select: { order: true, text: true, type: true, valueNum: true } },
+          // 人が付けたタグの横断集計（アフィニティ分析）用
+          highlights: { select: { tags: true } },
         },
       },
     },
@@ -78,6 +80,7 @@ export async function GET(req: NextRequest, props: { params: Promise<{ id: strin
       segmentCount: s.transcript?._count.segments ?? 0,
       taskResults: s.taskResults,
       answers: s.answers,
+      highlightTags: s.highlights.flatMap((h) => h.tags),
     }
   })
 

@@ -7,6 +7,7 @@ import { Search, X } from 'lucide-react'
 import FloatingAgentChat from '@/components/FloatingAgentChat'
 import StatusBadge from '@/components/StatusBadge'
 import InterviewMetrics from '@/components/InterviewMetrics'
+import TranscriptSearch from '@/components/TranscriptSearch'
 import { type TaskResultData, type AnswerData } from '@/components/SessionMetrics'
 
 type SortKey = 'date-desc' | 'date-asc' | 'name-asc' | 'status'
@@ -33,6 +34,7 @@ interface SessionStat {
   segmentCount: number
   taskResults?: TaskResultData[]
   answers?: AnswerData[]
+  highlightTags?: string[]
 }
 
 interface CompareData {
@@ -141,6 +143,17 @@ export default function InterviewComparePage(props: { params: Promise<{ id: stri
   })
   const sortedThemes = Object.entries(themeCount).sort(([, a], [, b]) => b - a)
 
+  // ハイライトのタグ頻度（人が付けた記録なので、AI 分析未完了のセッションも対象にする）
+  const highlightTagCount: Record<string, number> = {}
+  sessions.forEach((s) => {
+    s.highlightTags?.forEach((t) => {
+      const key = t.trim()
+      if (key) highlightTagCount[key] = (highlightTagCount[key] ?? 0) + 1
+    })
+  })
+  const sortedHighlightTags = Object.entries(highlightTagCount).sort(([, a], [, b]) => b - a)
+  const highlightTagTotal = sortedHighlightTags.reduce((sum, [, c]) => sum + c, 0)
+
   return (
     <div className="min-h-screen bg-white text-gray-900">
       <nav className="border-b border-gray-200 px-6 py-3 flex items-center justify-between">
@@ -224,6 +237,27 @@ export default function InterviewComparePage(props: { params: Promise<{ id: stri
 
         {/* 定量集計（タスク成功率・スコア）。AI 分析の完了を待たずに出せるので done で絞らない */}
         <InterviewMetrics sessions={sessions} />
+
+        {/* 発言の横断検索 */}
+        <TranscriptSearch interviewId={interview.id} />
+
+        {/* リサーチャーが付けたタグの頻度（AI 生成のテーマとは別。人の解釈の集計） */}
+        {sortedHighlightTags.length > 0 && (
+          <div className="bg-white border border-gray-200 rounded-lg p-6">
+            <h2 className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">
+              ハイライトのタグ（{highlightTagTotal}件）
+            </h2>
+            <p className="text-[11px] text-gray-400 mb-4">リサーチャーが引用に付けたタグの出現回数</p>
+            <div className="flex flex-wrap gap-2">
+              {sortedHighlightTags.map(([tag, count]) => (
+                <span key={tag} className="inline-flex items-center gap-1.5 bg-yellow-50 border border-yellow-200 text-gray-800 px-2.5 py-1 rounded-md text-xs">
+                  {tag}
+                  <span className="text-[10px] font-semibold text-yellow-800 bg-yellow-100 px-1.5 rounded-full">{count}</span>
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
 
         {doneSessions.length === 0 ? null : (
           <>

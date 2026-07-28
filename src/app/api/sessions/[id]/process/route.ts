@@ -45,17 +45,22 @@ export async function POST(req: NextRequest, props: { params: Promise<{ id: stri
   const questions = session.interview.questions.map((q) => q.text)
   // 発言の時刻 [mm:ss] を含むトランスクリプトを組み立て、AI 要約が根拠を引用できるようにする
   const fmt = (sec: number) => `${Math.floor(sec / 60)}:${String(Math.floor(sec % 60)).padStart(2, '0')}`
+  // 行番号 #i を付けて渡し、発言単位の sentiment を index で対応づけられるようにする
   const timestampedTranscript = (segments as { speaker: string; text: string; start: number }[])
-    .map((s) => `[${fmt(s.start ?? 0)}] ${s.speaker}: ${s.text}`)
+    .map((s, i) => `#${i} [${fmt(s.start ?? 0)}] ${s.speaker}: ${s.text}`)
     .join('\n') || transcriptText
   let summary = ''
   let themes = ''
-  let sentiment = 'neutral'
+  let sentiment: string | null = null
+  let sentimentNote = ''
+  let segmentSentiments: Record<string, string> = {}
   try {
     const result = await analyzeTranscript(timestampedTranscript, questions)
     summary = result.summary
     themes = result.themes
     sentiment = result.sentiment
+    sentimentNote = result.sentimentNote
+    segmentSentiments = result.segmentSentiments
   } catch (err) {
     console.error('analyzeTranscript failed:', err)
     summary = '分析に失敗しました。'
@@ -65,19 +70,26 @@ export async function POST(req: NextRequest, props: { params: Promise<{ id: stri
   // セグメントを常に「全置換」して最終結果（sentiment 付き）を確実に反映する。
   const transcript = await prisma.transcript.upsert({
     where: { sessionId: id },
-    create: { sessionId: id, fullText: transcriptText, summary, themes },
-    update: { fullText: transcriptText, summary, themes },
+    create: { sessionId: id, fullText: transcriptText, summary, themes, sentiment, sentimentNote },
+    update: { fullText: transcriptText, summary, themes, sentiment, sentimentNote },
   })
   await prisma.$transaction([
     prisma.transcriptSegment.deleteMany({ where: { transcriptId: transcript.id } }),
     prisma.transcriptSegment.createMany({
-      data: (segments as { speaker: string; text: string; start: number; end: number; sentiment?: string }[]).map((seg) => ({
+      // sentiment は AI が「その発言だけ」を見て判定した結果のみを入れる。
+      // 判定が無い行は null のままにし、全体の値をコピーして埋めない（実態のない判定を作らない）。
+      // AI インタビュアーとタスク記録には付けない: モデルが index をずらして返しても
+      // それらに感情バッジが出る事故を防ぐ。逆に Whisper 再文字起こし後は話者が
+      // 'Unknown'（話者分離なし）になるため、許可リストではなく除外リストで判定する。
+      data: (segments as { speaker: string; text: string; start: number; end: number }[]).map((seg, i) => ({
         transcriptId: transcript.id,
         speaker: seg.speaker,
         text: seg.text,
         startTime: seg.start,
         endTime: seg.end,
-        sentiment: seg.sentiment ?? sentiment,
+        sentiment: seg.speaker === 'Interviewer' || seg.speaker === 'System'
+          ? null
+          : (segmentSentiments[String(i)] ?? null),
       })),
     }),
   ])

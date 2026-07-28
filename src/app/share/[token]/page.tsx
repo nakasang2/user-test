@@ -31,6 +31,8 @@ export default async function SharePage(props: { params: Promise<{ token: string
           fullText: true,
           summary: true,
           themes: true,
+          sentiment: true,
+          sentimentNote: true,
           segments: {
             orderBy: { startTime: 'asc' },
             select: { id: true, speaker: true, text: true, startTime: true, endTime: true, sentiment: true },
