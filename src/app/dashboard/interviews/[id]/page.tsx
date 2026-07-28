@@ -465,7 +465,7 @@ export default function InterviewComparePage(props: { params: Promise<{ id: stri
       {editing && (
         <EditInterviewModal
           interview={interview}
-          sessionCount={sessions.length}
+          sessionCount={realSessions.length}
           onClose={() => setEditing(false)}
           onSaved={() => { setEditing(false); window.location.reload() }}
         />
