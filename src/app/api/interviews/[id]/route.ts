@@ -50,7 +50,8 @@ const patchSchema = z.object({
   screeners: z.array(z.object({
     id:         z.string().optional(),
     label:      z.string().min(1).max(500),
-    options:    z.array(z.string().min(1).max(200)).max(20),
+    // 選択肢ゼロだと被験者が回答できず、必須なら誰も参加できなくなるため最低1つ必須
+    options:    z.array(z.string().min(1).max(200)).min(1, '選択肢を1つ以上入力してください').max(20),
     disqualify: z.array(z.string().max(200)).max(20).default([]),
     required:   z.boolean().default(true),
   })).max(20).optional(),

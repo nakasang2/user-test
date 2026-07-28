@@ -901,6 +901,12 @@ export default function InterviewRoom({
   async function endInterview() {
     if (endedRef.current) return  // 二重実行防止（結果・録画の二重送信を防ぐ）
     endedRef.current = true
+    // SEQ 入力待ちのまま終了された場合、押した達成/断念を取りこぼさない（評価なしで確定）
+    if (awaitingSeq) {
+      const pending = awaitingSeq
+      setAwaitingSeq(null)
+      recordTaskOutcome(pending)
+    }
     recordOpenAnswerIfAny()  // 回答途中で終了した場合も取りこぼさない
     saveResults()            // 測定結果の最終フラッシュ（送信失敗していた分の再送を兼ねる）
     // ウィジェットを閉じる（BroadcastChannel 経由 + 直接 close）

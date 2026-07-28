@@ -301,6 +301,11 @@ function WidgetContent() {
 
   /* ── セッション終了 ───────────────────────────────────────── */
   async function endSession() {
+    // SEQ 入力待ちのまま終了された場合、押した達成/断念を取りこぼさない（評価なしで確定）
+    if (awaitingSeq) {
+      channelRef.current?.postMessage({ type: 'task_outcome', outcome: awaitingSeq })
+      setAwaitingSeq(null)
+    }
     focusInterviewPage()
     await stopAndSendRecording()
     channelRef.current?.postMessage({ type: 'end_session' })

@@ -3,6 +3,7 @@
 import { CheckCircle2, XCircle, Clock, Star } from 'lucide-react'
 
 export interface TaskResultData {
+  taskId?: string | null
   order: number
   text: string
   outcome: string          // completed | gave_up
@@ -11,6 +12,7 @@ export interface TaskResultData {
 }
 
 export interface AnswerData {
+  questionId?: string | null
   order: number
   text: string
   type: string             // open | rating | nps

@@ -78,6 +78,8 @@ export default function EditInterviewModal({
 
   async function save() {
     if (!title.trim()) { setError('タイトルを入力してください'); return }
+    const badScreener = screeners.find((x) => x.label.trim() && !x.optionsText.split('\n').some((o) => o.trim()))
+    if (badScreener) { setError(`事前質問「${badScreener.label.trim()}」に選択肢を入力してください`); return }
     setSaving(true)
     setError(null)
     try {
@@ -91,7 +93,8 @@ export default function EditInterviewModal({
             .filter((q) => q.text.trim())
             .map((q) => ({ id: q.id, text: q.text.trim(), type: q.type })),
           screeners: screeners
-            .filter((x) => x.label.trim())
+            // 選択肢が無い設問は保存しない（被験者が回答できず参加不能になるため）
+            .filter((x) => x.label.trim() && x.optionsText.split('\n').some((o) => o.trim()))
             .map((x) => ({
               id: x.id,
               label: x.label.trim(),
@@ -117,9 +120,11 @@ export default function EditInterviewModal({
     }
   }
 
+  // 削除扱いになる件数。行ごと消した場合に加え、文言を空にした行も保存時に落とされるため数える
+  const isKept = (rows: Row[], id: string) => rows.some((r) => r.id === id && r.text.trim())
   const removedCount =
-    interview.questions.filter((q) => !questions.some((r) => r.id === q.id)).length +
-    (interview.tasks ?? []).filter((t) => !tasks.some((r) => r.id === t.id)).length
+    interview.questions.filter((q) => !isKept(questions, q.id)).length +
+    (interview.tasks ?? []).filter((t) => !isKept(tasks, t.id)).length
 
   return (
     <div className="fixed inset-0 z-50 bg-gray-950/50 flex items-center justify-center p-4 overflow-y-auto">
@@ -142,7 +147,7 @@ export default function EditInterviewModal({
               <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" strokeWidth={2} />
               <div className="leading-relaxed">
                 このテストはすでに <strong>{sessionCount}件</strong> 実施済みです。実施済みの回答は残りますが、
-                質問やタスクを変えると<strong>変更前後で集計が混ざります</strong>。文言の修正にとどめるのが安全です。
+                質問やタスクの<strong>追加・削除・並べ替え</strong>は、変更後に実施した分から集計が分かれます（過去の結果は元の項目のまま残ります）。文言の修正だけなら影響ありません。
               </div>
             </div>
           )}

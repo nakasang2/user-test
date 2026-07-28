@@ -25,29 +25,37 @@ export default function InterviewMetrics({ sessions }: { sessions: SessionLike[]
   const withResults = sessions.filter((s) => (s.taskResults?.length ?? 0) > 0)
   const allAnswers = sessions.flatMap((s) => s.answers ?? [])
 
-  // タスク単位に集約（order をキーに、文言は最初に出たものを採用）
-  const taskMap = new Map<number, { text: string; completed: number; total: number; durations: number[]; seqs: number[] }>()
+  // タスク単位に集約。
+  // キーは order ではなく taskId（無ければ文言）にする。order は調査を編集して
+  // 並べ替えるたびに振り直されるため、order でまとめると別タスクの結果が合算されてしまう。
+  const taskKey = (t: TaskResultData) => t.taskId ?? `text:${t.text}`
+  const taskMap = new Map<string, { text: string; order: number; completed: number; total: number; durations: number[]; seqs: number[] }>()
   withResults.forEach((s) => {
     s.taskResults?.forEach((t) => {
-      const cur = taskMap.get(t.order) ?? { text: t.text, completed: 0, total: 0, durations: [], seqs: [] }
+      const key = taskKey(t)
+      const cur = taskMap.get(key) ?? { text: t.text, order: t.order, completed: 0, total: 0, durations: [], seqs: [] }
       cur.total += 1
+      cur.order = Math.min(cur.order, t.order)  // 表示順は最小の order を採用
       if (t.outcome === 'completed') cur.completed += 1
       if (typeof t.durationSec === 'number' && t.durationSec > 0) cur.durations.push(t.durationSec)
       if (typeof t.seq === 'number') cur.seqs.push(t.seq)
-      taskMap.set(t.order, cur)
+      taskMap.set(key, cur)
     })
   })
-  const taskRows = [...taskMap.entries()].sort(([a], [b]) => a - b)
+  const taskRows = [...taskMap.entries()].sort(([, a], [, b]) => a.order - b.order)
 
   // スコア質問を order でグループ化
-  const scoreMap = new Map<number, { text: string; type: string; values: number[] }>()
+  // スコア質問も同じ理由で questionId（無ければ文言）をキーにする
+  const scoreMap = new Map<string, { text: string; order: number; type: string; values: number[] }>()
   allAnswers.forEach((a) => {
     if ((a.type !== 'rating' && a.type !== 'nps') || typeof a.valueNum !== 'number') return
-    const cur = scoreMap.get(a.order) ?? { text: a.text, type: a.type, values: [] }
+    const key = a.questionId ?? `text:${a.text}`
+    const cur = scoreMap.get(key) ?? { text: a.text, order: a.order, type: a.type, values: [] }
     cur.values.push(a.valueNum)
-    scoreMap.set(a.order, cur)
+    cur.order = Math.min(cur.order, a.order)
+    scoreMap.set(key, cur)
   })
-  const scoreRows = [...scoreMap.entries()].sort(([a], [b]) => a - b)
+  const scoreRows = [...scoreMap.entries()].sort(([, a], [, b]) => a.order - b.order)
 
   if (taskRows.length === 0 && scoreRows.length === 0) return null
 
@@ -66,7 +74,7 @@ export default function InterviewMetrics({ sessions }: { sessions: SessionLike[]
             </p>
           </div>
           <div className="space-y-3">
-            {taskRows.map(([order, t]) => {
+            {taskRows.map(([key, t]) => {
               const rate = Math.round((t.completed / t.total) * 100)
               const avgDur = t.durations.length
                 ? t.durations.reduce((a, b) => a + b, 0) / t.durations.length
@@ -74,10 +82,10 @@ export default function InterviewMetrics({ sessions }: { sessions: SessionLike[]
               // 一般に成功率 70% 未満は要改善のシグナルとして扱われる
               const tone = rate >= 90 ? 'bg-emerald-500' : rate >= 70 ? 'bg-amber-500' : 'bg-red-500'
               return (
-                <div key={order}>
+                <div key={key}>
                   <div className="flex items-baseline justify-between gap-3 mb-1">
                     <p className="text-sm text-gray-900 leading-snug min-w-0">
-                      <span className="text-gray-400 mr-1.5">{order}.</span>{t.text}
+                      <span className="text-gray-400 mr-1.5">{t.order}.</span>{t.text}
                     </p>
                     <p className="text-xs text-gray-600 flex-shrink-0 tabular-nums">
                       <span className="font-semibold text-gray-900">{rate}%</span>
@@ -104,13 +112,13 @@ export default function InterviewMetrics({ sessions }: { sessions: SessionLike[]
         <div className="bg-white border border-gray-200 rounded-xl p-5">
           <h2 className="text-sm font-semibold text-gray-900 mb-4">評価スコア</h2>
           <div className="space-y-3">
-            {scoreRows.map(([order, s]) => {
+            {scoreRows.map(([key, s]) => {
               const mean = s.values.reduce((a, b) => a + b, 0) / s.values.length
               const isNps = s.type === 'nps'
               return (
-                <div key={order} className="flex items-baseline justify-between gap-3 pb-3 border-b border-gray-100 last:border-0 last:pb-0">
+                <div key={key} className="flex items-baseline justify-between gap-3 pb-3 border-b border-gray-100 last:border-0 last:pb-0">
                   <p className="text-sm text-gray-900 leading-snug min-w-0">
-                    <span className="text-gray-400 mr-1.5">{order}.</span>{s.text}
+                    <span className="text-gray-400 mr-1.5">{s.order}.</span>{s.text}
                   </p>
                   <div className="flex-shrink-0 text-right tabular-nums">
                     <p className="text-sm font-semibold text-gray-900">

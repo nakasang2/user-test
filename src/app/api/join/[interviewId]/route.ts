@@ -4,6 +4,7 @@ import { prisma } from '@/lib/db'
 import { createRoom } from '@/lib/daily'
 import { randomBytes } from 'crypto'
 import { handleApiError } from '@/lib/api-auth'
+import { rateLimit, getClientIp } from '@/lib/ratelimit'
 
 const joinSchema = z.object({
   name:  z.string().min(1, '名前を入力してください').max(100),
@@ -51,6 +52,11 @@ export async function POST(
 ) {
   try {
     const { interviewId } = await props.params
+    // 未認証エンドポイント。セッションと Daily ルームを無制限に作られるのを防ぐ。
+    // スクリーニングの足切り条件を総当たりで探る行為の抑止も兼ねる。
+    if (!(await rateLimit(`join:${interviewId}:${getClientIp(req)}`, 10, 300))) {
+      return NextResponse.json({ error: 'しばらく時間をおいてから再度お試しください' }, { status: 429 })
+    }
     const body = await req.json()
     const parsed = joinSchema.safeParse(body)
     if (!parsed.success) {
