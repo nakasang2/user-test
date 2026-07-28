@@ -1,5 +1,7 @@
 'use client'
 
+import { useRef } from 'react'
+
 import {
   LineChart,
   Line,
@@ -60,6 +62,9 @@ function formatTime(seconds: number) {
 }
 
 export default function EmotionChart({ emotions, currentTime, onSeek }: Props) {
+  // グラフの描画領域を実測してクリック位置から時刻を求めるため（フック規則上ここで宣言）
+  const chartBoxRef = useRef<HTMLDivElement>(null)
+
   if (emotions.length === 0) {
     return (
       <div className="p-8 text-center bg-white border border-gray-200 rounded-lg">
@@ -79,6 +84,24 @@ export default function EmotionChart({ emotions, currentTime, onSeek }: Props) {
         .map(([k, v]) => [k, Number((v * 100).toFixed(1))])
     ),
   }))
+
+  /**
+   * グラフのクリック位置から、最も近いデータ点の時刻を求めてシークする。
+   * 目盛りの実描画領域（recharts のグリッド要素）を基準にするため、
+   * 軸ラベルの幅や余白があってもズレない。
+   */
+  function handleChartClick(e: React.MouseEvent<HTMLDivElement>) {
+    if (!onSeek || chartData.length === 0) return
+    const box = chartBoxRef.current
+    if (!box) return
+    // グリッド＝実際にデータが描かれている矩形。取れないときはコンテナ全体で代用する
+    const grid = box.querySelector('.recharts-cartesian-grid')
+    const rect = (grid ?? box).getBoundingClientRect()
+    if (rect.width <= 0) return
+    const ratio = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width))
+    const idx = Math.round(ratio * (chartData.length - 1))
+    onSeek(chartData[idx].timestamp)
+  }
 
   // 現在の再生位置に最も近いデータ点のラベルを取得
   const currentLabel = currentTime !== undefined && emotions.length > 0
@@ -145,16 +168,15 @@ export default function EmotionChart({ emotions, currentTime, onSeek }: Props) {
             </span>
           )}
         </div>
+        {/* クリック位置から時刻を求める。
+            recharts の onClick はホバー状態（activeIndex）に依存し、2系にあった
+            activePayload も 3系では渡ってこないため、描画領域の実測値から自前で算出する。 */}
+        <div ref={chartBoxRef} onClick={handleChartClick}>
         <ResponsiveContainer width="100%" height={280}>
           <LineChart
             data={chartData}
             margin={{ top: 5, right: 20, left: 0, bottom: 5 }}
             style={{ cursor: onSeek ? 'pointer' : 'default' }}
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            onClick={(data: any) => {
-              const ts = data?.activePayload?.[0]?.payload?.timestamp
-              if (ts !== undefined) onSeek?.(ts)
-            }}
           >
             <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
             <XAxis dataKey="time" stroke="#6b7280" tick={{ fontSize: 11 }} />
@@ -187,6 +209,7 @@ export default function EmotionChart({ emotions, currentTime, onSeek }: Props) {
             )}
           </LineChart>
         </ResponsiveContainer>
+        </div>
       </div>
 
       <div className="bg-white border border-gray-200 rounded-lg p-6">
