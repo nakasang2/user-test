@@ -204,7 +204,7 @@ export default function TranscriptView({
               onChange={(e) => setQuery(e.target.value)}
               placeholder="発言を検索（例: 価格、わかりにくい）"
               aria-label="会話ログを検索"
-              className="w-full pl-8 pr-8 py-1.5 text-xs border border-gray-300 rounded-md focus:outline-none focus:border-gray-500 placeholder:text-gray-400"
+              className="w-full pl-8 pr-8 py-1.5 text-xs border border-gray-300 rounded-md focus:outline-none focus:border-gray-500 placeholder:text-gray-500"
             />
             {query && (
               <button

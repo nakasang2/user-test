@@ -3,7 +3,7 @@
 import { useState, useEffect, use, useMemo } from 'react'
 import Link from 'next/link'
 import { RadarChart, Radar, PolarGrid, PolarAngleAxis, ResponsiveContainer, Tooltip } from 'recharts'
-import { Search, X, Pencil, Download, FlaskConical } from 'lucide-react'
+import { Search, X, Pencil, Download, FlaskConical, RefreshCw } from 'lucide-react'
 import EditInterviewModal from '@/components/EditInterviewModal'
 import FloatingAgentChat from '@/components/FloatingAgentChat'
 import StatusBadge from '@/components/StatusBadge'
@@ -76,7 +76,53 @@ export default function InterviewComparePage(props: { params: Promise<{ id: stri
   const [editing, setEditing] = useState(false)
   const [pilotStarting, setPilotStarting] = useState(false)
   const [backfilling, setBackfilling] = useState(false)
+  const [reanalyzing, setReanalyzing] = useState(false)
+  const [reanalyzeMsg, setReanalyzeMsg] = useState('')
 
+  // 全セッションをまとめて再分析する。
+  // AI へのプロンプトを変えた後（要約の日本語化など）に既存セッションを追随させる用途。
+  // 全セッションをまとめて再分析する。
+  // AI へのプロンプトを変えた後（要約の日本語化など）に既存セッションを追随させる用途。
+  // 1回のリクエストで処理できる件数に限りがあるため、残りが無くなるまで自動で繰り返す。
+  async function reanalyzeAll() {
+    if (!confirm('このテストの全セッションをAIで再分析します。\n要約・テーマ・感情判定が作り直されます（録画と表情データは変更しません）。\n\n件数が多い場合は自動で続けて処理します。よろしいですか？')) return
+    setReanalyzing(true)
+    setReanalyzeMsg('再分析を開始しています…')
+    let totalDone = 0
+    let totalFailed = 0
+    let skip = 0
+    try {
+      // 上限を設けて無限ループを防ぐ（1回あたり最大3件）
+      for (let i = 0; i < 40; i++) {
+        const res = await fetch(`/api/interviews/${id}/reanalyze?skip=${skip}`, { method: 'POST' })
+        const data = await res.json().catch(() => null)
+        if (!res.ok || !data) {
+          alert(data?.error ?? `再分析が途中で終了しました。${totalDone} 件は完了しています。もう一度実行すると続きから再開します。`)
+          break
+        }
+        totalDone += data.done
+        totalFailed += data.failed
+        skip = data.nextSkip
+        setReanalyzeMsg(`再分析中… ${totalDone} 件完了（残り ${data.remaining} 件）`)
+        if (data.remaining <= 0) break
+        // 1件も進まなかったら打ち切る（時間切れで着手できなかった等）
+        if (data.done === 0 && data.failed === 0) {
+          alert(`時間の都合で一旦停止しました。${totalDone} 件完了。もう一度実行すると続きから再開します。`)
+          break
+        }
+      }
+      const ng = totalFailed > 0 ? `\n${totalFailed} 件は失敗しました（元の内容はそのまま残っています）。` : ''
+      alert(totalDone > 0 || totalFailed > 0
+        ? `${totalDone} 件を再分析しました。${ng}`
+        : '再分析の対象になるセッションがありませんでした。')
+      window.location.reload()
+    } catch {
+      alert('再分析に失敗しました')
+    } finally {
+      setReanalyzing(false)
+      setReanalyzeMsg('')
+    }
+  }
   // 文字起こししか無い過去セッションから、質問ごとの回答を復元する
   async function backfillAnswers() {
     if (!confirm('文字起こしから、質問ごとの回答をAIが抽出して保存します。\n実施中に保存された回答があるセッションは変更しません。よろしいですか？')) return
@@ -245,6 +291,15 @@ export default function InterviewComparePage(props: { params: Promise<{ id: stri
               CSV出力
             </a>
             <button
+              onClick={reanalyzeAll}
+              disabled={reanalyzing}
+              className="inline-flex items-center gap-1.5 border border-gray-300 hover:border-gray-400 disabled:opacity-50 text-gray-700 hover:text-gray-900 px-3 py-1.5 rounded-md text-sm transition-colors"
+              title="全セッションの要約・テーマ・感情判定をAIで作り直します（要約が英語のままのものを日本語にし直す用途）"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${reanalyzing ? 'animate-spin' : ''}`} strokeWidth={2} />
+              {reanalyzing ? (reanalyzeMsg || '再分析中…') : '全件を再分析'}
+            </button>
+            <button
               onClick={runPilot}
               disabled={pilotStarting}
               className="inline-flex items-center gap-1.5 border border-gray-300 hover:border-gray-400 disabled:opacity-50 text-gray-700 hover:text-gray-900 px-3 py-1.5 rounded-md text-sm transition-colors"
@@ -273,7 +328,7 @@ export default function InterviewComparePage(props: { params: Promise<{ id: stri
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="参加者名で検索"
-                className="bg-white border border-gray-300 focus:border-gray-900 focus:ring-1 focus:ring-gray-900 rounded-md pl-8 pr-3 py-1.5 text-sm text-gray-900 placeholder-gray-400 focus:outline-none transition-colors"
+                className="bg-white border border-gray-300 focus:border-gray-900 focus:ring-1 focus:ring-gray-900 rounded-md pl-8 pr-3 py-1.5 text-sm text-gray-900 placeholder-gray-500 focus:outline-none transition-colors"
               />
               {search && (
                 <button onClick={() => setSearch('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">

@@ -191,7 +191,7 @@ export default function JoinPage(props: { params: Promise<{ interviewId: string 
               autoFocus
               required
               disabled={loading}
-              className="w-full bg-white border border-gray-300 focus:border-gray-900 focus:ring-1 focus:ring-gray-900 focus:outline-none rounded-md px-3 py-2 text-gray-900 placeholder-gray-400 text-sm transition-colors disabled:opacity-50"
+              className="w-full bg-white border border-gray-300 focus:border-gray-900 focus:ring-1 focus:ring-gray-900 focus:outline-none rounded-md px-3 py-2 text-gray-900 placeholder-gray-500 text-sm transition-colors disabled:opacity-50"
             />
           </div>
 
@@ -206,7 +206,7 @@ export default function JoinPage(props: { params: Promise<{ interviewId: string 
               onChange={(e) => setEmail(e.target.value)}
               placeholder="例：tanaka@example.com"
               disabled={loading}
-              className="w-full bg-white border border-gray-300 focus:border-gray-900 focus:ring-1 focus:ring-gray-900 focus:outline-none rounded-md px-3 py-2 text-gray-900 placeholder-gray-400 text-sm transition-colors disabled:opacity-50"
+              className="w-full bg-white border border-gray-300 focus:border-gray-900 focus:ring-1 focus:ring-gray-900 focus:outline-none rounded-md px-3 py-2 text-gray-900 placeholder-gray-500 text-sm transition-colors disabled:opacity-50"
             />
           </div>
 

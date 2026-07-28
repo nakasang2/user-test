@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { prisma } from '@/lib/db'
-import { createRoom } from '@/lib/daily'
 import { randomBytes } from 'crypto'
 import { handleApiError } from '@/lib/api-auth'
 import { rateLimit, getClientIp } from '@/lib/ratelimit'
@@ -121,14 +120,9 @@ export async function POST(
     // 列挙されないよう十分なエントロピー（96bit）を持たせる
     const roomName = `interview-${randomBytes(12).toString('hex')}`
     const origin = process.env.NEXT_PUBLIC_APP_URL ?? new URL(req.url).origin
-    let dailyRoomUrl = `${origin}/interview/${roomName}`
-
-    if (process.env.DAILY_API_KEY) {
-      try {
-        const room = await createRoom(roomName)
-        dailyRoomUrl = room.url
-      } catch { /* Daily.co 未設定時はそのまま */ }
-    }
+    // 被験者が実際に開く URL。以前は Daily のルームを作っていたが、
+    // アプリ側は自前の録画・文字起こしに移行しており誰も接続しないため廃止した。
+    const dailyRoomUrl = `${origin}/interview/${roomName}`
 
     // 被験者フロー（未認証）が自分のセッションにのみ結果送信できるよう、
     // 高エントロピーの秘密トークンを発行する。被験者ページのサーバーコンポーネント経由でのみ渡す。

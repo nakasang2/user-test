@@ -23,7 +23,7 @@
 - **フレームワーク**: Next.js 16 (App Router, Turbopack)
 - **言語**: TypeScript
 - **DB**: PostgreSQL (Prisma ORM)
-- **ビデオ**: [Daily.co](https://daily.co) REST API（オプション）
+- **録画**: ブラウザの MediaRecorder（画面＋カメラを Canvas で合成）→ Vercel Blob に非公開保存
 - **文字起こし**: ブラウザの Speech Recognition API（ライブ）。OpenAI Whisper API は録音ファイル用のユーティリティとして同梱（現状の処理フローでは未使用）
 - **AI 分析・要約・Q&A**: OpenAI gpt-4o
 - **音声合成 (TTS)**: OpenAI tts-1
@@ -60,7 +60,7 @@ NEXT_PUBLIC_APP_URL="http://localhost:3000"
 > （Transaction pooler 6543 は `db push` の DDL と相性が悪いため避ける。）
 >
 > 環境変数はサーバー起動時に検証されます（`src/lib/env.ts` / `src/instrumentation.ts`）。
-> `DATABASE_URL`・`JWT_SECRET` が未設定だと起動に失敗し、任意項目（OpenAI / Blob / Daily）が未設定の場合は警告のうえ該当機能のみ無効化されます。
+> `DATABASE_URL`・`JWT_SECRET` が未設定だと起動に失敗し、任意項目（OpenAI / Blob / Upstash）が未設定の場合は警告のうえ該当機能のみ無効化されます。
 
 ### 2. 依存関係のインストール
 
@@ -154,7 +154,7 @@ src/
 │   └── CreateSessionModal.tsx           # セッション作成・URL 発行モーダル
 └── lib/
     ├── db.ts                            # Prisma クライアント（シングルトン）
-    ├── daily.ts                         # Daily.co REST API ラッパー
+    ├── analyze-session.ts               # セッション1件のAI分析と保存（初回分析・一括再分析で共用）
     ├── ai.ts                            # OpenAI gpt-4o（分析・要約・Q&A・質問生成）
     ├── anthropic.ts                     # 互換シム（ai.ts を再エクスポート。新規利用は ai.ts を直接 import）
     ├── llm-safety.ts                    # プロンプトインジェクション対策（入力長制限・デリミタ）
@@ -206,8 +206,8 @@ src/
 > **Neon（Vercel 連携）は `DATABASE_URL` と `DATABASE_URL_UNPOOLED` を自動設定する**ので、
 > Vercel 側は環境変数を用意するだけでデプロイ時に自動同期される。
 
-### ビデオ録画（Daily.co / Vercel Blob）
-- `DAILY_API_KEY` を設定するとクラウド録画が有効化されます。
+### ビデオ録画（Vercel Blob）
+- 録画はブラウザの MediaRecorder で行い（画面とカメラを Canvas で合成）、外部のビデオ基盤は使いません。
 - 録画は Vercel Blob に**非公開（private）**で保存し、ダッシュボードからは短命の署名付き URL 経由でのみ再生します（`BLOB_READ_WRITE_TOKEN` が必要）。
 
 ### 表情エンゲージメント指標

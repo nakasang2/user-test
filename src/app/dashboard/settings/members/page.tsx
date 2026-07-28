@@ -31,27 +31,25 @@ export default function MembersPage() {
   const [creating, setCreating]     = useState(false)
   const [copiedToken, setCopiedToken] = useState<string | null>(null)
 
-  useEffect(() => { fetchAll() }, [])
 
-  async function fetchAll() {
-    setLoading(true)
-    try {
-      const [mRes, iRes] = await Promise.all([
-        fetch('/api/organizations/members'),
-        fetch('/api/organizations/invites'),
-      ])
-      if (!mRes.ok || !iRes.ok) {
-        setError('メンバー情報の取得に失敗しました')
-        return
-      }
-      setMembers(await mRes.json())
-      setInvites(await iRes.json())
-    } catch {
-      setError('ネットワークエラーが発生しました')
-    } finally {
-      setLoading(false)
-    }
-  }
+  // 取得処理は effect 内に直接置く（外の関数を呼ぶと「レンダー中の setState」と判定される）
+  useEffect(() => {
+    let cancelled = false
+    Promise.all([
+      fetch('/api/organizations/members'),
+      fetch('/api/organizations/invites'),
+    ])
+      .then(async ([mRes, iRes]) => {
+        if (cancelled) return
+        if (!mRes.ok || !iRes.ok) { setError('メンバー情報の取得に失敗しました'); return }
+        setMembers(await mRes.json())
+        setInvites(await iRes.json())
+      })
+      .catch(() => { if (!cancelled) setError('ネットワークエラーが発生しました') })
+      .finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
+  }, [])
+
 
   async function createInvite() {
     setCreating(true)
@@ -158,7 +156,7 @@ export default function MembersPage() {
               <label className="block text-xs font-medium uppercase tracking-wide text-gray-500 mb-1">メールアドレス（任意・特定の人のみ有効にする場合）</label>
               <input type="email" value={newEmail} onChange={(e) => setNewEmail(e.target.value)}
                 placeholder="例：tanaka@example.com（空白で誰でも使用可）"
-                className="w-full bg-white border border-gray-300 rounded-md px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:border-gray-900 focus:ring-1 focus:ring-gray-900 focus:outline-none" />
+                className="w-full bg-white border border-gray-300 rounded-md px-3 py-2 text-sm text-gray-900 placeholder-gray-500 focus:border-gray-900 focus:ring-1 focus:ring-gray-900 focus:outline-none" />
             </div>
           </div>
           <button onClick={createInvite} disabled={creating}

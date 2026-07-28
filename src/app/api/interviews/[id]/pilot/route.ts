@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { randomBytes } from 'crypto'
 import { prisma } from '@/lib/db'
-import { createRoom } from '@/lib/daily'
 import { requireRole, handleApiError } from '@/lib/api-auth'
 
 /**
@@ -32,13 +31,8 @@ export async function POST(_req: NextRequest, props: { params: Promise<{ id: str
 
     const roomName = `interview-${randomBytes(12).toString('hex')}`
     const origin = process.env.NEXT_PUBLIC_APP_URL ?? new URL(_req.url).origin
-    let dailyRoomUrl = `${origin}/interview/${roomName}`
-    if (process.env.DAILY_API_KEY) {
-      try {
-        const room = await createRoom(roomName)
-        dailyRoomUrl = room.url
-      } catch { /* Daily 未設定時はそのまま */ }
-    }
+    // 被験者が実際に開く URL（Daily のルームは使わない。上記 join と同じ理由）
+    const dailyRoomUrl = `${origin}/interview/${roomName}`
 
     const participantToken = randomBytes(32).toString('base64url')
     await prisma.session.create({

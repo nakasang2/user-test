@@ -21,6 +21,12 @@ type Role = 'user' | 'assistant'
 type InterviewType = 'interview' | 'impression' | 'usability'
 interface Message { role: Role; content: string }
 interface Question { text: string; type: string }
+/** AI が生成する質問は自由回答固定なので、保存前にここで形式を選べるようにする */
+const Q_TYPES: { value: string; label: string }[] = [
+  { value: 'open',   label: '自由回答' },
+  { value: 'rating', label: '5段階評価' },
+  { value: 'nps',    label: 'NPS（0〜10）' },
+]
 interface TaskItem  { text: string; order: number }
 interface InterviewPlot {
   title: string
@@ -151,6 +157,13 @@ export default function DesignPage() {
     setPlot({ ...plot, questions: updated })
   }
 
+  function updateQuestionType(index: number, type: string) {
+    if (!plot) return
+    const updated = [...plot.questions]
+    updated[index] = { ...updated[index], type }
+    setPlot({ ...plot, questions: updated })
+  }
+
   function addQuestion() {
     if (!plot) return
     setPlot({ ...plot, questions: [...plot.questions, { text: '', type: 'open' }] })
@@ -226,7 +239,7 @@ export default function DesignPage() {
                 placeholder="メッセージを入力 (Enter で送信)"
                 rows={2}
                 disabled={loading}
-                className="flex-1 bg-white border border-gray-300 focus:border-gray-900 focus:ring-1 focus:ring-gray-900 focus:outline-none rounded-lg px-3 py-2 text-sm text-gray-900 placeholder-gray-400 resize-none transition-colors disabled:opacity-50"
+                className="flex-1 bg-white border border-gray-300 focus:border-gray-900 focus:ring-1 focus:ring-gray-900 focus:outline-none rounded-lg px-3 py-2 text-sm text-gray-900 placeholder-gray-500 resize-none transition-colors disabled:opacity-50"
               />
               <button type="submit" disabled={loading || !input.trim()}
                 className="inline-flex items-center gap-1.5 bg-gray-900 hover:bg-gray-800 text-white disabled:opacity-40 px-3.5 py-2 rounded-lg text-sm font-medium transition-colors shrink-0">
@@ -348,7 +361,7 @@ export default function DesignPage() {
                     <label className="block text-xs text-gray-500 mb-1.5 font-medium uppercase tracking-wide">画像URL</label>
                     <input type="url" value={stimulusUrl} onChange={(e) => setStimulusUrl(e.target.value)}
                       placeholder="https://example.com/image.png"
-                      className="w-full bg-white border border-gray-300 focus:border-gray-900 focus:ring-1 focus:ring-gray-900 focus:outline-none rounded-md px-3 py-2 text-sm text-gray-900 placeholder-gray-400" />
+                      className="w-full bg-white border border-gray-300 focus:border-gray-900 focus:ring-1 focus:ring-gray-900 focus:outline-none rounded-md px-3 py-2 text-sm text-gray-900 placeholder-gray-500" />
                   </div>
                   <div>
                     <label className="block text-xs text-gray-500 mb-1.5 font-medium uppercase tracking-wide">表示秒数</label>
@@ -367,7 +380,7 @@ export default function DesignPage() {
                   </label>
                   <input type="url" value={stimulusUrl} onChange={(e) => setStimulusUrl(e.target.value)}
                     placeholder={usabilityMode === 'prototype' ? 'https://www.figma.com/proto/...' : 'https://example.com'}
-                    className="w-full bg-white border border-gray-300 focus:border-gray-900 focus:ring-1 focus:ring-gray-900 focus:outline-none rounded-md px-3 py-2 text-sm text-gray-900 placeholder-gray-400" />
+                    className="w-full bg-white border border-gray-300 focus:border-gray-900 focus:ring-1 focus:ring-gray-900 focus:outline-none rounded-md px-3 py-2 text-sm text-gray-900 placeholder-gray-500" />
                   <p className="text-xs text-gray-500 mt-1">
                     {usabilityMode === 'prototype' ? 'Figma / ProtoPie などのプロトタイプ共有URLを入力してください' : '実際に操作するサービスのURL（メモ用）'}
                   </p>
@@ -404,7 +417,7 @@ export default function DesignPage() {
                         onChange={(e) => setTaskBulkText(e.target.value)}
                         placeholder={'タスクを1行ずつ入力してください\n\n例:\nログインする\n商品を検索して詳細ページを開く\nカートに追加して購入する'}
                         rows={6}
-                        className="w-full bg-white border border-gray-300 focus:border-gray-900 focus:ring-1 focus:ring-gray-900 focus:outline-none rounded-md px-3 py-2 text-sm text-gray-900 placeholder-gray-400 resize-none"
+                        className="w-full bg-white border border-gray-300 focus:border-gray-900 focus:ring-1 focus:ring-gray-900 focus:outline-none rounded-md px-3 py-2 text-sm text-gray-900 placeholder-gray-500 resize-none"
                       />
                       <p className="text-[10px] text-gray-500 mt-1">
                         1行 = 1タスク。空行は無視されます。
@@ -424,7 +437,7 @@ export default function DesignPage() {
                                 setTasks(next)
                               }}
                               placeholder={`タスク ${i + 1}`}
-                              className="flex-1 bg-white border border-gray-300 focus:border-gray-900 focus:ring-1 focus:ring-gray-900 focus:outline-none rounded-md px-3 py-2 text-sm text-gray-900 placeholder-gray-400" />
+                              className="flex-1 bg-white border border-gray-300 focus:border-gray-900 focus:ring-1 focus:ring-gray-900 focus:outline-none rounded-md px-3 py-2 text-sm text-gray-900 placeholder-gray-500" />
                             {tasks.length > 1 && (
                               <button type="button" onClick={() => setTasks(tasks.filter((_, j) => j !== i))}
                                 className="text-gray-300 hover:text-red-600 transition-colors p-1">
@@ -473,12 +486,23 @@ export default function DesignPage() {
                   {plot.questions.map((q, i) => (
                     <div key={i} className="flex gap-2 items-start group">
                       <span className="text-gray-400 text-xs mt-2.5 w-4 shrink-0 text-right">{i + 1}</span>
-                      <textarea
-                        value={q.text}
-                        onChange={(e) => updateQuestion(i, e.target.value)}
-                        rows={2}
-                        className="flex-1 bg-white border border-gray-300 focus:border-gray-900 focus:ring-1 focus:ring-gray-900 focus:outline-none rounded-md px-3 py-2 text-sm text-gray-900 resize-none"
-                      />
+                      <div className="flex-1 space-y-1.5">
+                        <textarea
+                          value={q.text}
+                          onChange={(e) => updateQuestion(i, e.target.value)}
+                          rows={2}
+                          aria-label={`質問 ${i + 1}`}
+                          className="w-full bg-white border border-gray-300 focus:border-gray-900 focus:ring-1 focus:ring-gray-900 focus:outline-none rounded-md px-3 py-2 text-sm text-gray-900 resize-none"
+                        />
+                        <select
+                          value={q.type ?? 'open'}
+                          onChange={(e) => updateQuestionType(i, e.target.value)}
+                          aria-label={`質問 ${i + 1} の形式`}
+                          className="bg-white border border-gray-300 text-xs text-gray-700 rounded-md px-2 py-1 focus:outline-none focus:border-gray-900"
+                        >
+                          {Q_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
+                        </select>
+                      </div>
                       <button
                         onClick={() => removeQuestion(i)}
                         className="text-gray-300 hover:text-red-600 mt-2 transition-colors p-1 opacity-0 group-hover:opacity-100">

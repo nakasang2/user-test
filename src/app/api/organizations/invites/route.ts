@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { prisma } from '@/lib/db'
 import { requireRole, handleApiError } from '@/lib/api-auth'
-import { ASSIGNABLE_ROLES } from '@/lib/permissions'
 
 const createSchema = z.object({
   role:  z.enum(['admin', 'editor', 'viewer']).default('viewer'),

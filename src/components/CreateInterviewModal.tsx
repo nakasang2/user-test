@@ -191,8 +191,9 @@ export default function CreateInterviewModal({ onClose, onCreated }: Props) {
           )}
 
           <div>
-            <label className="block text-xs font-medium text-gray-700 mb-1.5">タイトル <span className="text-red-500">*</span></label>
+            <label htmlFor="ci-title" className="block text-xs font-medium text-gray-700 mb-1.5">タイトル <span className="text-red-500">*</span></label>
             <input
+              id="ci-title"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               required
@@ -202,8 +203,9 @@ export default function CreateInterviewModal({ onClose, onCreated }: Props) {
           </div>
 
           <div>
-            <label className="block text-xs font-medium text-gray-700 mb-1.5">説明 <span className="text-gray-400 font-normal">（任意）</span></label>
+            <label htmlFor="ci-desc" className="block text-xs font-medium text-gray-700 mb-1.5">説明 <span className="text-gray-400 font-normal">（任意）</span></label>
             <textarea
+              id="ci-desc"
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               rows={2}
@@ -215,8 +217,9 @@ export default function CreateInterviewModal({ onClose, onCreated }: Props) {
           {sessionType === 'impression' && (
             <>
               <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1.5">画像URL <span className="text-red-500">*</span></label>
+                <label htmlFor="ci-stimulus" className="block text-xs font-medium text-gray-700 mb-1.5">画像URL <span className="text-red-500">*</span></label>
                 <input
+                  id="ci-stimulus"
                   type="url"
                   required
                   value={stimulusUrl}
@@ -227,8 +230,9 @@ export default function CreateInterviewModal({ onClose, onCreated }: Props) {
                 <p className="text-xs text-gray-500 mt-1">公開されている画像のURLを貼り付けてください</p>
               </div>
               <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1.5">表示秒数（デフォルト: 5秒）</label>
+                <label htmlFor="ci-duration" className="block text-xs font-medium text-gray-700 mb-1.5">表示秒数（デフォルト: 5秒）</label>
                 <input
+                  id="ci-duration"
                   type="number"
                   value={stimulusDuration}
                   onChange={(e) => setStimulusDuration(Number(e.target.value))}
@@ -407,4 +411,4 @@ export default function CreateInterviewModal({ onClose, onCreated }: Props) {
 }
 
 const inputClass =
-  'w-full bg-white border border-gray-300 focus:border-gray-900 focus:ring-1 focus:ring-gray-900 focus:outline-none rounded-md px-3 py-2 text-sm text-gray-900 placeholder-gray-400'
+  'w-full bg-white border border-gray-300 focus:border-gray-900 focus:ring-1 focus:ring-gray-900 focus:outline-none rounded-md px-3 py-2 text-sm text-gray-900 placeholder-gray-500'

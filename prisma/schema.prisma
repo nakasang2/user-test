@@ -2,6 +2,21 @@ generator client {
   provider = "prisma-client-js"
 }
 
+// ─────────────────────────────────────────────
+// スキーマ変更の反映方法（重要）
+//
+// このプロジェクトは `prisma migrate` を使わず、ビルド時の
+// `prisma db push --accept-data-loss`（package.json の build）で
+// スキーマを本番へ反映する。migrations ディレクトリは置かない。
+//
+// 以前 SQLite 時代のマイグレーションが残っていたが、
+// provider が sqlite のままで、モデルも 7/17 しか含まない
+// 復元不能な状態だったため 2026-07-28 に削除した。
+// （`prisma migrate` を実行すると失敗するか壊れた DB ができる罠になっていた）
+//
+// 将来 migrate 方式に移すなら、稼働中の DB から baseline を作る手順が必要。
+// ─────────────────────────────────────────────
+
 datasource db {
   provider = "postgresql"
   // 実行時はプール接続（DATABASE_URL）。
