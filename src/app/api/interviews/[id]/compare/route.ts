@@ -18,6 +18,8 @@ export async function GET(req: NextRequest, props: { params: Promise<{ id: strin
       description: true,
       commonInsights: true,
       insightsCount: true,
+      type: true,
+      tasks: { orderBy: { order: 'asc' }, select: { id: true, text: true, order: true } },
       questions: { orderBy: { order: 'asc' }, select: { id: true, text: true, order: true, type: true } },
       // 一覧表示のため全ステータスのセッションを返す（分析・レーダーは done のみで算出）
       sessions: {
@@ -46,7 +48,9 @@ export async function GET(req: NextRequest, props: { params: Promise<{ id: strin
     id: interview.id,
     title: interview.title,
     description: interview.description,
+    type: interview.type,
     questions: interview.questions,
+    tasks: interview.tasks,
   }
 
   if (interview.sessions.length === 0) {
