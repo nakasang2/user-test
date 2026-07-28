@@ -16,6 +16,7 @@ export async function GET(_req: NextRequest, props: { params: Promise<{ id: stri
         emotions: { orderBy: { timestamp: 'asc' } },
         taskResults: { orderBy: { order: 'asc' } },
         answers: { orderBy: { order: 'asc' } },
+        screenerAnswers: { orderBy: { order: 'asc' } },
       },
     })
     if (!session) return NextResponse.json({ error: 'Not found' }, { status: 404 })

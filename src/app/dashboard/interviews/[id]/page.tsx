@@ -36,6 +36,7 @@ interface SessionStat {
   taskResults?: TaskResultData[]
   answers?: AnswerData[]
   highlightTags?: string[]
+  screenerAnswers?: { label: string; value: string; order: number }[]
 }
 
 interface CompareData {
@@ -46,6 +47,8 @@ interface CompareData {
     type: string
     questions: { id: string; text: string; order: number; type: string }[]
     tasks: { id: string; text: string; order: number }[]
+    seqEnabled?: boolean
+    screeners?: { id: string; label: string; options: string[]; disqualify: string[]; required: boolean; order: number }[]
   }
   sessions: SessionStat[]
   commonInsights: string | null

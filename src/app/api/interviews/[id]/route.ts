@@ -46,6 +46,14 @@ const patchSchema = z.object({
     id:   z.string().optional(),
     text: z.string().min(1).max(2000),
   })).optional(),
+  // 事前質問（スクリーニング／属性）。disqualify に入れた選択肢を選んだ人は参加不可。
+  screeners: z.array(z.object({
+    id:         z.string().optional(),
+    label:      z.string().min(1).max(500),
+    options:    z.array(z.string().min(1).max(200)).max(20),
+    disqualify: z.array(z.string().max(200)).max(20).default([]),
+    required:   z.boolean().default(true),
+  })).max(20).optional(),
 })
 
 /**
@@ -62,7 +70,7 @@ export async function PATCH(req: NextRequest, props: { params: Promise<{ id: str
 
     const existing = await prisma.interview.findFirst({
       where: { id, organizationId: orgId },
-      select: { id: true, questions: { select: { id: true } }, tasks: { select: { id: true } } },
+      select: { id: true, questions: { select: { id: true } }, tasks: { select: { id: true } }, screeners: { select: { id: true } } },
     })
     if (!existing) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
@@ -70,7 +78,7 @@ export async function PATCH(req: NextRequest, props: { params: Promise<{ id: str
     if (!parsed.success) {
       return NextResponse.json({ error: parsed.error.issues[0]?.message ?? 'Invalid body' }, { status: 400 })
     }
-    const { title, description, stimulusUrl, stimulusDuration, seqEnabled, questions, tasks } = parsed.data
+    const { title, description, stimulusUrl, stimulusDuration, seqEnabled, questions, tasks, screeners } = parsed.data
 
     // 他インタビューの id を送られても触らないよう、自分の配下だけを対象にする
     const ownQuestionIds = new Set(existing.questions.map((q) => q.id))
@@ -104,6 +112,23 @@ export async function PATCH(req: NextRequest, props: { params: Promise<{ id: str
       })
     }
 
+    if (screeners) {
+      const ownScreenerIds = new Set(existing.screeners.map((x) => x.id))
+      const keep = screeners.map((x) => (x.id && ownScreenerIds.has(x.id) ? x.id : null)).filter(Boolean) as string[]
+      ops.push(prisma.screenerQuestion.deleteMany({ where: { interviewId: id, NOT: { id: { in: keep.length ? keep : ['__none__'] } } } }))
+      screeners.forEach((x, index) => {
+        const order = index + 1
+        // disqualify は options の中の値だけを採用する
+        const disqualify = x.disqualify.filter((d) => x.options.includes(d))
+        const payload = { label: x.label, options: x.options, disqualify, required: x.required, order }
+        if (x.id && ownScreenerIds.has(x.id)) {
+          ops.push(prisma.screenerQuestion.update({ where: { id: x.id }, data: payload }))
+        } else {
+          ops.push(prisma.screenerQuestion.create({ data: { interviewId: id, ...payload } }))
+        }
+      })
+    }
+
     const data: Record<string, unknown> = {}
     if (title !== undefined) data.title = title
     if (description !== undefined) data.description = description || null
@@ -121,7 +146,7 @@ export async function PATCH(req: NextRequest, props: { params: Promise<{ id: str
 
     const updated = await prisma.interview.findUnique({
       where: { id },
-      include: { questions: { orderBy: { order: 'asc' } }, tasks: { orderBy: { order: 'asc' } } },
+      include: { questions: { orderBy: { order: 'asc' } }, tasks: { orderBy: { order: 'asc' } }, screeners: { orderBy: { order: 'asc' } } },
     })
     return NextResponse.json(updated)
   } catch (err) {

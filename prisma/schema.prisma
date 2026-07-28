@@ -84,6 +84,7 @@ model Interview {
   questions        Question[]
   sessions         Session[]
   tasks            Task[]
+  screeners        ScreenerQuestion[]
   // 複数セッション比較の共通インサイトのキャッシュ。
   // insightsCount = キャッシュ生成時点の done セッション数（増減で再生成を判定）。
   commonInsights   String?
@@ -139,6 +140,36 @@ model TaskResult {
 
   // 1セッション1タスク1行。並行リクエストによる重複行を DB 側で防ぐ
   @@unique([sessionId, order])
+  @@index([sessionId])
+}
+
+// 参加前に聞く属性・スクリーニング設問。
+// 「対象者かどうかの判定」と「結果をセグメント別に見るための属性」を兼ねる。
+model ScreenerQuestion {
+  id          String    @id @default(cuid())
+  interviewId String
+  interview   Interview @relation(fields: [interviewId], references: [id], onDelete: Cascade)
+  label       String    // 例: 普段この種のサービスを使いますか
+  options     String[]  @default([])  // 選択肢
+  // この選択肢が選ばれたら参加不可にする（空なら属性収集のみで足切りしない）
+  disqualify  String[]  @default([])
+  required    Boolean   @default(true)
+  order       Int
+  answers     ScreenerAnswer[]
+}
+
+// 被験者が回答した属性。セッションに紐づけてセグメント分析に使う。
+model ScreenerAnswer {
+  id         String            @id @default(cuid())
+  sessionId  String
+  session    Session           @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  questionId String?
+  question   ScreenerQuestion? @relation(fields: [questionId], references: [id], onDelete: SetNull)
+  label      String            // 設問文のスナップショット
+  value      String            // 選んだ選択肢
+  order      Int
+  createdAt  DateTime          @default(now())
+
   @@index([sessionId])
 }
 
@@ -213,6 +244,7 @@ model Session {
   taskResults   TaskResult[]
   answers       Answer[]
   highlights    Highlight[]
+  screenerAnswers ScreenerAnswer[]
   interview     Interview       @relation(fields: [interviewId], references: [id])
   participant   Participant?    @relation(fields: [participantId], references: [id])
   createdAt     DateTime        @default(now())

@@ -39,6 +39,7 @@ export async function GET(_req: NextRequest, props: { params: Promise<{ id: stri
             taskResults: { orderBy: { order: 'asc' } },
             answers: { orderBy: { order: 'asc' } },
             highlights: { orderBy: { startTime: 'asc' } },
+            screenerAnswers: { orderBy: { order: 'asc' } },
           },
         },
       },
@@ -59,6 +60,19 @@ export async function GET(_req: NextRequest, props: { params: Promise<{ id: stri
       ])
     }
     rows.push([])
+
+    // 1.5) 参加者の属性（スクリーニング回答）。セグメント別分析に使う
+    const hasScreeners = interview.sessions.some((s) => s.screenerAnswers.length > 0)
+    if (hasScreeners) {
+      rows.push(['# 参加者の属性'])
+      rows.push(['participant', 'question', 'answer'].map(q))
+      for (const s of interview.sessions) {
+        for (const a of s.screenerAnswers) {
+          rows.push([q(name(s)), q(a.label), q(a.value)])
+        }
+      }
+      rows.push([])
+    }
 
     // 2) タスク結果（成功率・所要時間の集計用。1行1タスク×参加者）
     rows.push(['# タスク結果'])

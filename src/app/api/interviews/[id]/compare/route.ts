@@ -20,6 +20,7 @@ export async function GET(req: NextRequest, props: { params: Promise<{ id: strin
       insightsCount: true,
       type: true,
       seqEnabled: true,
+      screeners: { orderBy: { order: 'asc' }, select: { id: true, label: true, options: true, disqualify: true, required: true, order: true } },
       tasks: { orderBy: { order: 'asc' }, select: { id: true, text: true, order: true } },
       questions: { orderBy: { order: 'asc' }, select: { id: true, text: true, order: true, type: true } },
       // 一覧表示のため全ステータスのセッションを返す（分析・レーダーは done のみで算出）
@@ -37,6 +38,7 @@ export async function GET(req: NextRequest, props: { params: Promise<{ id: strin
           answers: { orderBy: { order: 'asc' }, select: { order: true, text: true, type: true, valueNum: true } },
           // 人が付けたタグの横断集計（アフィニティ分析）用
           highlights: { select: { tags: true } },
+          screenerAnswers: { orderBy: { order: 'asc' }, select: { label: true, value: true, order: true } },
         },
       },
     },
@@ -51,6 +53,7 @@ export async function GET(req: NextRequest, props: { params: Promise<{ id: strin
     description: interview.description,
     type: interview.type,
     seqEnabled: interview.seqEnabled,
+    screeners: interview.screeners,
     questions: interview.questions,
     tasks: interview.tasks,
   }
@@ -87,6 +90,7 @@ export async function GET(req: NextRequest, props: { params: Promise<{ id: strin
       taskResults: s.taskResults,
       answers: s.answers,
       highlightTags: s.highlights.flatMap((h) => h.tags),
+      screenerAnswers: s.screenerAnswers,
     }
   })
 

@@ -57,6 +57,7 @@ interface Session {
   taskResults?: TaskResultData[]
   answers?: AnswerData[]
   consentedAt?: string | null
+  screenerAnswers?: { label: string; value: string; order: number }[]
 }
 
 export default function SessionDetail(props: { params: Promise<{ id: string }> }) {
@@ -470,6 +471,21 @@ export default function SessionDetail(props: { params: Promise<{ id: string }> }
               <Download className="w-3 h-3" strokeWidth={2} />
               ダウンロード
             </a>
+          </div>
+        )}
+
+        {/* 参加者の属性（事前質問の回答）。誰のデータかを解釈する手がかり */}
+        {(session.screenerAnswers?.length ?? 0) > 0 && (
+          <div className="mb-6">
+            <SectionLabel>参加者の属性</SectionLabel>
+            <div className="bg-white border border-gray-200 rounded-xl p-4 flex flex-wrap gap-2">
+              {session.screenerAnswers!.map((a) => (
+                <span key={a.order} className="inline-flex items-center gap-1.5 bg-gray-50 border border-gray-200 rounded-md px-2.5 py-1 text-xs">
+                  <span className="text-gray-500">{a.label}</span>
+                  <span className="text-gray-900 font-medium">{a.value}</span>
+                </span>
+              ))}
+            </div>
           </div>
         )}
 

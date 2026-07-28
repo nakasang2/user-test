@@ -13,6 +13,15 @@ export interface EditableInterview {
   seqEnabled?: boolean
   questions: { id: string; text: string; order: number; type: string }[]
   tasks?: { id: string; text: string; order: number }[]
+  screeners?: { id: string; label: string; options: string[]; disqualify: string[]; required: boolean; order: number }[]
+}
+
+interface ScreenerRow {
+  id?: string
+  label: string
+  optionsText: string     // 改行区切りで編集する
+  disqualifyText: string  // 改行区切り。ここに書いた選択肢を選んだ人は参加不可
+  required: boolean
 }
 
 interface Row { id?: string; text: string; type: QType }
@@ -47,6 +56,15 @@ export default function EditInterviewModal({
     (interview.tasks ?? []).map((t) => ({ id: t.id, text: t.text, type: 'open' }))
   )
   const [seqEnabled, setSeqEnabled] = useState(interview.seqEnabled ?? false)
+  const [screeners, setScreeners] = useState<ScreenerRow[]>(
+    (interview.screeners ?? []).map((x) => ({
+      id: x.id,
+      label: x.label,
+      optionsText: x.options.join('\n'),
+      disqualifyText: x.disqualify.join('\n'),
+      required: x.required,
+    }))
+  )
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -72,6 +90,15 @@ export default function EditInterviewModal({
           questions: questions
             .filter((q) => q.text.trim())
             .map((q) => ({ id: q.id, text: q.text.trim(), type: q.type })),
+          screeners: screeners
+            .filter((x) => x.label.trim())
+            .map((x) => ({
+              id: x.id,
+              label: x.label.trim(),
+              options: x.optionsText.split('\n').map((o) => o.trim()).filter(Boolean),
+              disqualify: x.disqualifyText.split('\n').map((o) => o.trim()).filter(Boolean),
+              required: x.required,
+            })),
           ...(isUsability
             ? {
                 tasks: tasks.filter((t) => t.text.trim()).map((t) => ({ id: t.id, text: t.text.trim() })),
@@ -174,6 +201,82 @@ export default function EditInterviewModal({
             placeholder="例: 使ってみて迷った点はありますか"
             withType
           />
+
+          {/* 事前質問（スクリーニング／属性） */}
+          <div>
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="text-xs font-medium text-gray-700">事前質問（参加前に聞く属性・条件）</span>
+              <button
+                onClick={() => setScreeners([...screeners, { label: '', optionsText: '', disqualifyText: '', required: true }])}
+                className="inline-flex items-center gap-1 text-xs text-gray-600 hover:text-gray-900 border border-gray-300 hover:border-gray-400 px-2 py-1 rounded transition-colors"
+              >
+                <Plus className="w-3 h-3" strokeWidth={2} />追加
+              </button>
+            </div>
+            {screeners.length === 0 && (
+              <p className="text-xs text-gray-400">なし（全員が参加できます）</p>
+            )}
+            <div className="space-y-3">
+              {screeners.map((sc, i) => (
+                <div key={sc.id ?? `new-${i}`} className="border border-gray-200 rounded-md p-3 space-y-2">
+                  <div className="flex items-start gap-2">
+                    <input
+                      value={sc.label}
+                      onChange={(e) => setScreeners(screeners.map((r, j) => (j === i ? { ...r, label: e.target.value } : r)))}
+                      placeholder="質問文（例: このサービスを使ったことがありますか）"
+                      aria-label={`事前質問 ${i + 1}`}
+                      className="flex-1 border border-gray-300 focus:border-gray-900 rounded-md px-2.5 py-1.5 text-sm focus:outline-none"
+                    />
+                    <button
+                      onClick={() => setScreeners(screeners.filter((_, j) => j !== i))}
+                      aria-label={`事前質問 ${i + 1} を削除`}
+                      className="text-gray-400 hover:text-red-600 p-1.5 transition-colors"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" strokeWidth={2} />
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="block text-[11px] text-gray-500 mb-1">選択肢（1行に1つ）</label>
+                      <textarea
+                        value={sc.optionsText}
+                        onChange={(e) => setScreeners(screeners.map((r, j) => (j === i ? { ...r, optionsText: e.target.value } : r)))}
+                        rows={3}
+                        placeholder={'はい\nいいえ'}
+                        className="w-full border border-gray-300 focus:border-gray-900 rounded-md px-2 py-1.5 text-xs focus:outline-none resize-y"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] text-gray-500 mb-1">
+                        参加不可にする選択肢
+                      </label>
+                      <textarea
+                        value={sc.disqualifyText}
+                        onChange={(e) => setScreeners(screeners.map((r, j) => (j === i ? { ...r, disqualifyText: e.target.value } : r)))}
+                        rows={3}
+                        placeholder={'（空なら全員参加可）'}
+                        className="w-full border border-gray-300 focus:border-gray-900 rounded-md px-2 py-1.5 text-xs focus:outline-none resize-y"
+                      />
+                    </div>
+                  </div>
+                  <label className="flex items-center gap-1.5 text-[11px] text-gray-600 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={sc.required}
+                      onChange={(e) => setScreeners(screeners.map((r, j) => (j === i ? { ...r, required: e.target.checked } : r)))}
+                    />
+                    回答必須
+                  </label>
+                </div>
+              ))}
+            </div>
+            {screeners.length > 0 && (
+              <p className="text-[11px] text-gray-500 mt-2 leading-relaxed">
+                「参加不可にする選択肢」に書いた回答を選んだ人は、セッションを作らずに丁重にお断りします。
+                条件は被験者側には表示されません。
+              </p>
+            )}
+          </div>
 
           {removedCount > 0 && (
             <p className="text-xs text-gray-500">
