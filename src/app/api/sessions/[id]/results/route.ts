@@ -23,6 +23,7 @@ type TaskResultInput = {
   outcome: string
   startedAt?: number | null
   endedAt?: number | null
+  seq?: number | null
 }
 
 type AnswerInput = {
@@ -79,6 +80,11 @@ export async function POST(req: NextRequest, props: { params: Promise<{ id: stri
             startedAt !== null && endedAt !== null && endedAt >= startedAt
               ? endedAt - startedAt
               : null,
+          // SEQ は 1〜7 の整数のみ受け付ける
+          seq: (() => {
+            const v = num(t.seq)
+            return v !== null && Number.isInteger(v) && v >= 1 && v <= 7 ? v : null
+          })(),
         }
       })
 

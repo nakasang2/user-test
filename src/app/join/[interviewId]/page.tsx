@@ -14,12 +14,21 @@ import {
   AlertCircle,
 } from 'lucide-react'
 
+interface Screener {
+  id: string
+  label: string
+  options: string[]
+  required: boolean
+  order: number
+}
+
 interface InterviewInfo {
   id: string
   title: string
   description: string | null
   type?: string
-  _count?: { questions: number }
+  screeners?: Screener[]
+  _count?: { questions: number; tasks: number }
 }
 
 export default function JoinPage(props: { params: Promise<{ interviewId: string }> }) {
@@ -31,6 +40,10 @@ export default function JoinPage(props: { params: Promise<{ interviewId: string 
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [consent, setConsent] = useState(false)
+  // スクリーニング回答（questionId -> 選択肢）
+  const [screenerValues, setScreenerValues] = useState<Record<string, string>>({})
+  // 条件に合わず参加できない場合の表示
+  const [disqualified, setDisqualified] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -47,6 +60,9 @@ export default function JoinPage(props: { params: Promise<{ interviewId: string 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     if (!name.trim() || !consent) return
+    // 必須のスクリーニング設問が未回答なら送信しない
+    const missing = (interview?.screeners ?? []).filter((sc) => sc.required && !screenerValues[sc.id])
+    if (missing.length > 0) { setError('事前質問にすべてお答えください'); return }
     setLoading(true)
     setError(null)
 
@@ -54,10 +70,16 @@ export default function JoinPage(props: { params: Promise<{ interviewId: string 
       const res = await fetch(`/api/join/${interviewId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: name.trim(), email: email.trim() || undefined, consent }),
+        body: JSON.stringify({
+          name: name.trim(),
+          email: email.trim() || undefined,
+          consent,
+          screenerAnswers: Object.entries(screenerValues).map(([questionId, value]) => ({ questionId, value })),
+        }),
       })
       const data = await res.json()
       if (!res.ok) { setError(data.error ?? 'エラーが発生しました'); return }
+      if (data.disqualified) { setDisqualified(true); return }
       track('interview_started', { interviewId })
       router.push(`/interview/${data.roomName}`)
     } catch {
@@ -84,6 +106,21 @@ export default function JoinPage(props: { params: Promise<{ interviewId: string 
           </div>
           <p className="text-gray-900 font-medium mb-1.5">インタビューが見つかりません</p>
           <p className="text-gray-500 text-sm">リンクが無効か、削除された可能性があります。</p>
+        </div>
+      </div>
+    )
+  }
+
+  // 条件に合わなかった場合。理由は伝えない（設問の意図を推測されないため）
+  if (disqualified) {
+    return (
+      <div className="min-h-screen bg-white flex items-center justify-center px-4">
+        <div className="text-center max-w-sm">
+          <p className="text-gray-900 font-medium mb-1.5">ご協力ありがとうございました</p>
+          <p className="text-gray-500 text-sm leading-relaxed">
+            恐れ入りますが、今回の調査は対象となる条件が限られており、
+            今回はご参加いただけません。またの機会によろしくお願いいたします。
+          </p>
         </div>
       </div>
     )
@@ -164,6 +201,34 @@ export default function JoinPage(props: { params: Promise<{ interviewId: string 
               className="w-full bg-white border border-gray-300 focus:border-gray-900 focus:ring-1 focus:ring-gray-900 focus:outline-none rounded-md px-3 py-2 text-gray-900 placeholder-gray-400 text-sm transition-colors disabled:opacity-50"
             />
           </div>
+
+          {/* 事前質問（スクリーニング／属性） */}
+          {(interview!.screeners ?? []).length > 0 && (
+            <div className="space-y-3 pt-1">
+              <p className="text-xs font-medium text-gray-700">事前質問</p>
+              {interview!.screeners!.map((sc) => (
+                <fieldset key={sc.id} disabled={loading}>
+                  <legend className="text-xs text-gray-700 mb-1.5">
+                    {sc.label} {sc.required && <span className="text-red-500">*</span>}
+                  </legend>
+                  <div className="space-y-1.5">
+                    {sc.options.map((opt) => (
+                      <label key={opt} className="flex items-center gap-2 cursor-pointer text-sm text-gray-800">
+                        <input
+                          type="radio"
+                          name={`screener-${sc.id}`}
+                          value={opt}
+                          checked={screenerValues[sc.id] === opt}
+                          onChange={() => setScreenerValues((prev) => ({ ...prev, [sc.id]: opt }))}
+                        />
+                        {opt}
+                      </label>
+                    ))}
+                  </div>
+                </fieldset>
+              ))}
+            </div>
+          )}
 
           {/* 録画同意チェック */}
           <label className="flex items-start gap-2.5 cursor-pointer group pt-1">

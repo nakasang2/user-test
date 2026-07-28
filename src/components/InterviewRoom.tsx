@@ -22,6 +22,7 @@ import {
   AlertTriangle,
   Copy,
 } from 'lucide-react'
+import SeqScale from '@/components/SeqScale'
 
 interface Question {
   id?: string
@@ -42,6 +43,7 @@ interface Props {
   stimulusUrl?: string
   stimulusDuration?: number  // seconds (default 5)
   tasks?: { id?: string; text: string; order: number }[]
+  seqEnabled?: boolean
 }
 
 // 測定結果（構造化して /results に保存する定量データ）
@@ -52,6 +54,7 @@ interface TaskResultEntry {
   outcome: 'completed' | 'gave_up'
   startedAt: number
   endedAt: number
+  seq?: number
 }
 
 interface AnswerEntry {
@@ -84,6 +87,7 @@ export default function InterviewRoom({
   stimulusUrl,
   stimulusDuration,
   tasks,
+  seqEnabled,
 }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const streamRef = useRef<MediaStream | null>(null)
@@ -171,6 +175,18 @@ export default function InterviewRoom({
   // 最初のタスクの計測開始。事前手続き（録画開始・サイトを開く）の時間を
   // タスク1に含めないよう、被験者が実際に着手できる時点まで遅らせる。
   const firstTaskStartedRef = useRef(false)
+  // メイン画面での SEQ 入力待ち（達成/断念を押した直後に評価を聞く）
+  const [awaitingSeq, setAwaitingSeq] = useState<'completed' | 'gave_up' | null>(null)
+  // SEQ が有効なら先に評価を聞き、選択後に結果を確定する
+  function handleTaskOutcome(outcome: 'completed' | 'gave_up') {
+    if (seqEnabled) { setAwaitingSeq(outcome); return }
+    recordTaskOutcome(outcome)
+  }
+  function commitSeq(value: number) {
+    const outcome = awaitingSeq
+    setAwaitingSeq(null)
+    if (outcome) recordTaskOutcome(outcome, value)
+  }
   function markFirstTaskStart() {
     if (firstTaskStartedRef.current) return
     firstTaskStartedRef.current = true
@@ -639,7 +655,8 @@ export default function InterviewRoom({
     const cacheBust = `${Date.now()}${Math.round(performance.now())}`
     // サービス起動も小窓に一本化するため、対象サービスの URL を小窓へ渡す。
     const stimulusParam = stimulusUrl ? `&stimulus=${encodeURIComponent(stimulusUrl)}` : ''
-    const url = `/interview/widget?session=${encodeURIComponent(sessionId)}&tasks=${tasksEncoded}&current=${currentTaskIndex}&_t=${cacheBust}${stimulusParam}`
+    const seqParam = seqEnabled ? '&seq=1' : ''
+    const url = `/interview/widget?session=${encodeURIComponent(sessionId)}&tasks=${tasksEncoded}&current=${currentTaskIndex}&_t=${cacheBust}${stimulusParam}${seqParam}`
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const docPiP = (window as any).documentPictureInPicture
@@ -672,7 +689,7 @@ export default function InterviewRoom({
   }
 
   // ── タスクの結果を記録して次へ（達成 / 断念）。最後のタスクなら質問フェーズへ ──
-  function recordTaskOutcome(outcome: 'completed' | 'gave_up') {
+  function recordTaskOutcome(outcome: 'completed' | 'gave_up', seq?: number) {
     const idx = currentTaskIndexRef.current
     const task = tasks?.[idx]
     if (task) {
@@ -687,6 +704,7 @@ export default function InterviewRoom({
           outcome,
           startedAt: taskStartedAtRef.current,
           endedAt: now,
+          seq,
         },
       ]
       saveResults()
@@ -759,7 +777,7 @@ export default function InterviewRoom({
       const channel = new BroadcastChannel(`uservoice-widget-${sessionId}`)
       widgetChannelRef.current = channel
       channel.onmessage = (e) => {
-        if (e.data.type === 'task_outcome') recordTaskOutcome(e.data.outcome === 'gave_up' ? 'gave_up' : 'completed')
+        if (e.data.type === 'task_outcome') recordTaskOutcome(e.data.outcome === 'gave_up' ? 'gave_up' : 'completed', typeof e.data.seq === 'number' ? e.data.seq : undefined)
         else if (e.data.type === 'task_complete') completeTasksAndStartInterview() // 後方互換
         else if (e.data.type === 'end_session') endInterview()
         else if (e.data.type === 'recording_started') setScreenSharing(true)
@@ -883,6 +901,12 @@ export default function InterviewRoom({
   async function endInterview() {
     if (endedRef.current) return  // 二重実行防止（結果・録画の二重送信を防ぐ）
     endedRef.current = true
+    // SEQ 入力待ちのまま終了された場合、押した達成/断念を取りこぼさない（評価なしで確定）
+    if (awaitingSeq) {
+      const pending = awaitingSeq
+      setAwaitingSeq(null)
+      recordTaskOutcome(pending)
+    }
     recordOpenAnswerIfAny()  // 回答途中で終了した場合も取りこぼさない
     saveResults()            // 測定結果の最終フラッシュ（送信失敗していた分の再送を兼ねる）
     // ウィジェットを閉じる（BroadcastChannel 経由 + 直接 close）
@@ -1424,21 +1448,28 @@ export default function InterviewRoom({
                           サービスを開く（新しいタブ）
                         </a>
                       )}
+                      {awaitingSeq ? (
+                        <div className="pt-2 border-t border-gray-200">
+                          <SeqScale onSelect={commitSeq} />
+                          <button onClick={() => setAwaitingSeq(null)} className="mt-2 w-full text-xs text-gray-500 hover:text-gray-900 py-1">戻る</button>
+                        </div>
+                      ) : (
                       <div className="flex gap-2 pt-2 border-t border-gray-200">
                         <button
-                          onClick={() => recordTaskOutcome('completed')}
+                          onClick={() => handleTaskOutcome('completed')}
                           className="flex-1 inline-flex items-center justify-center gap-1.5 bg-gray-900 hover:bg-gray-800 text-white px-4 py-2 rounded-md text-sm font-medium transition-colors"
                         >
                           <Check className="w-3.5 h-3.5" strokeWidth={2.5} />
                           達成して{(tasks?.length ?? 0) <= currentTaskIndex + 1 ? '質問へ' : '次へ'}
                         </button>
                         <button
-                          onClick={() => recordTaskOutcome('gave_up')}
+                          onClick={() => handleTaskOutcome('gave_up')}
                           className="border border-gray-300 hover:border-gray-400 text-gray-700 hover:text-gray-900 px-4 py-2 rounded-md text-sm transition-colors"
                         >
                           できなかった
                         </button>
                       </div>
+                      )}
                       <button
                         onClick={endInterview}
                         className="w-full text-xs text-gray-500 hover:text-gray-800 py-1 transition-colors"
@@ -1532,21 +1563,28 @@ export default function InterviewRoom({
                         </button>
                       </div>
                     )}
+                    {awaitingSeq ? (
+                      <div className="border border-gray-200 rounded-md p-3 bg-gray-50">
+                        <SeqScale onSelect={commitSeq} />
+                        <button onClick={() => setAwaitingSeq(null)} className="mt-2 w-full text-xs text-gray-500 hover:text-gray-900 py-1">戻る</button>
+                      </div>
+                    ) : (
                     <div className="flex gap-2">
                       <button
-                        onClick={() => recordTaskOutcome('completed')}
+                        onClick={() => handleTaskOutcome('completed')}
                         className="flex-1 inline-flex items-center justify-center gap-1.5 bg-gray-900 hover:bg-gray-800 text-white px-4 py-2.5 rounded-md text-sm font-medium transition-colors"
                       >
                         <Check className="w-3.5 h-3.5" strokeWidth={2.5} />
                         達成して{(tasks?.length ?? 0) <= currentTaskIndex + 1 ? '質問へ' : '次へ'}
                       </button>
                       <button
-                        onClick={() => recordTaskOutcome('gave_up')}
+                        onClick={() => handleTaskOutcome('gave_up')}
                         className="flex-1 inline-flex items-center justify-center gap-1.5 border border-gray-300 hover:border-gray-400 text-gray-700 hover:text-gray-900 px-4 py-2.5 rounded-md text-sm transition-colors"
                       >
                         できなかった
                       </button>
                     </div>
+                    )}
                     <button
                       onClick={endInterview}
                       className="w-full text-xs text-gray-500 hover:text-gray-800 py-1 transition-colors"

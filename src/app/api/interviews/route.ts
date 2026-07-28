@@ -18,6 +18,7 @@ const createSchema = z.object({
   stimulusUrl:      z.string().url().optional().or(z.literal('')),
   stimulusDuration: z.number().int().min(1).max(60).optional(),
   tasks:            z.array(z.object({ text: z.string(), order: z.number() })).optional(),
+  seqEnabled:       z.boolean().optional(),
 })
 
 export async function GET() {
@@ -46,7 +47,7 @@ export async function POST(req: NextRequest) {
     if (!parsed.success) {
       return NextResponse.json({ error: parsed.error.issues[0]?.message }, { status: 400 })
     }
-    const { title, description, questions, autoGenerate, topic, type, usabilityMode, stimulusUrl, stimulusDuration, tasks } = parsed.data
+    const { title, description, questions, autoGenerate, topic, type, usabilityMode, stimulusUrl, stimulusDuration, tasks, seqEnabled } = parsed.data
 
     type QuestionInput = { text: string; type?: string } | string
     let questionList: QuestionInput[] = questions ?? []
@@ -65,6 +66,7 @@ export async function POST(req: NextRequest) {
         usabilityMode: usabilityMode ?? null,
         stimulusUrl: stimulusUrl || null,
         stimulusDuration: stimulusDuration ?? null,
+        seqEnabled: seqEnabled ?? false,
         questions: {
           create: questionList.map((q: QuestionInput, index: number) => ({
             text: typeof q === 'string' ? q : q.text,

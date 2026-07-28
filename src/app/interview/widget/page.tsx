@@ -3,6 +3,7 @@
 import { useEffect, useState, useRef, Suspense } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { Monitor, Check, X, AlertTriangle, CheckCircle2, Globe } from 'lucide-react'
+import SeqScale from '@/components/SeqScale'
 
 interface Task {
   text: string
@@ -17,6 +18,7 @@ function WidgetContent() {
   const tasksRaw   = searchParams.get('tasks')    ?? 'W10='
   const initialIdx = parseInt(searchParams.get('current') ?? '0', 10)
   const stimulusUrl = searchParams.get('stimulus') ?? ''
+  const seqEnabled  = searchParams.get('seq') === '1'
 
   const [tasks, setTasks]                       = useState<Task[]>([])
   const [currentTaskIndex, setCurrentTaskIndex] = useState(initialIdx)
@@ -25,6 +27,8 @@ function WidgetContent() {
   const [isScreenRecording, setIsScreenRecording] = useState(false)
   const [serviceOpened, setServiceOpened]       = useState(false)
   const [warnNoRecord, setWarnNoRecord]         = useState(false)
+  // SEQ 入力待ちの結果（達成/断念を押した直後、評価を受け取るまで保持）
+  const [awaitingSeq, setAwaitingSeq]           = useState<'completed' | 'gave_up' | null>(null)
   const [cameraError, setCameraError]           = useState(false)
   // 顔フレーミング判定: null=判定前 / 'ok'=正常 / 'no_face'=写っていない / 'cut_off'=見切れ
   const [faceStatus, setFaceStatus]             = useState<'ok' | 'no_face' | 'cut_off' | null>(null)
@@ -259,35 +263,49 @@ function WidgetContent() {
 
   const isLastTask = currentTaskIndex + 1 >= tasks.length
   const pendingOutcomeRef = useRef<'completed' | 'gave_up'>('completed')
+  const pendingSeqRef = useRef<number | undefined>(undefined)
 
   /* ── タスク結果を記録して次へ（達成 / 断念）。最後なら録画を止めて質問へ ── */
-  async function handleOutcome(outcome: 'completed' | 'gave_up') {
+  // 達成/断念のボタンを押した直後。SEQ が有効ならまず評価を聞いてから確定する。
+  function handleOutcome(outcome: 'completed' | 'gave_up') {
+    if (seqEnabled) { setAwaitingSeq(outcome); return }
+    void commitOutcome(outcome)
+  }
+
+  async function commitOutcome(outcome: 'completed' | 'gave_up', seq?: number) {
+    setAwaitingSeq(null)
     if (!isLastTask) {
       // 途中のタスク: 結果だけ送って次へ（録画は継続）
-      channelRef.current?.postMessage({ type: 'task_outcome', outcome })
+      channelRef.current?.postMessage({ type: 'task_outcome', outcome, seq })
       setCurrentTaskIndex((i) => Math.min(i + 1, tasks.length - 1))
       return
     }
     // 最後のタスク: 録画必須（未開始なら警告）
     if (!isScreenRecording && screenChunksRef.current.length === 0) {
       pendingOutcomeRef.current = outcome
+      pendingSeqRef.current = seq
       setWarnNoRecord(true)
       return
     }
-    await finalize(outcome)
+    await finalize(outcome, seq)
   }
 
-  async function finalize(outcome: 'completed' | 'gave_up') {
+  async function finalize(outcome: 'completed' | 'gave_up', seq?: number) {
     setWarnNoRecord(false)
     focusInterviewPage()            // ① フォーカス（ユーザージェスチャー文脈）
     await stopAndSendRecording()    // ② 録画停止 & blob 送信
-    channelRef.current?.postMessage({ type: 'task_outcome', outcome })
+    channelRef.current?.postMessage({ type: 'task_outcome', outcome, seq })
     setDoneMessage('インタビューページに戻ります...')
     setWidgetPhase('done')
   }
 
   /* ── セッション終了 ───────────────────────────────────────── */
   async function endSession() {
+    // SEQ 入力待ちのまま終了された場合、押した達成/断念を取りこぼさない（評価なしで確定）
+    if (awaitingSeq) {
+      channelRef.current?.postMessage({ type: 'task_outcome', outcome: awaitingSeq })
+      setAwaitingSeq(null)
+    }
     focusInterviewPage()
     await stopAndSendRecording()
     channelRef.current?.postMessage({ type: 'end_session' })
@@ -295,6 +313,21 @@ function WidgetContent() {
     setWidgetPhase('done')
     setTimeout(() => window.close(), 800)
   }
+
+  // 事前手続き（録画開始 →（サービスURLがあれば）サービスを開く）が完了したか。
+  // 完了して初めてタスク文言と結果ボタンを表示し、準備中は隠して混乱を防ぐ。
+  const readyForTask = isScreenRecording && (serviceOpened || !stimulusUrl)
+
+  // タスク文言が実際に見えた瞬間をメインへ通知する。
+  // 所要時間（time on task）の計測開始をこの時点に合わせ、
+  // 録画の開始操作やサイトを開く操作の時間がタスク1に混入しないようにする。
+  // ※フック規則のため、必ず早期 return より前で呼ぶこと。
+  const taskReadySentRef = useRef(false)
+  useEffect(() => {
+    if (!readyForTask || taskReadySentRef.current) return
+    taskReadySentRef.current = true
+    channelRef.current?.postMessage({ type: 'task_ready' })
+  }, [readyForTask])
 
   /* ── 完了画面 ─────────────────────────────────────────────── */
   if (widgetPhase === 'done') {
@@ -311,19 +344,6 @@ function WidgetContent() {
   }
 
   const currentTask = tasks[currentTaskIndex]
-  // 事前手続き（録画開始 →（サービスURLがあれば）サービスを開く）が完了したか。
-  // 完了して初めてタスク文言と結果ボタンを表示し、準備中は隠して混乱を防ぐ。
-  const readyForTask = isScreenRecording && (serviceOpened || !stimulusUrl)
-
-  // タスク文言が実際に見えた瞬間をメインへ通知する。
-  // 所要時間（time on task）の計測開始をこの時点に合わせ、
-  // 録画の開始操作やサイトを開く操作の時間がタスク1に混入しないようにする。
-  const taskReadySentRef = useRef(false)
-  useEffect(() => {
-    if (!readyForTask || taskReadySentRef.current) return
-    taskReadySentRef.current = true
-    channelRef.current?.postMessage({ type: 'task_ready' })
-  }, [readyForTask])
 
   /* ── タスク画面 ─────────────────────────────────────────────── */
   // 注: Document PiP の iframe 内では 100vh 等の viewport 単位が実際の窓より大きく評価され、
@@ -482,7 +502,7 @@ function WidgetContent() {
                     録画してから完了
                   </button>
                   <button
-                    onClick={() => finalize(pendingOutcomeRef.current)}
+                    onClick={() => finalize(pendingOutcomeRef.current, pendingSeqRef.current)}
                     className="flex-1 bg-white border border-amber-300 hover:border-amber-500 text-amber-800 py-1.5 rounded-md text-xs transition-colors"
                   >
                     このまま完了
@@ -494,21 +514,34 @@ function WidgetContent() {
             <p className="text-[10px] text-gray-500 text-center leading-snug pt-1">
               操作が終わったら押してください
             </p>
-            <div className="flex gap-2">
-              <button
-                onClick={() => handleOutcome('completed')}
-                className="flex-1 inline-flex items-center justify-center gap-1.5 bg-gray-900 hover:bg-gray-800 active:bg-black text-white py-2.5 rounded-lg text-sm font-semibold transition-colors"
-              >
-                <Check className="w-4 h-4" strokeWidth={2.5} />
-                達成して{isLastTask ? '質問へ' : '次へ'}
-              </button>
-              <button
-                onClick={() => handleOutcome('gave_up')}
-                className="flex-1 inline-flex items-center justify-center gap-1.5 bg-white border border-gray-300 hover:border-gray-400 text-gray-700 hover:text-gray-900 py-2.5 rounded-lg text-sm font-medium transition-colors"
-              >
-                できなかった
-              </button>
-            </div>
+            {awaitingSeq ? (
+              /* SEQ 入力中: 評価を選ぶまで次に進まない（1タップで確定） */
+              <div className="border border-gray-200 rounded-lg p-3 bg-gray-50">
+                <SeqScale compact onSelect={(v) => void commitOutcome(awaitingSeq, v)} />
+                <button
+                  onClick={() => setAwaitingSeq(null)}
+                  className="mt-2 w-full text-[11px] text-gray-500 hover:text-gray-900 py-1"
+                >
+                  戻る
+                </button>
+              </div>
+            ) : (
+              <div className="flex gap-2">
+                <button
+                  onClick={() => handleOutcome('completed')}
+                  className="flex-1 inline-flex items-center justify-center gap-1.5 bg-gray-900 hover:bg-gray-800 active:bg-black text-white py-2.5 rounded-lg text-sm font-semibold transition-colors"
+                >
+                  <Check className="w-4 h-4" strokeWidth={2.5} />
+                  達成して{isLastTask ? '質問へ' : '次へ'}
+                </button>
+                <button
+                  onClick={() => handleOutcome('gave_up')}
+                  className="flex-1 inline-flex items-center justify-center gap-1.5 bg-white border border-gray-300 hover:border-gray-400 text-gray-700 hover:text-gray-900 py-2.5 rounded-lg text-sm font-medium transition-colors"
+                >
+                  できなかった
+                </button>
+              </div>
+            )}
           </>
         )}
 

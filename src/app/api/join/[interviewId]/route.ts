@@ -4,6 +4,7 @@ import { prisma } from '@/lib/db'
 import { createRoom } from '@/lib/daily'
 import { randomBytes } from 'crypto'
 import { handleApiError } from '@/lib/api-auth'
+import { rateLimit, getClientIp } from '@/lib/ratelimit'
 
 const joinSchema = z.object({
   name:  z.string().min(1, '名前を入力してください').max(100),
@@ -11,6 +12,11 @@ const joinSchema = z.object({
   // 録画・表情分析・AI処理への同意。証跡として Session.consentedAt に記録する。
   // 旧クライアント互換のため任意項目にするが、false 明示は拒否する。
   consent: z.boolean().optional(),
+  // スクリーニング回答（questionId -> 選んだ選択肢）
+  screenerAnswers: z.array(z.object({
+    questionId: z.string(),
+    value: z.string().max(200),
+  })).max(50).optional(),
 })
 
 /** GET /api/join/[interviewId] — インタビュータイトルなど公開情報を返す（認証不要） */
@@ -22,7 +28,15 @@ export async function GET(
     const { interviewId } = await props.params
     const interview = await prisma.interview.findUnique({
       where: { id: interviewId },
-      select: { id: true, title: true, description: true },
+      select: {
+        id: true, title: true, description: true, type: true,
+        screeners: {
+          orderBy: { order: 'asc' },
+          // disqualify（足切り条件）は被験者に見せない
+          select: { id: true, label: true, options: true, required: true, order: true },
+        },
+        _count: { select: { questions: true, tasks: true } },
+      },
     })
     if (!interview) return NextResponse.json({ error: 'Not found' }, { status: 404 })
     return NextResponse.json(interview)
@@ -38,18 +52,48 @@ export async function POST(
 ) {
   try {
     const { interviewId } = await props.params
+    // 未認証エンドポイント。セッションと Daily ルームを無制限に作られるのを防ぐ。
+    // スクリーニングの足切り条件を総当たりで探る行為の抑止も兼ねる。
+    if (!(await rateLimit(`join:${interviewId}:${getClientIp(req)}`, 10, 300))) {
+      return NextResponse.json({ error: 'しばらく時間をおいてから再度お試しください' }, { status: 429 })
+    }
     const body = await req.json()
     const parsed = joinSchema.safeParse(body)
     if (!parsed.success) {
       return NextResponse.json({ error: parsed.error.issues[0]?.message }, { status: 400 })
     }
-    const { name, email, consent } = parsed.data
+    const { name, email, consent, screenerAnswers } = parsed.data
     if (consent === false) {
       return NextResponse.json({ error: '参加には同意が必要です' }, { status: 400 })
     }
 
-    const interview = await prisma.interview.findUnique({ where: { id: interviewId } })
+    const interview = await prisma.interview.findUnique({
+      where: { id: interviewId },
+      include: { screeners: { orderBy: { order: 'asc' } } },
+    })
     if (!interview) return NextResponse.json({ error: 'インタビューが見つかりません' }, { status: 404 })
+
+    // スクリーニング判定。足切りはサーバー側でのみ行う（条件をクライアントに出さない）。
+    const answersByQuestion = new Map((screenerAnswers ?? []).map((a) => [a.questionId, a.value]))
+    const resolvedScreeners: { questionId: string; label: string; value: string; order: number }[] = []
+    for (const sc of interview.screeners) {
+      const value = answersByQuestion.get(sc.id)
+      if (!value) {
+        if (sc.required) {
+          return NextResponse.json({ error: '事前質問にすべてお答えください' }, { status: 400 })
+        }
+        continue
+      }
+      // 選択肢に無い値は受け付けない
+      if (sc.options.length > 0 && !sc.options.includes(value)) {
+        return NextResponse.json({ error: '選択肢から選んでください' }, { status: 400 })
+      }
+      if (sc.disqualify.includes(value)) {
+        // 対象外。セッションも参加者も作らない（理由は伝えない）
+        return NextResponse.json({ disqualified: true }, { status: 200 })
+      }
+      resolvedScreeners.push({ questionId: sc.id, label: sc.label, value, order: sc.order })
+    }
 
     const participant = await prisma.participant.create({
       data: { name, email: email || null },
@@ -79,6 +123,11 @@ export async function POST(
         dailyRoomUrl,
         participantToken,
         consentedAt: consent ? new Date() : null, // 同意の証跡
+        screenerAnswers: {
+          create: resolvedScreeners.map((a) => ({
+            questionId: a.questionId, label: a.label, value: a.value, order: a.order,
+          })),
+        },
       },
     })
 

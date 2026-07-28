@@ -1,4 +1,4 @@
-import { prisma } from '@/lib/db'
+import { getSharedSession } from '@/lib/share'
 import { notFound } from 'next/navigation'
 import EmotionChart from '@/components/EmotionChart'
 import TranscriptView from '@/components/TranscriptView'
@@ -14,36 +14,24 @@ export const metadata = { title: '共有レポート | UserVoice' }
 export default async function SharePage(props: { params: Promise<{ token: string }> }) {
   const { token } = await props.params
 
-  const session = await prisma.session.findUnique({
-    where: { shareToken: token },
-    select: {
-      status: true,
-      createdAt: true,
-      participant: { select: { name: true } },
-      interview: {
-        select: {
-          title: true,
-          questions: { orderBy: { order: 'asc' }, select: { id: true, text: true, order: true } },
-        },
-      },
-      transcript: {
-        select: {
-          fullText: true,
-          summary: true,
-          themes: true,
-          sentiment: true,
-          sentimentNote: true,
-          segments: {
-            orderBy: { startTime: 'asc' },
-            select: { id: true, speaker: true, text: true, startTime: true, endTime: true, sentiment: true },
-          },
-        },
-      },
-      emotions: { orderBy: { timestamp: 'asc' } },
-    },
-  })
+  const { session, expired } = await getSharedSession(token)
 
   if (!session) notFound()
+
+  // 期限切れのリンクは内容を一切表示しない。
+  // 存在自体は隠さず（notFound にせず）、共有した側に再発行を促せるよう明示する。
+  if (expired) {
+    return (
+      <div className="min-h-screen bg-white flex items-center justify-center px-6">
+        <div className="text-center max-w-sm">
+          <h1 className="text-base font-semibold text-gray-900 mb-2">この共有リンクは期限切れです</h1>
+          <p className="text-sm text-gray-500 leading-relaxed">
+            レポートを共有した担当者に、リンクの再発行を依頼してください。
+          </p>
+        </div>
+      </div>
+    )
+  }
 
   // 分析がまだ完了していない共有レポートは、内部操作向けの空状態（「AI分析を実行」等）を
   // 外部閲覧者に見せず、中立的な「準備中」表示にする。

@@ -3,7 +3,8 @@
 import { useState, useEffect, use, useMemo } from 'react'
 import Link from 'next/link'
 import { RadarChart, Radar, PolarGrid, PolarAngleAxis, ResponsiveContainer, Tooltip } from 'recharts'
-import { Search, X } from 'lucide-react'
+import { Search, X, Pencil, Download } from 'lucide-react'
+import EditInterviewModal from '@/components/EditInterviewModal'
 import FloatingAgentChat from '@/components/FloatingAgentChat'
 import StatusBadge from '@/components/StatusBadge'
 import InterviewMetrics from '@/components/InterviewMetrics'
@@ -35,6 +36,7 @@ interface SessionStat {
   taskResults?: TaskResultData[]
   answers?: AnswerData[]
   highlightTags?: string[]
+  screenerAnswers?: { label: string; value: string; order: number }[]
 }
 
 interface CompareData {
@@ -42,7 +44,11 @@ interface CompareData {
     id: string
     title: string
     description: string | null
+    type: string
     questions: { id: string; text: string; order: number; type: string }[]
+    tasks: { id: string; text: string; order: number }[]
+    seqEnabled?: boolean
+    screeners?: { id: string; label: string; options: string[]; disqualify: string[]; required: boolean; order: number }[]
   }
   sessions: SessionStat[]
   commonInsights: string | null
@@ -65,6 +71,7 @@ export default function InterviewComparePage(props: { params: Promise<{ id: stri
   const [error, setError] = useState(false)
   // 個別結果一覧のソート/フィルタ
   const [search, setSearch] = useState('')
+  const [editing, setEditing] = useState(false)
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
   const [sortKey, setSortKey] = useState<SortKey>('date-desc')
 
@@ -168,11 +175,30 @@ export default function InterviewComparePage(props: { params: Promise<{ id: stri
 
       <div className="max-w-7xl mx-auto px-6 py-8 space-y-6">
         {/* ヘッダー */}
-        <div>
-          <h1 className="text-2xl font-semibold mb-1 tracking-tight text-gray-900">{interview.title}</h1>
-          <p className="text-gray-500 text-sm">
-            セッション {sessions.length} 件（分析済み {doneSessions.length} 件） · 質問 {interview.questions.length} 問
-          </p>
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h1 className="text-2xl font-semibold mb-1 tracking-tight text-gray-900">{interview.title}</h1>
+            <p className="text-gray-500 text-sm">
+              セッション {sessions.length} 件（分析済み {doneSessions.length} 件） · 質問 {interview.questions.length} 問
+            </p>
+          </div>
+          <div className="flex-shrink-0 flex items-center gap-2">
+            <a
+              href={`/api/interviews/${interview.id}/export`}
+              className="inline-flex items-center gap-1.5 border border-gray-300 hover:border-gray-400 text-gray-700 hover:text-gray-900 px-3 py-1.5 rounded-md text-sm transition-colors"
+              title="全セッションのタスク結果・回答・ハイライトを1つのCSVにまとめて出力"
+            >
+              <Download className="w-3.5 h-3.5" strokeWidth={2} />
+              CSV出力
+            </a>
+            <button
+              onClick={() => setEditing(true)}
+              className="inline-flex items-center gap-1.5 border border-gray-300 hover:border-gray-400 text-gray-700 hover:text-gray-900 px-3 py-1.5 rounded-md text-sm transition-colors"
+            >
+              <Pencil className="w-3.5 h-3.5" strokeWidth={2} />
+              編集
+            </button>
+          </div>
         </div>
 
         {/* 個別の結果一覧（全ステータス・ソート/フィルタ/検索） */}
@@ -395,6 +421,15 @@ export default function InterviewComparePage(props: { params: Promise<{ id: stri
           </>
         )}
       </div>
+
+      {editing && (
+        <EditInterviewModal
+          interview={interview}
+          sessionCount={sessions.length}
+          onClose={() => setEditing(false)}
+          onSaved={() => { setEditing(false); window.location.reload() }}
+        />
+      )}
 
       {/* フローティング AI チャット（このインタビュー全体について質問） */}
       <FloatingAgentChat interviewId={id} />

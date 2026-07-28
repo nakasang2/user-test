@@ -57,6 +57,7 @@ interface Session {
   taskResults?: TaskResultData[]
   answers?: AnswerData[]
   consentedAt?: string | null
+  screenerAnswers?: { label: string; value: string; order: number }[]
 }
 
 export default function SessionDetail(props: { params: Promise<{ id: string }> }) {
@@ -177,15 +178,30 @@ export default function SessionDetail(props: { params: Promise<{ id: string }> }
   }, [id, session?.recordingUrl])
 
   async function shareSession() {
+    // 被験者の発言が無期限に公開され続けないよう、期限を選ばせる（既定 30 日）
+    const input = prompt('共有リンクの有効期限を日数で入力してください（0 = 無期限）', '30')
+    if (input === null) return
+    const expiresInDays = Number(input)
+    if (!Number.isFinite(expiresInDays) || expiresInDays < 0) {
+      alert('日数は0以上の数値で入力してください')
+      return
+    }
     try {
-      const res = await fetch(`/api/sessions/${id}/share`, { method: 'POST' })
+      const res = await fetch(`/api/sessions/${id}/share`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ expiresInDays }),
+      })
       if (!res.ok) throw new Error('failed')
-      const { shareToken } = await res.json()
+      const { shareToken, shareExpiresAt } = await res.json()
       const url = `${window.location.origin}/share/${shareToken}`
       await navigator.clipboard.writeText(url)
       track('report_shared', { sessionId: id })
       setSession((prev) => (prev ? { ...prev, shareEnabled: true } : prev))
-      alert(`読み取り専用の共有リンクをコピーしました:\n${url}`)
+      const until = shareExpiresAt
+        ? `\n有効期限: ${new Date(shareExpiresAt).toLocaleDateString('ja-JP')}`
+        : '\n有効期限: なし'
+      alert(`読み取り専用の共有リンクをコピーしました:\n${url}${until}`)
     } catch {
       alert('共有リンクの発行に失敗しました')
     }
@@ -215,11 +231,12 @@ export default function SessionDetail(props: { params: Promise<{ id: string }> }
 
     // 測定結果（定量）を先頭に。表計算ソフトで成功率・スコアを扱えるようにする
     if (session.taskResults?.length) {
-      rows.push(['# タスク結果'], ['order', 'task', 'outcome', 'durationSec'])
+      rows.push(['# タスク結果'], ['order', 'task', 'outcome', 'durationSec', 'seq'])
       session.taskResults.forEach((t) => rows.push([
         String(t.order), q(t.text),
         t.outcome === 'completed' ? '達成' : 'できなかった',
         t.durationSec != null ? String(Math.round(t.durationSec)) : '',
+        t.seq != null ? String(t.seq) : '',
       ]))
       rows.push([])
     }
@@ -454,6 +471,21 @@ export default function SessionDetail(props: { params: Promise<{ id: string }> }
               <Download className="w-3 h-3" strokeWidth={2} />
               ダウンロード
             </a>
+          </div>
+        )}
+
+        {/* 参加者の属性（事前質問の回答）。誰のデータかを解釈する手がかり */}
+        {(session.screenerAnswers?.length ?? 0) > 0 && (
+          <div className="mb-6">
+            <SectionLabel>参加者の属性</SectionLabel>
+            <div className="bg-white border border-gray-200 rounded-xl p-4 flex flex-wrap gap-2">
+              {session.screenerAnswers!.map((a) => (
+                <span key={a.order} className="inline-flex items-center gap-1.5 bg-gray-50 border border-gray-200 rounded-md px-2.5 py-1 text-xs">
+                  <span className="text-gray-500">{a.label}</span>
+                  <span className="text-gray-900 font-medium">{a.value}</span>
+                </span>
+              ))}
+            </div>
           </div>
         )}
 
