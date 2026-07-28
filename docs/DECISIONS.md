@@ -2,7 +2,7 @@
 
 ## 現在の前提・絶対ルール
 - `prisma db push` は directUrl（DB直結）経由で実行する。ビルド時の pooler 経由接続は P1017 で不安定（2026-06 に3回失敗して確立したルール）
-- push 前のローカルビルド検証（`npx tsc --noEmit` + `npx next build`）を省略しない
+- push 前のローカルビルド検証（`npx tsc --noEmit` + `npx next build`）を省略しない。**`next/font/google` の module-not-found は間欠的なネットワーク要因**なので、コードを疑う前に同じコミットで再実行する
 - **本番URL**: https://user-test-nakasang2s-projects.vercel.app/ （Vercel: user-test / GitHub: nakasang2/user-test → main が本番）。反映確認はここで行う。※ `user-test.vercel.app`（末尾に -projects なし）は別の create-react-app 製サイトで無関係
 - セッション種別によって実行できることが違う。**開始時に一度試して確かめる**（2026-07-28 のローカル実行では `git push` / `next build` / `gh pr create` すべて可能だった。過去の sandbox セッションでは不可だった）
 - `gh pr merge` は安全分類器にブロックされる（本番に影響する操作のため）。**PR 作成までを Claude が行い、マージはユーザーが GitHub で実施する**
