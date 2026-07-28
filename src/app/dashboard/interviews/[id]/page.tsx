@@ -3,7 +3,7 @@
 import { useState, useEffect, use, useMemo } from 'react'
 import Link from 'next/link'
 import { RadarChart, Radar, PolarGrid, PolarAngleAxis, ResponsiveContainer, Tooltip } from 'recharts'
-import { Search, X, Pencil, Download } from 'lucide-react'
+import { Search, X, Pencil, Download, FlaskConical } from 'lucide-react'
 import EditInterviewModal from '@/components/EditInterviewModal'
 import FloatingAgentChat from '@/components/FloatingAgentChat'
 import StatusBadge from '@/components/StatusBadge'
@@ -37,6 +37,7 @@ interface SessionStat {
   answers?: AnswerData[]
   highlightTags?: string[]
   screenerAnswers?: { label: string; value: string; order: number }[]
+  isPilot?: boolean
 }
 
 interface CompareData {
@@ -72,6 +73,23 @@ export default function InterviewComparePage(props: { params: Promise<{ id: stri
   // 個別結果一覧のソート/フィルタ
   const [search, setSearch] = useState('')
   const [editing, setEditing] = useState(false)
+  const [pilotStarting, setPilotStarting] = useState(false)
+
+  // パイロット: 本番集計に含まれないセッションを作り、被験者フローをそのまま開く
+  async function runPilot() {
+    if (!confirm('パイロット（お試し）を開始します。\nこの結果は集計・分析には含まれません。よろしいですか？')) return
+    setPilotStarting(true)
+    try {
+      const res = await fetch(`/api/interviews/${id}/pilot`, { method: 'POST' })
+      if (!res.ok) { alert('パイロットの開始に失敗しました'); return }
+      const data = await res.json()
+      window.location.href = data.url
+    } catch {
+      alert('パイロットの開始に失敗しました')
+    } finally {
+      setPilotStarting(false)
+    }
+  }
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
   const [sortKey, setSortKey] = useState<SortKey>('date-desc')
 
@@ -125,8 +143,12 @@ export default function InterviewComparePage(props: { params: Promise<{ id: stri
   }
 
   const { interview, sessions, commonInsights } = data
+  // パイロット（リサーチャーの試行）は本番の結果ではないので、集計・分析からは除外する。
+  // 一覧には残してバッジで区別し、消したくなったら削除できるようにする。
+  const realSessions = sessions.filter((s) => !s.isPilot)
+  const pilotCount = sessions.length - realSessions.length
   // 分析系（インサイト・テーマ・比較・レーダー）は分析済み(done)のみで算出
-  const doneSessions = sessions.filter((s) => s.status === 'done')
+  const doneSessions = realSessions.filter((s) => s.status === 'done')
 
   // レーダーチャート用データ（参加者ごとの感情平均）
   const radarData = ['happy', 'neutral', 'sad', 'surprised'].map((emotion) => ({
@@ -152,7 +174,7 @@ export default function InterviewComparePage(props: { params: Promise<{ id: stri
 
   // ハイライトのタグ頻度（人が付けた記録なので、AI 分析未完了のセッションも対象にする）
   const highlightTagCount: Record<string, number> = {}
-  sessions.forEach((s) => {
+  realSessions.forEach((s) => {
     s.highlightTags?.forEach((t) => {
       const key = t.trim()
       if (key) highlightTagCount[key] = (highlightTagCount[key] ?? 0) + 1
@@ -179,7 +201,8 @@ export default function InterviewComparePage(props: { params: Promise<{ id: stri
           <div>
             <h1 className="text-2xl font-semibold mb-1 tracking-tight text-gray-900">{interview.title}</h1>
             <p className="text-gray-500 text-sm">
-              セッション {sessions.length} 件（分析済み {doneSessions.length} 件） · 質問 {interview.questions.length} 問
+              セッション {realSessions.length} 件（分析済み {doneSessions.length} 件） · 質問 {interview.questions.length} 問
+              {pilotCount > 0 && <span className="text-gray-400"> · パイロット {pilotCount} 件（集計対象外）</span>}
             </p>
           </div>
           <div className="flex-shrink-0 flex items-center gap-2">
@@ -191,6 +214,15 @@ export default function InterviewComparePage(props: { params: Promise<{ id: stri
               <Download className="w-3.5 h-3.5" strokeWidth={2} />
               CSV出力
             </a>
+            <button
+              onClick={runPilot}
+              disabled={pilotStarting}
+              className="inline-flex items-center gap-1.5 border border-gray-300 hover:border-gray-400 disabled:opacity-50 text-gray-700 hover:text-gray-900 px-3 py-1.5 rounded-md text-sm transition-colors"
+              title="本番データに含めずに、被験者と同じ流れを自分で試す"
+            >
+              <FlaskConical className="w-3.5 h-3.5" strokeWidth={2} />
+              パイロット実行
+            </button>
             <button
               onClick={() => setEditing(true)}
               className="inline-flex items-center gap-1.5 border border-gray-300 hover:border-gray-400 text-gray-700 hover:text-gray-900 px-3 py-1.5 rounded-md text-sm transition-colors"
@@ -253,6 +285,14 @@ export default function InterviewComparePage(props: { params: Promise<{ id: stri
                 >
                   <span className="font-medium text-sm text-gray-900 w-36 flex-shrink-0 truncate">{s.participantName}</span>
                   <StatusBadge status={s.status} />
+                  {s.isPilot && (
+                    <span
+                      className="flex-shrink-0 text-[10px] text-amber-800 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded"
+                      title="リサーチャーの試行。集計・分析には含まれません"
+                    >
+                      パイロット
+                    </span>
+                  )}
                   <span className="hidden md:block text-xs text-gray-500 flex-1 truncate">{s.summary ?? '—'}</span>
                   <span className="text-xs text-gray-400 flex-shrink-0 ml-auto">{new Date(s.createdAt).toLocaleDateString('ja-JP')}</span>
                 </Link>
@@ -262,7 +302,7 @@ export default function InterviewComparePage(props: { params: Promise<{ id: stri
         </div>
 
         {/* 定量集計（タスク成功率・スコア）。AI 分析の完了を待たずに出せるので done で絞らない */}
-        <InterviewMetrics sessions={sessions} />
+        <InterviewMetrics sessions={realSessions} />
 
         {/* 発言の横断検索 */}
         <TranscriptSearch interviewId={interview.id} />

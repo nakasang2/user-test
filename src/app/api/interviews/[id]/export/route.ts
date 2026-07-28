@@ -28,6 +28,8 @@ export async function GET(_req: NextRequest, props: { params: Promise<{ id: stri
       select: {
         title: true,
         sessions: {
+          // パイロット（リサーチャーの試行）は本番データではないので出力しない
+          where: { isPilot: false },
           orderBy: { createdAt: 'asc' },
           select: {
             id: true,

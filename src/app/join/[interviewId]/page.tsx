@@ -28,7 +28,8 @@ interface InterviewInfo {
   description: string | null
   type?: string
   screeners?: Screener[]
-  _count?: { questions: number; tasks: number }
+  estimate?: { min: number; max: number }
+  _count?: { tasks: number }
 }
 
 export default function JoinPage(props: { params: Promise<{ interviewId: string }> }) {
@@ -145,7 +146,14 @@ export default function JoinPage(props: { params: Promise<{ interviewId: string 
           <ul className="space-y-2.5 text-sm text-gray-700">
             <li className="flex items-start gap-2.5">
               <Clock className="w-4 h-4 text-gray-400 mt-0.5 flex-shrink-0" strokeWidth={1.75} />
-              <span>所要時間：<strong className="text-gray-900 font-medium">約 15〜30 分</strong></span>
+              <span>
+                所要時間：
+                <strong className="text-gray-900 font-medium">
+                  {interview!.estimate
+                    ? `約 ${interview!.estimate.min}〜${interview!.estimate.max} 分`
+                    : '約 15〜30 分'}
+                </strong>
+              </span>
             </li>
             <li className="flex items-start gap-2.5">
               <Video className="w-4 h-4 text-gray-400 mt-0.5 flex-shrink-0" strokeWidth={1.75} />

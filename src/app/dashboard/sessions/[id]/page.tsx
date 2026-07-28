@@ -58,6 +58,7 @@ interface Session {
   answers?: AnswerData[]
   consentedAt?: string | null
   screenerAnswers?: { label: string; value: string; order: number }[]
+  isPilot?: boolean
 }
 
 export default function SessionDetail(props: { params: Promise<{ id: string }> }) {
@@ -382,6 +383,11 @@ export default function SessionDetail(props: { params: Promise<{ id: string }> }
         </div>
         <div className="flex flex-wrap items-center justify-end gap-2">
           <StatusBadge status={session.status} />
+          {session.isPilot && (
+            <span className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded ml-2">
+              パイロット（集計対象外）
+            </span>
+          )}
           {session.transcript && (
             <>
               <button
