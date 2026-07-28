@@ -34,7 +34,6 @@ interface Props {
   sessionId: string
   participantToken?: string
   roomName: string
-  dailyRoomUrl: string
   questions: Question[]
   interviewTitle: string
   participantName?: string

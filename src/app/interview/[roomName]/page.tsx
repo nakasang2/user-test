@@ -25,7 +25,6 @@ export default async function InterviewPage(props: { params: Promise<{ roomName:
       sessionId={session.id}
       participantToken={session.participantToken ?? undefined}
       roomName={roomName}
-      dailyRoomUrl={session.dailyRoomUrl}
       questions={session.interview.questions.map((q) => ({
         id: q.id,
         text: q.text,
