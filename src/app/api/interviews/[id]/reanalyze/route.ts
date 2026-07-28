@@ -15,10 +15,14 @@ export const maxDuration = 300
  * セッションを1件ずつ開いて再分析する手間をなくすために用意した。
  */
 
-/** 1リクエストで処理する件数の上限。多い場合は繰り返し実行してもらう。 */
-const BATCH = 5
-/** 実行時間の予算（ミリ秒）。超えたら打ち切り、残りは次回に回す。 */
-const TIME_BUDGET_MS = 210_000
+/** 1リクエストで処理する件数の上限。呼び出し側が skip を進めて繰り返す。 */
+const BATCH = 3
+/**
+ * 次の1件に着手してよい上限（ミリ秒）。maxDuration=300 に対し、
+ * 1件あたり AI 2コールで最大 70 秒程度かかることを見込んで余裕を残す。
+ * 途中で強制終了すると status が 'processing' で残るため、着手前に判断する。
+ */
+const START_DEADLINE_MS = 150_000
 
 export async function POST(req: NextRequest, props: { params: Promise<{ id: string }> }) {
   try {
@@ -30,6 +34,9 @@ export async function POST(req: NextRequest, props: { params: Promise<{ id: stri
 
     // 「英語のまま残っているものだけ」を対象にできるようにする（既定は全件）
     const onlyNonJapanese = req.nextUrl.searchParams.get('onlyNonJapanese') === '1'
+    // 繰り返し実行で先に進めるための開始位置。無いと毎回同じ先頭 N 件を処理してしまう。
+    const skipRaw = Number(req.nextUrl.searchParams.get('skip') ?? '0')
+    const skip = Number.isInteger(skipRaw) && skipRaw >= 0 ? skipRaw : 0
 
     const interview = await prisma.interview.findFirst({
       where: { id, organizationId: orgId },
@@ -37,7 +44,14 @@ export async function POST(req: NextRequest, props: { params: Promise<{ id: stri
         questions: { orderBy: { order: 'asc' }, select: { text: true } },
         sessions: {
           // パイロットは分析対象外。文字起こしが無いものは再分析できない。
-          where: { isPilot: false, transcript: { isNot: null } },
+          // 実施中（pending/active）も除外する。再分析が status を done に
+          // 書き換えると、その被験者の逐次保存が以降スキップされてしまうため。
+          // 'processing' は含める（前回タイムアウトで固まったものを復旧できるように）。
+          where: {
+            isPilot: false,
+            transcript: { isNot: null },
+            status: { in: ['done', 'completed', 'processing'] },
+          },
           orderBy: { createdAt: 'desc' },
           select: {
             id: true,
@@ -74,8 +88,9 @@ export async function POST(req: NextRequest, props: { params: Promise<{ id: stri
     let processed = 0
     const startedAt = Date.now()
 
-    for (const session of targets.slice(0, BATCH)) {
-      if (Date.now() - startedAt > TIME_BUDGET_MS) break
+    for (const session of targets.slice(skip, skip + BATCH)) {
+      // 着手前に残り時間を見る（途中で強制終了されると status が processing で残る）
+      if (Date.now() - startedAt > START_DEADLINE_MS) break
       processed += 1
       try {
         await analyzeAndSaveSession({
@@ -90,6 +105,8 @@ export async function POST(req: NextRequest, props: { params: Promise<{ id: stri
           // 感情データは再分析の対象外（録画時に取得した実測値なので触らない）
           emotions: null,
           questions,
+          // 失敗しても既存の要約・テーマ・発言ごとの感情を壊さない
+          onAnalysisFailure: 'abort',
         })
         done += 1
       } catch (err) {
@@ -105,11 +122,16 @@ export async function POST(req: NextRequest, props: { params: Promise<{ id: stri
         .catch(() => {})
     }
 
+    // 対象から外れないケース（全件モード）でも先に進めるよう、次の開始位置を返す。
+    // 成功した分は日本語化されるので onlyNonJapanese モードでは targets 自体が縮む。
+    const nextSkip = onlyNonJapanese ? 0 : skip + processed
     return NextResponse.json({
       ok: true,
       done,
       failed,
-      remaining: Math.max(0, targets.length - processed),
+      total: targets.length,
+      nextSkip,
+      remaining: Math.max(0, targets.length - (onlyNonJapanese ? processed : skip + processed)),
     })
   } catch (err) {
     return handleApiError(err)

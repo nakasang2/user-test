@@ -112,9 +112,11 @@ export default function InterviewRoom({
   const [cameraReady, setCameraReady] = useState(false)
   // リアルタイムグラフ用：lastEmotion が更新されるたびに履歴に追加（最大 30 件 ≈ 2.5 分）
   //
-  // 時間経過とともに値を積み上げる性質のため、レンダー中に算出できない
-  //（過去の検出結果はどこにも残らず、この履歴だけが保持している）。
-  // 検出フックの更新に反応して追記するのが唯一の方法なので、規則を個別に外す。
+  // この effect は履歴の追記だけでなく、感情スナップショットの逐次サーバー保存も担う
+  //（下の /api/emotions への POST）。検出フックの更新に反応して動く必要があるため
+  // effect 自体を無くせない。追記もレンダー中には算出できないので、規則を個別に外す。
+  // ※全件は useEmotionDetection 側の getSnapshots() が保持しており、ここは
+  //   直近30件の表示用。
   const [emotionHistory, setEmotionHistory] = useState<EmotionSnapshot[]>([])
   useEffect(() => {
     if (lastEmotion) {

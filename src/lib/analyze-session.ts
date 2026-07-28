@@ -37,9 +37,25 @@ export async function analyzeAndSaveSession(params: {
   /** 渡したときだけ感情データを置き換える。null/undefined なら既存を保持 */
   emotions?: EmotionInput[] | null
   questions: string[]
+  /**
+   * AI 分析が失敗したときの扱い。
+   * - 'fallback': 「分析に失敗しました。」を保存して先に進む（初回分析向け。
+   *   まだ何も無い状態なので、失敗した事実を残すほうが分かりやすい）
+   * - 'abort':    何も書かずに例外を投げ、status も元に戻す（再分析向け。
+   *   既にある良い要約・テーマ・発言ごとの感情を壊さないため）
+   */
+  onAnalysisFailure?: 'fallback' | 'abort'
 }) {
-  const { sessionId, transcriptText, segments, emotions, questions } = params
+  const {
+    sessionId, transcriptText, segments, emotions, questions,
+    onAnalysisFailure = 'fallback',
+  } = params
 
+  // 失敗時に元へ戻せるよう、書き換える前の status を控える
+  const before = await prisma.session.findUnique({
+    where: { id: sessionId },
+    select: { status: true },
+  })
   await prisma.session.update({ where: { id: sessionId }, data: { status: 'processing' } })
 
   // 行番号 #i と時刻 [mm:ss] を付けて渡す。
@@ -62,6 +78,14 @@ export async function analyzeAndSaveSession(params: {
     segmentSentiments = result.segmentSentiments
   } catch (err) {
     console.error('analyzeTranscript failed:', err)
+    if (onAnalysisFailure === 'abort') {
+      // 既存データを上書きせずに中断する。status も元の値へ戻して
+      // 'processing' のまま固まらないようにする。
+      await prisma.session
+        .update({ where: { id: sessionId }, data: { status: before?.status ?? 'done' } })
+        .catch(() => {})
+      throw err instanceof Error ? err : new Error('analyzeTranscript failed')
+    }
     summary = '分析に失敗しました。'
   }
 

@@ -77,31 +77,52 @@ export default function InterviewComparePage(props: { params: Promise<{ id: stri
   const [pilotStarting, setPilotStarting] = useState(false)
   const [backfilling, setBackfilling] = useState(false)
   const [reanalyzing, setReanalyzing] = useState(false)
+  const [reanalyzeMsg, setReanalyzeMsg] = useState('')
 
   // 全セッションをまとめて再分析する。
   // AI へのプロンプトを変えた後（要約の日本語化など）に既存セッションを追随させる用途。
+  // 全セッションをまとめて再分析する。
+  // AI へのプロンプトを変えた後（要約の日本語化など）に既存セッションを追随させる用途。
+  // 1回のリクエストで処理できる件数に限りがあるため、残りが無くなるまで自動で繰り返す。
   async function reanalyzeAll() {
-    if (!confirm('このテストの全セッションをAIで再分析します。\n要約・テーマ・感情判定が作り直されます（録画と表情データは変更しません）。\n\n5件ずつ処理します。よろしいですか？')) return
+    if (!confirm('このテストの全セッションをAIで再分析します。\n要約・テーマ・感情判定が作り直されます（録画と表情データは変更しません）。\n\n件数が多い場合は自動で続けて処理します。よろしいですか？')) return
     setReanalyzing(true)
+    setReanalyzeMsg('再分析を開始しています…')
+    let totalDone = 0
+    let totalFailed = 0
+    let skip = 0
     try {
-      const res = await fetch(`/api/interviews/${id}/reanalyze`, { method: 'POST' })
-      const data = await res.json().catch(() => null)
-      if (!res.ok || !data) {
-        alert(data?.error ?? '再分析が途中で終了しました。保存できた分を反映します。残りがあれば、もう一度実行してください。')
-        window.location.reload()
-        return
+      // 上限を設けて無限ループを防ぐ（1回あたり最大3件）
+      for (let i = 0; i < 40; i++) {
+        const res = await fetch(`/api/interviews/${id}/reanalyze?skip=${skip}`, { method: 'POST' })
+        const data = await res.json().catch(() => null)
+        if (!res.ok || !data) {
+          alert(data?.error ?? `再分析が途中で終了しました。${totalDone} 件は完了しています。もう一度実行すると続きから再開します。`)
+          break
+        }
+        totalDone += data.done
+        totalFailed += data.failed
+        skip = data.nextSkip
+        setReanalyzeMsg(`再分析中… ${totalDone} 件完了（残り ${data.remaining} 件）`)
+        if (data.remaining <= 0) break
+        // 1件も進まなかったら打ち切る（時間切れで着手できなかった等）
+        if (data.done === 0 && data.failed === 0) {
+          alert(`時間の都合で一旦停止しました。${totalDone} 件完了。もう一度実行すると続きから再開します。`)
+          break
+        }
       }
-      const rest = data.remaining > 0 ? `\n残り ${data.remaining} 件は、もう一度実行してください。` : ''
-      const ng = data.failed > 0 ? `\n${data.failed} 件は失敗しました。` : ''
-      alert(`${data.done} 件を再分析しました。${ng}${rest}`)
+      const ng = totalFailed > 0 ? `\n${totalFailed} 件は失敗しました（元の内容はそのまま残っています）。` : ''
+      alert(totalDone > 0 || totalFailed > 0
+        ? `${totalDone} 件を再分析しました。${ng}`
+        : '再分析の対象になるセッションがありませんでした。')
       window.location.reload()
     } catch {
       alert('再分析に失敗しました')
     } finally {
       setReanalyzing(false)
+      setReanalyzeMsg('')
     }
   }
-
   // 文字起こししか無い過去セッションから、質問ごとの回答を復元する
   async function backfillAnswers() {
     if (!confirm('文字起こしから、質問ごとの回答をAIが抽出して保存します。\n実施中に保存された回答があるセッションは変更しません。よろしいですか？')) return
@@ -276,7 +297,7 @@ export default function InterviewComparePage(props: { params: Promise<{ id: stri
               title="全セッションの要約・テーマ・感情判定をAIで作り直します（要約が英語のままのものを日本語にし直す用途）"
             >
               <RefreshCw className={`w-3.5 h-3.5 ${reanalyzing ? 'animate-spin' : ''}`} strokeWidth={2} />
-              {reanalyzing ? '再分析中…' : '全件を再分析'}
+              {reanalyzing ? (reanalyzeMsg || '再分析中…') : '全件を再分析'}
             </button>
             <button
               onClick={runPilot}
