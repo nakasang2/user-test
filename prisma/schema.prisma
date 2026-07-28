@@ -137,6 +137,26 @@ model TaskResult {
   @@index([sessionId])
 }
 
+// リサーチャーが付けるハイライト（引用＋メモ＋タグ）。
+// 定性分析（コーディング／アフィニティ）の一次データで、AI 生成のテーマとは別物。
+// AI テーマは再分析で上書きされるが、こちらは人が付けた記録なので消さない。
+model Highlight {
+  id        String   @id @default(cuid())
+  sessionId String
+  session   Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  // 紐づく発言。セグメントは再分析で作り直されるため、引用文はスナップショットで持つ
+  segmentId String?
+  quote     String   // 引用した発言
+  note      String?  // リサーチャーのメモ
+  tags      String[] @default([])
+  startTime Float?   // 動画の該当位置（秒）
+  createdBy String?  // 作成者の User.id（表示用。参照整合は取らない）
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([sessionId])
+}
+
 // 質問への回答。rating/nps は valueNum に数値で入れて集計可能にする
 model Answer {
   id         String    @id @default(cuid())
@@ -185,6 +205,7 @@ model Session {
   emotions      EmotionResult[]
   taskResults   TaskResult[]
   answers       Answer[]
+  highlights    Highlight[]
   interview     Interview       @relation(fields: [interviewId], references: [id])
   participant   Participant?    @relation(fields: [participantId], references: [id])
   createdAt     DateTime        @default(now())
@@ -199,6 +220,10 @@ model Transcript {
   segments  TranscriptSegment[]
   summary   String?
   themes    String?
+  // インタビュー全体のトーン（positive | neutral | negative）と、その根拠の短い説明。
+  // 発言ごとの判定は TranscriptSegment.sentiment 側に持つ（全体値のコピーはしない）。
+  sentiment     String?
+  sentimentNote String?
   createdAt DateTime            @default(now())
 }
 
@@ -211,6 +236,9 @@ model TranscriptSegment {
   startTime    Float
   endTime      Float
   sentiment    String?
+
+  // 横断検索・セグメント全置換で毎回この列を辿るため索引を張る
+  @@index([transcriptId])
 }
 
 model EmotionResult {

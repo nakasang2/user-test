@@ -7,6 +7,7 @@ import TranscriptView from '@/components/TranscriptView'
 import FloatingAgentChat from '@/components/FloatingAgentChat'
 import StatusBadge from '@/components/StatusBadge'
 import SessionMetrics, { type TaskResultData, type AnswerData } from '@/components/SessionMetrics'
+import HighlightPanel, { type HighlightData } from '@/components/HighlightPanel'
 import { Video, Download, X, Folder } from 'lucide-react'
 import { track } from '@/lib/analytics'
 
@@ -71,6 +72,45 @@ export default function SessionDetail(props: { params: Promise<{ id: string }> }
   const [videoLoadError, setVideoLoadError] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const localVideoUrlRef = useRef<string | null>(null)
+  const [highlights, setHighlights] = useState<HighlightData[]>([])
+
+  // ── ハイライト（定性分析のコーディング） ──
+  async function addHighlight(seg: { id: string; text: string; startTime: number }) {
+    try {
+      const res = await fetch(`/api/sessions/${id}/highlights`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ quote: seg.text, segmentId: seg.id, startTime: seg.startTime }),
+      })
+      if (!res.ok) { alert('ハイライトの追加に失敗しました'); return }
+      const data = await res.json()
+      setHighlights((prev) => [...prev, data.highlight].sort((a, b) => (a.startTime ?? 0) - (b.startTime ?? 0)))
+    } catch { alert('ハイライトの追加に失敗しました') }
+  }
+
+  async function updateHighlight(highlightId: string, patch: { note?: string; tags?: string[] }) {
+    const res = await fetch(`/api/highlights/${highlightId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(patch),
+    })
+    if (!res.ok) { alert('保存に失敗しました'); return }
+    const data = await res.json()
+    setHighlights((prev) => prev.map((h) => (h.id === highlightId ? data.highlight : h)))
+  }
+
+  async function deleteHighlight(highlightId: string) {
+    if (!confirm('このハイライトを削除しますか？')) return
+    const res = await fetch(`/api/highlights/${highlightId}`, { method: 'DELETE' })
+    if (!res.ok) { alert('削除に失敗しました'); return }
+    setHighlights((prev) => prev.filter((h) => h.id !== highlightId))
+  }
+
+  function seekVideo(sec: number) {
+    if (!videoRef.current) return
+    videoRef.current.currentTime = sec
+    videoRef.current.play()
+  }
 
   useEffect(() => {
     return () => { if (localVideoUrlRef.current) URL.revokeObjectURL(localVideoUrlRef.current) }
@@ -115,6 +155,13 @@ export default function SessionDetail(props: { params: Promise<{ id: string }> }
       })
       .then((d) => { if (!cancelled && d) setSession(d) })
       .catch(() => { if (!cancelled) setLoadError(true) })
+
+    // ハイライトも同時に取得（セッション取得と同じ cancelled ガードのパターンに揃える）
+    fetch(`/api/sessions/${id}/highlights`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (!cancelled && d) setHighlights(d.highlights ?? []) })
+      .catch(() => { /* 取得失敗時は空のまま */ })
+
     return () => { cancelled = true }
   }, [id])
 
@@ -182,6 +229,15 @@ export default function SessionDetail(props: { params: Promise<{ id: string }> }
         String(a.order), q(a.text), a.type,
         a.valueNum != null ? String(a.valueNum) : '',
         q(a.valueText ?? ''),
+      ]))
+      rows.push([])
+    }
+
+    if (highlights.length) {
+      rows.push(['# ハイライト'], ['startTime', 'quote', 'note', 'tags'])
+      highlights.forEach((h) => rows.push([
+        h.startTime != null ? String(Math.round(h.startTime)) : '',
+        q(h.quote), q(h.note ?? ''), q(h.tags.join(' / ')),
       ]))
       rows.push([])
     }
@@ -421,7 +477,20 @@ export default function SessionDetail(props: { params: Promise<{ id: string }> }
             <TranscriptView
               transcript={session.transcript}
               questions={session.interview.questions}
+              onHighlight={addHighlight}
+              highlightedSegmentIds={new Set(highlights.map((h) => h.segmentId).filter((v): v is string => !!v))}
             />
+
+            {/* ハイライト（引用＋メモ＋タグ）: 定性分析の作業場 */}
+            <div className="mt-6">
+              <SectionLabel>ハイライト</SectionLabel>
+              <HighlightPanel
+                highlights={highlights}
+                onUpdate={updateHighlight}
+                onDelete={deleteHighlight}
+                onSeek={videoSrc ? seekVideo : undefined}
+              />
+            </div>
           </div>
 
           {/* 右: 表情エンゲージメント指標 + 動画 */}
