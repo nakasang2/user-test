@@ -46,6 +46,19 @@ function scoreTone(value: number, type: string): string {
   return TONE.bad
 }
 
+const SENTIMENT_LABEL: Record<string, string> = {
+  positive: '肯定的', neutral: 'ふつう', negative: '否定的',
+}
+const SENTIMENT_TONE: Record<string, string> = {
+  positive: TONE.good, neutral: TONE.mid, negative: TONE.bad,
+}
+/** 自由回答セルの左端に色帯を出して、肯定/否定を一目で分かるようにする */
+const SENTIMENT_BAR: Record<string, string> = {
+  positive: 'border-l-2 border-emerald-400',
+  neutral:  'border-l-2 border-amber-300',
+  negative: 'border-l-2 border-red-400',
+}
+
 /**
  * 質問 × 被験者の回答比較テーブル。
  *
@@ -99,7 +112,11 @@ export default function AnswerMatrix({
       // 参加者名か、いずれかの回答本文に一致すれば残す
       if (s.participantName.toLowerCase().includes(q)) return true
       return (s.answers ?? []).some(
-        (a) => a.valueText?.toLowerCase().includes(q) || String(a.valueNum ?? '').includes(q)
+        (a) =>
+          a.valueText?.toLowerCase().includes(q) ||
+          String(a.valueNum ?? '').includes(q) ||
+          // 「肯定的」「否定的」でも絞り込めるようにする
+          (a.sentiment ? (SENTIMENT_LABEL[a.sentiment] ?? '').includes(q) : false)
       )
     })
     if (sortBy) {
@@ -115,6 +132,17 @@ export default function AnswerMatrix({
             if (an === null) return 1
             if (bn === null) return -1
             return sortAsc ? an - bn : bn - an
+          }
+          // 自由回答は AI 判定（肯定 > ふつう > 否定）を優先して並べる。
+          // 「肯定的に答えた人は誰か」を見たいので、五十音順より判定順のほうが役に立つ。
+          const rank = (v?: AnswerData) =>
+            v?.sentiment === 'positive' ? 2 : v?.sentiment === 'neutral' ? 1 : v?.sentiment === 'negative' ? 0 : null
+          const ar = rank(av)
+          const br = rank(bv)
+          if (ar !== null || br !== null) {
+            if (ar === null) return 1
+            if (br === null) return -1
+            if (ar !== br) return sortAsc ? ar - br : br - ar
           }
           const at = av?.valueText ?? ''
           const bt = bv?.valueText ?? ''
@@ -145,6 +173,9 @@ export default function AnswerMatrix({
         <h2 className="text-xs font-medium text-gray-500 uppercase tracking-wide mr-auto">
           回答の比較（質問 × 参加者）
         </h2>
+        <span className="text-[11px] text-gray-400 mr-auto">
+          自由回答の肯定/否定は AI 判定（参考値）
+        </span>
         <div className="relative">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400 pointer-events-none" strokeWidth={2} />
           <input
@@ -229,11 +260,22 @@ export default function AnswerMatrix({
                   }
                   const text = a.valueText ?? ''
                   const long = text.length > 90
+                  const tone = a.sentiment ? SENTIMENT_BAR[a.sentiment] : ''
                   return (
                     <td key={q.id} className="px-3 py-3">
-                      <p className={`text-xs text-gray-700 leading-relaxed whitespace-pre-wrap ${isOpen || !long ? '' : 'line-clamp-3'}`}>
-                        {text || <span className="text-gray-300">—</span>}
-                      </p>
+                      <div className={tone ? `${tone} pl-2` : ''}>
+                        {a.sentiment && SENTIMENT_LABEL[a.sentiment] && (
+                          <span
+                            className={`inline-block mb-1 px-1.5 py-0.5 rounded border text-[10px] ${SENTIMENT_TONE[a.sentiment]}`}
+                            title="AI による判定です。ニュアンスの取り違えがあるため、判断の前に本文をご確認ください"
+                          >
+                            {SENTIMENT_LABEL[a.sentiment]}
+                          </span>
+                        )}
+                        <p className={`text-xs text-gray-700 leading-relaxed whitespace-pre-wrap ${isOpen || !long ? '' : 'line-clamp-3'}`}>
+                          {text || <span className="text-gray-300">—</span>}
+                        </p>
+                      </div>
                       <div className="flex items-center gap-2 mt-1">
                         {long && (
                           <button

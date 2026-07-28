@@ -242,11 +242,13 @@ export default function SessionDetail(props: { params: Promise<{ id: string }> }
       rows.push([])
     }
     if (session.answers?.length) {
-      rows.push(['# 回答'], ['order', 'question', 'type', 'value', 'text'])
+      rows.push(['# 回答'], ['order', 'question', 'type', 'value', 'text', 'followUpCount', 'sentiment'])
       session.answers.forEach((a) => rows.push([
         String(a.order), q(a.text), a.type,
         a.valueNum != null ? String(a.valueNum) : '',
         q(a.valueText ?? ''),
+        a.followUpCount != null ? String(a.followUpCount) : '',
+        q(a.sentiment ?? ''),
       ]))
       rows.push([])
     }

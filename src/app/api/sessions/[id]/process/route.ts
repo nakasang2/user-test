@@ -1,8 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { analyzeTranscript } from '@/lib/ai'
+import { analyzeTranscript, classifyAnswerSentiments } from '@/lib/ai'
 import { requireAuth, requireParticipantToken, handleApiError } from '@/lib/api-auth'
 import { rateLimit, getClientIp } from '@/lib/ratelimit'
+
+// AI 呼び出しを2回行うため、既定の実行時間上限では足りないことがある
+export const maxDuration = 300
 
 export async function POST(req: NextRequest, props: { params: Promise<{ id: string }> }) {
  try {
@@ -111,10 +114,40 @@ export async function POST(req: NextRequest, props: { params: Promise<{ id: stri
     })
   }
 
+  // 先に分析済みにしておく。この後の自由回答判定は補助的な処理なので、
+  // ここで落ちても status が 'processing' のまま固まらないようにする
+  //（固まると画面から「AI 再分析」ボタンが出ず復旧できなくなる）。
   await prisma.session.update({
     where: { id },
     data: { status: 'done' },
   })
+
+  // 自由回答の肯定/否定を判定して保存する。
+  // 文字起こしの分析とは別呼び出しなので、ここが失敗しても要約・テーマは残る。
+  // 失敗時は既存の判定を保持する（classifyAnswerSentiments は失敗を投げる）。
+  try {
+    const openAnswers = await prisma.answer.findMany({
+      where: { sessionId: id, type: 'open', NOT: { valueText: null } },
+      select: { id: true, text: true, valueText: true },
+      orderBy: { order: 'asc' },
+    })
+    if (openAnswers.length > 0) {
+      const judged = await classifyAnswerSentiments(
+        openAnswers.map((a) => ({ question: a.text, answer: a.valueText ?? '' })),
+      )
+      await prisma.$transaction(
+        openAnswers.map((a, i) =>
+          prisma.answer.update({
+            where: { id: a.id },
+            // 判定が返らなかったものは null に戻す（前回の古い判定を残さない）
+            data: { sentiment: judged[String(i)] ?? null },
+          }),
+        ),
+      )
+    }
+  } catch (err) {
+    console.error('classifyAnswerSentiments failed:', err)
+  }
 
   return NextResponse.json({ transcript, ok: true })
  } catch (err) {
