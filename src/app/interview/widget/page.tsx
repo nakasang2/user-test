@@ -26,8 +26,12 @@ function WidgetContent() {
   const [serviceOpened, setServiceOpened]       = useState(false)
   const [warnNoRecord, setWarnNoRecord]         = useState(false)
   const [cameraError, setCameraError]           = useState(false)
+  // 顔フレーミング判定: null=判定前 / 'ok'=正常 / 'no_face'=写っていない / 'cut_off'=見切れ
+  const [faceStatus, setFaceStatus]             = useState<'ok' | 'no_face' | 'cut_off' | null>(null)
 
   const channelRef             = useRef<BroadcastChannel | null>(null)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const faceApiRef             = useRef<any>(null)
   const webcamVideoRef         = useRef<HTMLVideoElement>(null)
   const webcamStreamRef        = useRef<MediaStream | null>(null)
   const screenMediaRecorderRef = useRef<MediaRecorder | null>(null)
@@ -82,6 +86,49 @@ function WidgetContent() {
       })
       .catch(() => { setCameraError(true) })
   }
+
+  /* ── 顔検出モデル（tiny_face_detector のみ）をロード。補助機能なので失敗しても録画は継続 ── */
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      if (typeof window === 'undefined') return
+      try {
+        const faceapi = await import('@vladmandic/face-api')
+        await faceapi.nets.tinyFaceDetector.loadFromUri('/models')
+        if (!cancelled) faceApiRef.current = faceapi
+      } catch (err) {
+        console.warn('[Widget] 顔検出モデルのロードに失敗（顔フレーミング判定は無効）:', err)
+      }
+    })()
+    return () => { cancelled = true }
+  }, [])
+
+  /* ── 顔フレーミング判定ループ: 数秒ごとに顔の有無と見切れ（画面端に接触）を判定 ── */
+  useEffect(() => {
+    const interval = setInterval(async () => {
+      const faceapi = faceApiRef.current
+      const video = webcamVideoRef.current
+      if (!faceapi || !video || cameraError || video.readyState < 2 || !video.videoWidth) return
+      try {
+        const det = await faceapi.detectSingleFace(
+          video,
+          new faceapi.TinyFaceDetectorOptions({ scoreThreshold: 0.3 }),
+        )
+        if (!det) { setFaceStatus('no_face'); return }
+        const { x, y, width, height } = det.box
+        const vw = video.videoWidth
+        const vh = video.videoHeight
+        // 端に接していたら「見切れ」。マージンは映像サイズの約1.5%（最低6px）。
+        const mx = Math.max(6, vw * 0.015)
+        const my = Math.max(6, vh * 0.015)
+        const cut = x <= mx || y <= my || (x + width) >= (vw - mx) || (y + height) >= (vh - my)
+        setFaceStatus(cut ? 'cut_off' : 'ok')
+      } catch {
+        // フレームが取れない等は無視
+      }
+    }, 2500)
+    return () => clearInterval(interval)
+  }, [cameraError])
 
   /* ── 画面録画開始（Canvas合成: スクリーン + ウェブカメラPiP） ── */
   async function startScreenRecording() {
@@ -308,6 +355,17 @@ function WidgetContent() {
           <div className="absolute top-2 right-2 flex items-center gap-1.5 bg-white/95 border border-red-200 px-2 py-1 rounded-md shadow-sm">
             <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
             <span className="text-[10px] text-red-600 font-semibold tracking-wide">REC</span>
+          </div>
+        )}
+        {/* 顔フレーミング警告（カメラ下端にオーバーレイ）。見切れ・未検出のときだけ出す */}
+        {!cameraError && (faceStatus === 'no_face' || faceStatus === 'cut_off') && (
+          <div className="absolute bottom-0 inset-x-0 flex items-center gap-1.5 bg-amber-500/95 text-white px-2.5 py-1.5">
+            <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" strokeWidth={2.25} />
+            <span className="text-[11px] font-medium leading-snug">
+              {faceStatus === 'no_face'
+                ? '顔が写っていません。カメラに顔が入るように調整してください'
+                : '顔が見切れています。中央に顔が来るように位置を調整してください'}
+            </span>
           </div>
         )}
       </div>

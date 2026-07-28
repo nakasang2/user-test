@@ -19,6 +19,7 @@ import {
   Send,
   Sparkles,
   AlertCircle,
+  AlertTriangle,
   Copy,
 } from 'lucide-react'
 
@@ -81,7 +82,7 @@ export default function InterviewRoom({
   const conversationBufferRef = useRef('')
 
   // 実感情検出フック
-  const { status: emotionStatus, lastEmotion, startDetection, stopDetection, getSnapshots } = useEmotionDetection(5000)
+  const { status: emotionStatus, lastEmotion, faceStatus, startDetection, stopDetection, getSnapshots } = useEmotionDetection(5000)
   const [cameraReady, setCameraReady] = useState(false)
   // リアルタイムグラフ用：lastEmotion が更新されるたびに履歴に追加（最大 30 件 ≈ 2.5 分）
   const [emotionHistory, setEmotionHistory] = useState<EmotionSnapshot[]>([])
@@ -1050,6 +1051,29 @@ export default function InterviewRoom({
                 カメラを許可して再試行
               </button>
             </div>
+          )}
+
+          {/* 顔フレーミング警告。カメラが小型PiP（ユーザビリティ時）か全画面（通常時）かで位置を変える。
+              見切れ・未検出のときだけ出す。 */}
+          {!cameraError && (faceStatus === 'no_face' || faceStatus === 'cut_off') && (
+            (() => {
+              const cameraIsPip = interviewType === 'usability' && (phase === 'task' || phase === 'interview' || phase === 'thinking' || phase === 'intro' || phase === 'waiting')
+              const msg = faceStatus === 'no_face'
+                ? '顔が写っていません。カメラに顔が入るように調整してください'
+                : '顔が見切れています。中央に顔が来るように位置を調整してください'
+              return (
+                <div
+                  className={
+                    cameraIsPip
+                      ? 'absolute bottom-[8.5rem] right-4 w-44 z-20 flex items-start gap-1.5 bg-amber-500/95 text-white px-2 py-1.5 rounded-lg shadow-lg'
+                      : 'absolute bottom-4 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2 bg-amber-500/95 text-white px-3.5 py-2 rounded-lg shadow-lg max-w-[90%]'
+                  }
+                >
+                  <AlertTriangle className={cameraIsPip ? 'w-3.5 h-3.5 flex-shrink-0 mt-0.5' : 'w-4 h-4 flex-shrink-0'} strokeWidth={2.25} />
+                  <span className={cameraIsPip ? 'text-[10px] font-medium leading-snug' : 'text-xs font-medium leading-snug'}>{msg}</span>
+                </div>
+              )
+            })()
           )}
 
           {/* プロトタイプテスト: iframe */}

@@ -14,10 +14,13 @@ export interface EmotionSnapshot {
 }
 
 type DetectionStatus = 'idle' | 'loading' | 'ready' | 'error'
+// 顔フレーミング: null=判定前 / 'ok'=正常 / 'no_face'=写っていない / 'cut_off'=見切れ
+export type FaceFraming = 'ok' | 'no_face' | 'cut_off' | null
 
 export function useEmotionDetection(intervalMs = 5000) {
   const [status, setStatus] = useState<DetectionStatus>('idle')
   const [lastEmotion, setLastEmotion] = useState<EmotionSnapshot | null>(null)
+  const [faceStatus, setFaceStatus] = useState<FaceFraming>(null)
   const snapshotsRef = useRef<EmotionSnapshot[]>([])
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const startTimeRef = useRef<number>(Date.now())
@@ -66,7 +69,18 @@ export function useEmotionDetection(intervalMs = 5000) {
           .detectSingleFace(videoEl, new faceapi.TinyFaceDetectorOptions({ scoreThreshold: 0.3 }))
           .withFaceExpressions()
 
-        if (!detection) return // 顔が映っていない
+        if (!detection) { setFaceStatus('no_face'); return } // 顔が映っていない
+
+        // 顔フレーミング判定: box が映像端（±1.5%、最低6px）に接していたら見切れ
+        const { x, y, width, height } = detection.detection.box
+        const vw = videoEl.videoWidth
+        const vh = videoEl.videoHeight
+        if (vw && vh) {
+          const mx = Math.max(6, vw * 0.015)
+          const my = Math.max(6, vh * 0.015)
+          const cut = x <= mx || y <= my || (x + width) >= (vw - mx) || (y + height) >= (vh - my)
+          setFaceStatus(cut ? 'cut_off' : 'ok')
+        }
 
         const expr = detection.expressions
         const snapshot: EmotionSnapshot = {
@@ -94,10 +108,11 @@ export function useEmotionDetection(intervalMs = 5000) {
       clearInterval(intervalRef.current)
       intervalRef.current = null
     }
+    setFaceStatus(null) // 停止後に古い見切れ警告が残らないようリセット
   }, [])
 
   // スナップショット一覧を返す
   const getSnapshots = useCallback(() => snapshotsRef.current, [])
 
-  return { status, lastEmotion, startDetection, stopDetection, getSnapshots }
+  return { status, lastEmotion, faceStatus, startDetection, stopDetection, getSnapshots }
 }
