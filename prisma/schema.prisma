@@ -197,6 +197,8 @@ model Session {
   participantToken String?      @unique
   // 読み取り専用の共有リンク用トークン（発行時のみ生成。null = 共有無効）。
   shareToken    String?         @unique
+  // 共有リンクの有効期限。null = 無期限。期限切れのリンクは共有ページ側で拒否する。
+  shareExpiresAt DateTime?
   recordingId   String?
   recordingUrl  String?
   // 参加同意（録画・表情分析・AI処理）を得た日時。null = 未取得。

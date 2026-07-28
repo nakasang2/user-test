@@ -3,7 +3,7 @@
 import { useState, useEffect, use, useMemo } from 'react'
 import Link from 'next/link'
 import { RadarChart, Radar, PolarGrid, PolarAngleAxis, ResponsiveContainer, Tooltip } from 'recharts'
-import { Search, X, Pencil } from 'lucide-react'
+import { Search, X, Pencil, Download } from 'lucide-react'
 import EditInterviewModal from '@/components/EditInterviewModal'
 import FloatingAgentChat from '@/components/FloatingAgentChat'
 import StatusBadge from '@/components/StatusBadge'
@@ -179,13 +179,23 @@ export default function InterviewComparePage(props: { params: Promise<{ id: stri
               セッション {sessions.length} 件（分析済み {doneSessions.length} 件） · 質問 {interview.questions.length} 問
             </p>
           </div>
-          <button
-            onClick={() => setEditing(true)}
-            className="flex-shrink-0 inline-flex items-center gap-1.5 border border-gray-300 hover:border-gray-400 text-gray-700 hover:text-gray-900 px-3 py-1.5 rounded-md text-sm transition-colors"
-          >
-            <Pencil className="w-3.5 h-3.5" strokeWidth={2} />
-            編集
-          </button>
+          <div className="flex-shrink-0 flex items-center gap-2">
+            <a
+              href={`/api/interviews/${interview.id}/export`}
+              className="inline-flex items-center gap-1.5 border border-gray-300 hover:border-gray-400 text-gray-700 hover:text-gray-900 px-3 py-1.5 rounded-md text-sm transition-colors"
+              title="全セッションのタスク結果・回答・ハイライトを1つのCSVにまとめて出力"
+            >
+              <Download className="w-3.5 h-3.5" strokeWidth={2} />
+              CSV出力
+            </a>
+            <button
+              onClick={() => setEditing(true)}
+              className="inline-flex items-center gap-1.5 border border-gray-300 hover:border-gray-400 text-gray-700 hover:text-gray-900 px-3 py-1.5 rounded-md text-sm transition-colors"
+            >
+              <Pencil className="w-3.5 h-3.5" strokeWidth={2} />
+              編集
+            </button>
+          </div>
         </div>
 
         {/* 個別の結果一覧（全ステータス・ソート/フィルタ/検索） */}

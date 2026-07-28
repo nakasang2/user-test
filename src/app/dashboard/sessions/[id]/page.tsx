@@ -177,15 +177,30 @@ export default function SessionDetail(props: { params: Promise<{ id: string }> }
   }, [id, session?.recordingUrl])
 
   async function shareSession() {
+    // 被験者の発言が無期限に公開され続けないよう、期限を選ばせる（既定 30 日）
+    const input = prompt('共有リンクの有効期限を日数で入力してください（0 = 無期限）', '30')
+    if (input === null) return
+    const expiresInDays = Number(input)
+    if (!Number.isFinite(expiresInDays) || expiresInDays < 0) {
+      alert('日数は0以上の数値で入力してください')
+      return
+    }
     try {
-      const res = await fetch(`/api/sessions/${id}/share`, { method: 'POST' })
+      const res = await fetch(`/api/sessions/${id}/share`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ expiresInDays }),
+      })
       if (!res.ok) throw new Error('failed')
-      const { shareToken } = await res.json()
+      const { shareToken, shareExpiresAt } = await res.json()
       const url = `${window.location.origin}/share/${shareToken}`
       await navigator.clipboard.writeText(url)
       track('report_shared', { sessionId: id })
       setSession((prev) => (prev ? { ...prev, shareEnabled: true } : prev))
-      alert(`読み取り専用の共有リンクをコピーしました:\n${url}`)
+      const until = shareExpiresAt
+        ? `\n有効期限: ${new Date(shareExpiresAt).toLocaleDateString('ja-JP')}`
+        : '\n有効期限: なし'
+      alert(`読み取り専用の共有リンクをコピーしました:\n${url}${until}`)
     } catch {
       alert('共有リンクの発行に失敗しました')
     }
