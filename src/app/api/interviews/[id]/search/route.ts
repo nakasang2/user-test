@@ -35,7 +35,8 @@ export async function GET(req: NextRequest, props: { params: Promise<{ id: strin
     const escaped = q.replace(/[\\%_]/g, '\\$&')
     const where = {
       text: { contains: escaped, mode: 'insensitive' as const },
-      transcript: { session: { interviewId: id } },
+      // パイロット（リサーチャーの試行）は検索対象に含めない
+      transcript: { session: { interviewId: id, isPilot: false } },
     }
 
     // 表示件数の上限。到達したら UI に「一部のみ表示」と伝えるため総数も取る。

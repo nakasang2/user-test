@@ -34,6 +34,7 @@ interface Interview {
 interface Session {
   id: string
   status: string
+  isPilot?: boolean
   dailyRoomName: string
   dailyRoomUrl: string
   createdAt: string
@@ -104,17 +105,21 @@ export default function Dashboard() {
     }
   }
 
+  // パイロット（リサーチャーの試行）は本番の実績ではないので、件数からは除く。
+  // 調査詳細側の集計と数字が食い違わないよう、ここでも同じ基準で数える。
+  const realSessions = useMemo(() => sessions.filter((s) => !s.isPilot), [sessions])
+
   // インタビュー(テスト)ごとのセッション集計
   const countsByInterview = useMemo(() => {
     const m: Record<string, { total: number; done: number }> = {}
-    for (const s of sessions) {
+    for (const s of realSessions) {
       const k = s.interview.id
       if (!m[k]) m[k] = { total: 0, done: 0 }
       m[k].total++
       if (s.status === 'done') m[k].done++
     }
     return m
-  }, [sessions])
+  }, [realSessions])
 
   // テスト一覧（テスト名で検索＋並び替え）
   const visibleInterviews = useMemo(() => {
@@ -130,7 +135,7 @@ export default function Dashboard() {
       })
   }, [interviews, searchQuery, sortKey, countsByInterview])
 
-  const doneCount = sessions.filter((s) => s.status === 'done').length
+  const doneCount = realSessions.filter((s) => s.status === 'done').length
 
   return (
     <div className="min-h-screen bg-white text-gray-900">
@@ -192,7 +197,7 @@ export default function Dashboard() {
         {/* サマリーカード */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-8">
           <StatCard value={interviews.length} label="テスト数" />
-          <StatCard value={sessions.length} label="総セッション数" />
+          <StatCard value={realSessions.length} label="総セッション数" />
           <StatCard value={doneCount} label="分析完了" />
         </div>
 

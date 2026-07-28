@@ -37,6 +37,8 @@ export async function POST(req: NextRequest) {
       include: {
         questions: true,
         sessions: {
+          // パイロット（リサーチャーの試行）は知見ではないので AI の文脈に入れない
+          where: { isPilot: false },
           include: {
             participant: true,
             transcript: { include: { segments: true } },

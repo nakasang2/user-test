@@ -239,6 +239,8 @@ model Session {
   recordingUrl  String?
   // 参加同意（録画・表情分析・AI処理）を得た日時。null = 未取得。
   consentedAt   DateTime?
+  // リサーチャー自身の試行（パイロット）。本番の集計・分析からは除外する。
+  isPilot       Boolean         @default(false)
   transcript    Transcript?
   emotions      EmotionResult[]
   taskResults   TaskResult[]

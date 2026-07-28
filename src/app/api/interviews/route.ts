@@ -29,7 +29,8 @@ export async function GET() {
       include: {
         questions: { orderBy: { order: 'asc' } },
         tasks: { orderBy: { order: 'asc' } },
-        _count: { select: { sessions: true } },
+        // 件数はパイロット（リサーチャーの試行）を除いた本番セッション数
+        _count: { select: { sessions: { where: { isPilot: false } } } },
       },
       orderBy: { createdAt: 'desc' },
     })

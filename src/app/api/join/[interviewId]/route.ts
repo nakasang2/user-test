@@ -5,6 +5,7 @@ import { createRoom } from '@/lib/daily'
 import { randomBytes } from 'crypto'
 import { handleApiError } from '@/lib/api-auth'
 import { rateLimit, getClientIp } from '@/lib/ratelimit'
+import { estimateMinutes } from '@/lib/duration-estimate'
 
 const joinSchema = z.object({
   name:  z.string().min(1, '名前を入力してください').max(100),
@@ -35,11 +36,28 @@ export async function GET(
           // disqualify（足切り条件）は被験者に見せない
           select: { id: true, label: true, options: true, required: true, order: true },
         },
-        _count: { select: { questions: true, tasks: true } },
+        seqEnabled: true,
+        // 所要時間の算出に必要な設問構成（本文は返さない）
+        questions: { select: { type: true } },
+        _count: { select: { tasks: true } },
       },
     })
     if (!interview) return NextResponse.json({ error: 'Not found' }, { status: 404 })
-    return NextResponse.json(interview)
+
+    // 所要時間はサーバー側で算出して返す（表示側に計算ロジックを持たせない）
+    const openQuestions = interview.questions.filter((q) => (q.type ?? 'open') === 'open').length
+    const estimate = estimateMinutes({
+      openQuestions,
+      scaleQuestions: interview.questions.length - openQuestions,
+      tasks: interview._count.tasks,
+      seqEnabled: interview.seqEnabled,
+      screeners: interview.screeners.length,
+    })
+
+    // questions は件数の算出にしか使わないのでレスポンスからは外す
+    const { questions: _q, seqEnabled: _s, ...rest } = interview
+    void _q; void _s
+    return NextResponse.json({ ...rest, estimate })
   } catch (err) {
     return handleApiError(err)
   }

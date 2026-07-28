@@ -30,6 +30,7 @@ export async function GET(req: NextRequest, props: { params: Promise<{ id: strin
           id: true,
           status: true,
           createdAt: true,
+          isPilot: true,
           participant: { select: { name: true } },
           transcript: { select: { summary: true, themes: true, _count: { select: { segments: true } } } },
           emotions: { select: { happy: true, neutral: true, sad: true, surprised: true } },
@@ -82,6 +83,7 @@ export async function GET(req: NextRequest, props: { params: Promise<{ id: strin
       participantName: s.participant?.name ?? 'Anonymous',
       status: s.status,
       createdAt: s.createdAt,
+      isPilot: s.isPilot,
       summary: s.transcript?.summary ?? null,
       themes: s.transcript?.themes ?? null,
       avgEmotion,
@@ -96,7 +98,8 @@ export async function GET(req: NextRequest, props: { params: Promise<{ id: strin
 
   // AI に共通インサイトを生成させる（分析済み=done のみが対象。done 件数が変わらなければキャッシュ）
   const refresh = req.nextUrl.searchParams.get('refresh') === '1'
-  const doneStats = sessionsWithStats.filter((s) => s.status === 'done' && s.summary)
+  // パイロット（リサーチャーの試行）は本番の知見ではないので分析対象から除く
+  const doneStats = sessionsWithStats.filter((s) => s.status === 'done' && s.summary && !s.isPilot)
   const doneCount = doneStats.length
   let commonInsights: string | null = interview.commonInsights
   if (doneCount >= 2 && (refresh || interview.commonInsights === null || interview.insightsCount !== doneCount)) {
