@@ -75,6 +75,35 @@ export default function InterviewComparePage(props: { params: Promise<{ id: stri
   const [search, setSearch] = useState('')
   const [editing, setEditing] = useState(false)
   const [pilotStarting, setPilotStarting] = useState(false)
+  const [backfilling, setBackfilling] = useState(false)
+
+  // 文字起こししか無い過去セッションから、質問ごとの回答を復元する
+  async function backfillAnswers() {
+    if (!confirm('文字起こしから、質問ごとの回答をAIが抽出して保存します。\n実施中に保存された回答があるセッションは変更しません。よろしいですか？')) return
+    setBackfilling(true)
+    try {
+      const res = await fetch(`/api/interviews/${id}/backfill-answers`, { method: 'POST' })
+      // タイムアウト（504）は本文が JSON でないことがある。その場合でも
+      // 一部は保存済みの可能性があるため、必ず再読み込みして結果を反映する。
+      const data = await res.json().catch(() => null)
+      if (!res.ok || !data) {
+        alert(
+          data?.error ??
+            '抽出が途中で終了しました。保存できた分を反映します。残りがあれば、もう一度実行してください。'
+        )
+        window.location.reload()
+        return
+      }
+      const rest = data.remaining > 0 ? `\n残り ${data.remaining} 件は、もう一度実行してください。` : ''
+      const ng = data.failed > 0 ? `\n${data.failed} 件は抽出できませんでした。` : ''
+      alert(`${data.filled} 件のセッションから回答を抽出しました。${ng}${rest}`)
+      window.location.reload()
+    } catch {
+      alert('抽出に失敗しました')
+    } finally {
+      setBackfilling(false)
+    }
+  }
 
   // パイロット: 本番集計に含まれないセッションを作り、被験者フローをそのまま開く
   async function runPilot() {
@@ -303,7 +332,12 @@ export default function InterviewComparePage(props: { params: Promise<{ id: stri
         </div>
 
         {/* 回答の比較（質問 × 参加者）。深掘りは元の質問にまとめて紐づくので列は崩れない */}
-        <AnswerMatrix sessions={realSessions} questions={interview.questions} />
+        <AnswerMatrix
+          sessions={realSessions}
+          questions={interview.questions}
+          onBackfill={backfillAnswers}
+          backfilling={backfilling}
+        />
 
         {/* 定量集計（タスク成功率・スコア）。AI 分析の完了を待たずに出せるので done で絞らない */}
         <InterviewMetrics sessions={realSessions} />

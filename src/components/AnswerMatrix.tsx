@@ -69,9 +69,14 @@ const SENTIMENT_BAR: Record<string, string> = {
 export default function AnswerMatrix({
   sessions,
   questions,
+  onBackfill,
+  backfilling,
 }: {
   sessions: SessionLike[]
   questions: QuestionCol[]
+  /** 文字起こしから過去の回答を復元する。未指定なら空状態でも案内だけ出す */
+  onBackfill?: () => void
+  backfilling?: boolean
 }) {
   const [sortBy, setSortBy] = useState<string | null>(null)   // questionId
   const [sortAsc, setSortAsc] = useState(false)
@@ -158,8 +163,32 @@ export default function AnswerMatrix({
 
   if (questions.length === 0 || sessions.length === 0) return null
 
+  // 回答が1件も無いとき、黙って消えると「機能が無い」ように見えるので理由を出す。
+  // 回答の構造化保存より前に実施したセッションは、回答が文字起こしの中にしか無い。
   const answeredCount = sessions.filter((s) => (s.answers?.length ?? 0) > 0).length
-  if (answeredCount === 0) return null
+  // 回答が入っていないセッション。1件でも埋まるとボタンが消えて
+  // 残りを埋められなくなるため、テーブル表示中も導線を残す。
+  const missingCount = sessions.length - answeredCount
+  if (answeredCount === 0) {
+    return (
+      <div className="bg-white border border-gray-200 rounded-lg p-6 text-center">
+        <p className="text-sm text-gray-900 font-medium mb-1">回答の比較（質問 × 参加者）</p>
+        <p className="text-xs text-gray-500 leading-relaxed max-w-lg mx-auto">
+          このテストにはまだ質問ごとの回答が保存されていません。
+          回答を個別に保存する仕組みを入れる前に実施したセッションは、回答が文字起こしの中にのみ残っています。
+        </p>
+        {onBackfill && (
+          <button
+            onClick={onBackfill}
+            disabled={backfilling}
+            className="mt-3 inline-flex items-center gap-1.5 bg-gray-900 hover:bg-gray-800 disabled:opacity-50 text-white px-3.5 py-2 rounded-md text-xs font-medium transition-colors"
+          >
+            {backfilling ? '抽出中…' : '文字起こしから回答を抽出する'}
+          </button>
+        )}
+      </div>
+    )
+  }
 
   function toggleSort(qid: string) {
     if (sortBy === qid) { setSortAsc((v) => !v); return }
@@ -194,6 +223,16 @@ export default function AnswerMatrix({
         {sortBy && (
           <button onClick={() => setSortBy(null)} className="text-xs text-gray-500 hover:text-gray-900 underline underline-offset-2">
             並び替えを解除
+          </button>
+        )}
+        {onBackfill && missingCount > 0 && (
+          <button
+            onClick={onBackfill}
+            disabled={backfilling}
+            className="inline-flex items-center gap-1.5 border border-gray-300 hover:border-gray-400 disabled:opacity-50 text-gray-700 hover:text-gray-900 px-2.5 py-1.5 rounded-md text-xs transition-colors"
+            title="回答が保存されていないセッションについて、文字起こしから回答を抽出します"
+          >
+            {backfilling ? '抽出中…' : `未取得 ${missingCount} 件を抽出`}
           </button>
         )}
       </div>
