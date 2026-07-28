@@ -15,4 +15,15 @@ This version has breaking changes — APIs, conventions, and file structure may 
 4. **3回ルール（昇格）**: 同種パターンが ×3 に達したら、DECISIONS.md の絶対ルール化かスキル化をユーザーに提案する。勝手に恒久ルール化しない（Human-in-the-Loop）。
 5. **検証ループ**: push 前にビルド検証（`npx tsc --noEmit` + `npx next build`）と /code-review による別視点レビューを必ず行う。ローカルではさらに ship スキルの手順（本番反映確認まで）に従う。
 6. **棚卸し**: 「一区切り」のタイミングで /kaizen（.claude/skills/kaizen）を実行し、台帳の整理と昇格提案を行う。
+
+## 作業前に読むチェックリスト（3回ルールで昇格したもの）
+
+過去に同じ失敗を繰り返した領域は、着手前に該当スキルを読む。
+
+- **AI（LLM）呼び出しを追加・変更する** → `/ai-call-review`
+  失敗と結果ゼロの区別／フォールバック値で判定を偽装しない／初回と再実行で失敗時の扱いを分ける／
+  AI が返す添字を検証／可変長出力の上限と finish_reason／補助処理は完了フラグの後／一括処理の進み方
+- **DB スキーマ・集計ロジックを触る** → `/data-model-review`
+  集計値を表示テキストに混ぜない／集計キーは安定ID（表示順を使わない）／全置換ではなく行単位 upsert／
+  バックフィルは既存行をスキップ／除外フラグは描画経路まで確認／既存データでの見え方
 <!-- END:self-improvement-loop -->
