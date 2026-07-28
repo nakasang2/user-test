@@ -6,6 +6,8 @@ import { RadarChart, Radar, PolarGrid, PolarAngleAxis, ResponsiveContainer, Tool
 import { Search, X } from 'lucide-react'
 import FloatingAgentChat from '@/components/FloatingAgentChat'
 import StatusBadge from '@/components/StatusBadge'
+import InterviewMetrics from '@/components/InterviewMetrics'
+import { type TaskResultData, type AnswerData } from '@/components/SessionMetrics'
 
 type SortKey = 'date-desc' | 'date-asc' | 'name-asc' | 'status'
 type StatusFilter = 'all' | 'pending' | 'active' | 'done' | 'completed'
@@ -29,6 +31,8 @@ interface SessionStat {
   dominantEmotion: string | null
   avgEmotion: { happy: number; neutral: number; sad: number; surprised: number } | null
   segmentCount: number
+  taskResults?: TaskResultData[]
+  answers?: AnswerData[]
 }
 
 interface CompareData {
@@ -217,6 +221,9 @@ export default function InterviewComparePage(props: { params: Promise<{ id: stri
             </div>
           )}
         </div>
+
+        {/* 定量集計（タスク成功率・スコア）。AI 分析の完了を待たずに出せるので done で絞らない */}
+        <InterviewMetrics sessions={sessions} />
 
         {doneSessions.length === 0 ? null : (
           <>

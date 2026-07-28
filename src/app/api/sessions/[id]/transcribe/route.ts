@@ -54,18 +54,31 @@ export async function POST(_req: NextRequest, props: { params: Promise<{ id: str
       update: { fullText, summary, themes },
     })
 
-    // 既存セグメントを Whisper の結果で原子的に置き換える
+    // System セグメント（タスク達成記録など）は音声として発話されていないため、
+    // Whisper の結果では復元できない。置き換えの前に退避して書き戻す。
+    // ※定量データ自体は TaskResult / Answer テーブルにあるので消えないが、
+    //   文字起こし上の時系列コンテキストも失わないようにする。
+    const preserved = await prisma.transcriptSegment.findMany({
+      where: { transcriptId: transcript.id, speaker: 'System' },
+      select: { speaker: true, text: true, startTime: true, endTime: true, sentiment: true },
+    })
+
+    const merged = [
+      ...segments.map((seg) => ({
+        transcriptId: transcript.id,
+        speaker: seg.speaker,
+        text: seg.text,
+        startTime: seg.start,
+        endTime: seg.end,
+        sentiment: null as string | null,
+      })),
+      ...preserved.map((p) => ({ ...p, transcriptId: transcript.id })),
+    ].sort((a, b) => a.startTime - b.startTime)
+
+    // 既存セグメントを Whisper の結果（+ 退避した System 行）で原子的に置き換える
     await prisma.$transaction([
       prisma.transcriptSegment.deleteMany({ where: { transcriptId: transcript.id } }),
-      prisma.transcriptSegment.createMany({
-        data: segments.map((seg) => ({
-          transcriptId: transcript.id,
-          speaker: seg.speaker,
-          text: seg.text,
-          startTime: seg.start,
-          endTime: seg.end,
-        })),
-      }),
+      prisma.transcriptSegment.createMany({ data: merged }),
     ])
 
     // process と挙動を揃える: 分析済みにし、比較インサイトのキャッシュを無効化
