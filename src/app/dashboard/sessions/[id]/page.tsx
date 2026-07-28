@@ -517,6 +517,8 @@ export default function SessionDetail(props: { params: Promise<{ id: string }> }
             <TranscriptView
               transcript={session.transcript}
               questions={session.interview.questions}
+              onSeek={videoSrc ? seekVideo : undefined}
+              currentTime={videoSrc ? videoCurrentTime : undefined}
               onHighlight={addHighlight}
               highlightedSegmentIds={new Set(highlights.map((h) => h.segmentId).filter((v): v is string => !!v))}
             />
