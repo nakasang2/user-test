@@ -315,6 +315,16 @@ function WidgetContent() {
   // 完了して初めてタスク文言と結果ボタンを表示し、準備中は隠して混乱を防ぐ。
   const readyForTask = isScreenRecording && (serviceOpened || !stimulusUrl)
 
+  // タスク文言が実際に見えた瞬間をメインへ通知する。
+  // 所要時間（time on task）の計測開始をこの時点に合わせ、
+  // 録画の開始操作やサイトを開く操作の時間がタスク1に混入しないようにする。
+  const taskReadySentRef = useRef(false)
+  useEffect(() => {
+    if (!readyForTask || taskReadySentRef.current) return
+    taskReadySentRef.current = true
+    channelRef.current?.postMessage({ type: 'task_ready' })
+  }, [readyForTask])
+
   /* ── タスク画面 ─────────────────────────────────────────────── */
   // 注: Document PiP の iframe 内では 100vh 等の viewport 単位が実際の窓より大きく評価され、
   //     min-h-screen だと巨大な余白＋スクロールが出る。ここでは vh/flex 高さ配分を使わず、

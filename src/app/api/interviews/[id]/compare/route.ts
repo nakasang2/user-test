@@ -29,6 +29,9 @@ export async function GET(req: NextRequest, props: { params: Promise<{ id: strin
           participant: { select: { name: true } },
           transcript: { select: { summary: true, themes: true, _count: { select: { segments: true } } } },
           emotions: { select: { happy: true, neutral: true, sad: true, surprised: true } },
+          // 定量集計（タスク成功率・スコア平均）用
+          taskResults: { orderBy: { order: 'asc' }, select: { order: true, text: true, outcome: true, durationSec: true } },
+          answers: { orderBy: { order: 'asc' }, select: { order: true, text: true, type: true, valueNum: true } },
         },
       },
     },
@@ -73,6 +76,8 @@ export async function GET(req: NextRequest, props: { params: Promise<{ id: strin
       avgEmotion,
       dominantEmotion,
       segmentCount: s.transcript?._count.segments ?? 0,
+      taskResults: s.taskResults,
+      answers: s.answers,
     }
   })
 

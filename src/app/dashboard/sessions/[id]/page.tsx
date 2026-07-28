@@ -6,6 +6,7 @@ import EmotionChart from '@/components/EmotionChart'
 import TranscriptView from '@/components/TranscriptView'
 import FloatingAgentChat from '@/components/FloatingAgentChat'
 import StatusBadge from '@/components/StatusBadge'
+import SessionMetrics, { type TaskResultData, type AnswerData } from '@/components/SessionMetrics'
 import { Video, Download, X, Folder } from 'lucide-react'
 import { track } from '@/lib/analytics'
 
@@ -52,6 +53,9 @@ interface Session {
   participant: { name: string; email: string | null } | null
   transcript: Transcript | null
   emotions: EmotionResult[]
+  taskResults?: TaskResultData[]
+  answers?: AnswerData[]
+  consentedAt?: string | null
 }
 
 export default function SessionDetail(props: { params: Promise<{ id: string }> }) {
@@ -154,13 +158,39 @@ export default function SessionDetail(props: { params: Promise<{ id: string }> }
 
   function exportCsv() {
     if (!session) return
-    const rows: string[][] = [
-      ['speaker', 'text', 'startTime', 'endTime', 'sentiment'],
-      ...(session.transcript?.segments.map((s) => [
-        s.speaker, `"${s.text.replace(/"/g, '""')}"`,
-        String(s.startTime), String(s.endTime), s.sentiment ?? '',
-      ]) ?? []),
-    ]
+    // Excel の数式インジェクション対策。=, +, -, @ とタブ/CR 始まりを無害化する。
+    // 被験者側から書き込める値（speaker 含む）は必ずこれを通すこと。
+    const q = (v: string) => {
+      const safe = /^[=+\-@\t\r]/.test(v) ? `'${v}` : v
+      return `"${safe.replace(/"/g, '""')}"`
+    }
+    const rows: string[][] = []
+
+    // 測定結果（定量）を先頭に。表計算ソフトで成功率・スコアを扱えるようにする
+    if (session.taskResults?.length) {
+      rows.push(['# タスク結果'], ['order', 'task', 'outcome', 'durationSec'])
+      session.taskResults.forEach((t) => rows.push([
+        String(t.order), q(t.text),
+        t.outcome === 'completed' ? '達成' : 'できなかった',
+        t.durationSec != null ? String(Math.round(t.durationSec)) : '',
+      ]))
+      rows.push([])
+    }
+    if (session.answers?.length) {
+      rows.push(['# 回答'], ['order', 'question', 'type', 'value', 'text'])
+      session.answers.forEach((a) => rows.push([
+        String(a.order), q(a.text), a.type,
+        a.valueNum != null ? String(a.valueNum) : '',
+        q(a.valueText ?? ''),
+      ]))
+      rows.push([])
+    }
+
+    rows.push(['# 文字起こし'], ['speaker', 'text', 'startTime', 'endTime', 'sentiment'])
+    session.transcript?.segments.forEach((s) => rows.push([
+      q(s.speaker), q(s.text), String(s.startTime), String(s.endTime), q(s.sentiment ?? ''),
+    ]))
+
     const csv = rows.map((r) => r.join(',')).join('\n')
     const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' })
     const a = document.createElement('a')
@@ -368,6 +398,17 @@ export default function SessionDetail(props: { params: Promise<{ id: string }> }
               <Download className="w-3 h-3" strokeWidth={2} />
               ダウンロード
             </a>
+          </div>
+        )}
+
+        {/* ── 測定結果（定量）: 分析の起点なので最上部に置く ── */}
+        {((session.taskResults?.length ?? 0) > 0 || (session.answers?.length ?? 0) > 0) && (
+          <div className="mb-6">
+            <SectionLabel>測定結果</SectionLabel>
+            <SessionMetrics
+              taskResults={session.taskResults ?? []}
+              answers={session.answers ?? []}
+            />
           </div>
         )}
 

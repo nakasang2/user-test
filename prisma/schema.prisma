@@ -99,14 +99,62 @@ model Question {
   type        String    @default("open") // open | rating | nps
   interviewId String
   interview   Interview @relation(fields: [interviewId], references: [id], onDelete: Cascade)
+  answers     Answer[]
 }
 
 model Task {
-  id          String    @id @default(cuid())
+  id          String       @id @default(cuid())
   interviewId String
-  interview   Interview @relation(fields: [interviewId], references: [id], onDelete: Cascade)
+  interview   Interview    @relation(fields: [interviewId], references: [id], onDelete: Cascade)
   text        String
   order       Int
+  results     TaskResult[]
+}
+
+// ─────────────────────────────────────────────
+// 測定結果（定量分析の一次データ）
+// 文字起こしとは独立に保持する。文字起こしは再生成・再文字起こしで
+// 置き換わるが、ここは消えない＝成功率やスコアの集計が壊れない。
+// ─────────────────────────────────────────────
+
+// タスクの達成/断念と所要時間
+model TaskResult {
+  id          String   @id @default(cuid())
+  sessionId   String
+  session     Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  taskId      String?  // 元タスク（削除されても結果は残すため nullable）
+  task        Task?    @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  order       Int      // タスク番号（1始まり）
+  text        String   // 実施時点のタスク文言のスナップショット
+  outcome     String   // completed | gave_up
+  startedAt   Float?   // セッション開始からの経過秒
+  endedAt     Float?
+  durationSec Float?   // 所要時間（time on task）
+  createdAt   DateTime @default(now())
+
+  // 1セッション1タスク1行。並行リクエストによる重複行を DB 側で防ぐ
+  @@unique([sessionId, order])
+  @@index([sessionId])
+}
+
+// 質問への回答。rating/nps は valueNum に数値で入れて集計可能にする
+model Answer {
+  id         String    @id @default(cuid())
+  sessionId  String
+  session    Session   @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  questionId String?
+  question   Question? @relation(fields: [questionId], references: [id], onDelete: SetNull)
+  order      Int
+  text       String    // 質問文のスナップショット
+  type       String    // open | rating | nps
+  valueNum   Float?    // rating(1-5) / nps(0-10) の数値
+  valueText  String?   // 自由回答
+  answeredAt Float?    // セッション開始からの経過秒
+  createdAt  DateTime  @default(now())
+
+  // 1セッション1質問1行。並行リクエストによる重複行を DB 側で防ぐ
+  @@unique([sessionId, order])
+  @@index([sessionId])
 }
 
 model Participant {
@@ -131,8 +179,12 @@ model Session {
   shareToken    String?         @unique
   recordingId   String?
   recordingUrl  String?
+  // 参加同意（録画・表情分析・AI処理）を得た日時。null = 未取得。
+  consentedAt   DateTime?
   transcript    Transcript?
   emotions      EmotionResult[]
+  taskResults   TaskResult[]
+  answers       Answer[]
   interview     Interview       @relation(fields: [interviewId], references: [id])
   participant   Participant?    @relation(fields: [participantId], references: [id])
   createdAt     DateTime        @default(now())

@@ -24,6 +24,7 @@ import {
 } from 'lucide-react'
 
 interface Question {
+  id?: string
   text: string
   type: 'open' | 'rating' | 'nps'
 }
@@ -40,7 +41,27 @@ interface Props {
   usabilityMode?: 'prototype' | 'service'
   stimulusUrl?: string
   stimulusDuration?: number  // seconds (default 5)
-  tasks?: { text: string; order: number }[]
+  tasks?: { id?: string; text: string; order: number }[]
+}
+
+// 測定結果（構造化して /results に保存する定量データ）
+interface TaskResultEntry {
+  taskId?: string | null
+  order: number
+  text: string
+  outcome: 'completed' | 'gave_up'
+  startedAt: number
+  endedAt: number
+}
+
+interface AnswerEntry {
+  questionId?: string | null
+  order: number
+  text: string
+  type: 'open' | 'rating' | 'nps'
+  valueNum?: number | null
+  valueText?: string | null
+  answeredAt: number
 }
 
 interface TranscriptEntry {
@@ -136,7 +157,25 @@ export default function InterviewRoom({
   // BroadcastChannel の onmessage は startInterview 時のクロージャを保持するため、
   // 最新のタスク番号は ref で参照する（state だけだと陳腐化して複数タスクで進めない）
   const currentTaskIndexRef = useRef(0)
-  function gotoTask(idx: number) { currentTaskIndexRef.current = idx; setCurrentTaskIndex(idx) }
+  function gotoTask(idx: number) {
+    currentTaskIndexRef.current = idx
+    setCurrentTaskIndex(idx)
+    // 次タスクの計測開始（前タスクの終了時刻＝次タスクの開始時刻）
+    taskStartedAtRef.current = (Date.now() - startTimeRef.current) / 1000
+    firstTaskStartedRef.current = true
+  }
+  // 測定結果（定量データ）。文字起こしとは別に /results へ構造化保存する
+  const taskResultsRef = useRef<TaskResultEntry[]>([])
+  const answersRef = useRef<AnswerEntry[]>([])
+  const taskStartedAtRef = useRef<number>(0)
+  // 最初のタスクの計測開始。事前手続き（録画開始・サイトを開く）の時間を
+  // タスク1に含めないよう、被験者が実際に着手できる時点まで遅らせる。
+  const firstTaskStartedRef = useRef(false)
+  function markFirstTaskStart() {
+    if (firstTaskStartedRef.current) return
+    firstTaskStartedRef.current = true
+    taskStartedAtRef.current = (Date.now() - startTimeRef.current) / 1000
+  }
   const [stimulusCountdown, setStimulusCountdown] = useState(0)
   const [stimulusError, setStimulusError] = useState(false)
   const stimulusStartedRef = useRef(false)   // カウント開始の二重起動防止
@@ -308,6 +347,21 @@ export default function InterviewRoom({
     }).catch(() => {})
   }
 
+  // ── 測定結果（タスク達成/断念・評価回答）を構造化してサーバー保存 ──
+  // その時点の全件を送り、サーバー側は (sessionId, order) 単位で upsert する。
+  // 並行送信・再送しても行が重複せず、遅延したリクエストが新しい結果を消すこともない。
+  function saveResults() {
+    if (!participantToken) return
+    fetch(`/api/sessions/${sessionId}/results`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-participant-token': participantToken },
+      body: JSON.stringify({
+        taskResults: taskResultsRef.current,
+        answers: answersRef.current,
+      }),
+    }).catch(() => {})
+  }
+
   // ── テキスト入力で回答を送信 ──────────────────────────
   function submitTextAnswer() {
     const text = textInput.trim()
@@ -441,6 +495,23 @@ export default function InterviewRoom({
     setRatingValue(null)
     saveProgress()
 
+    // 評価スコアは数値として構造化保存（平均・NPS 集計用）
+    if (q && (q.type === 'rating' || q.type === 'nps')) {
+      const qIdx = currentQuestionIndexRef.current
+      answersRef.current = [
+        ...answersRef.current.filter((a) => a.order !== qIdx + 1),
+        {
+          questionId: q.id ?? null,
+          order: qIdx + 1,
+          text: q.text,
+          type: q.type,
+          valueNum: value,
+          answeredAt: entry.start,
+        },
+      ]
+      saveResults()
+    }
+
     // 評価質問は AI 深掘りなし → 次へ
     if (q.type === 'nps' || q.type === 'rating') {
       moveToNextPlannedQuestion()
@@ -490,7 +561,35 @@ export default function InterviewRoom({
   }
 
   // ── 次の設定質問へ ────────────────────────────────────
+  // 自由回答を「どの質問に対する回答か」を紐づけて保存する。
+  // 会話バッファ（深掘りのやり取りを含む）から参加者の発言だけを取り出してまとめる。
+  function recordOpenAnswerIfAny() {
+    const qIdx = currentQuestionIndexRef.current
+    const q = questions[qIdx]
+    if (!q || q.type !== 'open') return
+    const said = conversationBufferRef.current
+      .split('\n')
+      .filter((l) => l.startsWith('参加者: '))
+      .map((l) => l.slice('参加者: '.length).trim())
+      .filter(Boolean)
+      .join(' / ')
+    if (!said) return
+    answersRef.current = [
+      ...answersRef.current.filter((a) => a.order !== qIdx + 1),
+      {
+        questionId: q.id ?? null,
+        order: qIdx + 1,
+        text: q.text,
+        type: 'open',
+        valueText: said,
+        answeredAt: (Date.now() - startTimeRef.current) / 1000,
+      },
+    ]
+    saveResults()
+  }
+
   function moveToNextPlannedQuestion() {
+    recordOpenAnswerIfAny() // バッファをリセットする前に確定させる
     const next = currentQuestionIndexRef.current + 1
     followUpCountRef.current = 0
     conversationBufferRef.current = ''
@@ -577,6 +676,21 @@ export default function InterviewRoom({
     const idx = currentTaskIndexRef.current
     const task = tasks?.[idx]
     if (task) {
+      // 定量データとして構造化保存（成功率・所要時間の集計用）
+      const now = (Date.now() - startTimeRef.current) / 1000
+      taskResultsRef.current = [
+        ...taskResultsRef.current.filter((r) => r.order !== idx + 1), // 同一タスクの再記録は上書き
+        {
+          taskId: task.id ?? null,
+          order: idx + 1,
+          text: task.text,
+          outcome,
+          startedAt: taskStartedAtRef.current,
+          endedAt: now,
+        },
+      ]
+      saveResults()
+
       const label = outcome === 'completed' ? '達成' : '断念（たどり着けなかった）'
       const text = `タスク${idx + 1}「${task.text}」→ ${label}`
       const entry: TranscriptEntry = {
@@ -630,6 +744,11 @@ export default function InterviewRoom({
   async function startInterview() {
     if (startedRef.current) return  // 二重クリック・二重起動防止
     startedRef.current = true
+    // 経過時間の基準を「開始ボタンを押した瞬間」に揃える。
+    // マウント時のままだとガイド画面の滞在時間が所要時間に混入し、
+    // 文字起こしのタイムスタンプも録画の再生位置とずれる。
+    startTimeRef.current = Date.now()
+    taskStartedAtRef.current = 0
     setIsRecording(true)
     startMediaRecorder()
     if (videoRef.current) startDetection(videoRef.current)
@@ -645,6 +764,7 @@ export default function InterviewRoom({
         else if (e.data.type === 'end_session') endInterview()
         else if (e.data.type === 'recording_started') setScreenSharing(true)
         else if (e.data.type === 'service_opened') setServiceOpened(true)
+        else if (e.data.type === 'task_ready') markFirstTaskStart() // 小窓でタスクが見えた＝着手できる時点
         else if (e.data.type === 'screen_recording_blob') {
           const blob: Blob = e.data.blob
           if (blob.size > 0) {
@@ -672,8 +792,14 @@ export default function InterviewRoom({
     if (interviewType === 'usability') {
       // prototype のみ: iframe 上の操作をバックグラウンドで画面録画
       if (usabilityMode === 'prototype' && stimulusUrl) {
-        startScreenShare().catch(() => {/* 録画失敗は無視して続行 */})
+        // 画面選択ダイアログの操作時間をタスク1に含めないよう、選択が終わってから計測開始
+        startScreenShare()
+          .catch(() => {/* 録画失敗は無視して続行 */})
+          .finally(() => markFirstTaskStart())
+      } else if (usabilityMode !== 'service') {
+        markFirstTaskStart()
       }
+      // service モードは小窓の task_ready（録画開始＋サイトを開いた時点）を待って計測開始する
       setPhase('task')
       return
     }
@@ -757,6 +883,8 @@ export default function InterviewRoom({
   async function endInterview() {
     if (endedRef.current) return  // 二重実行防止（結果・録画の二重送信を防ぐ）
     endedRef.current = true
+    recordOpenAnswerIfAny()  // 回答途中で終了した場合も取りこぼさない
+    saveResults()            // 測定結果の最終フラッシュ（送信失敗していた分の再送を兼ねる）
     // ウィジェットを閉じる（BroadcastChannel 経由 + 直接 close）
     widgetChannelRef.current?.postMessage({ type: 'session_ended' })
     try { pipWindowRef.current?.close() } catch { /* ignore */ }
@@ -1289,6 +1417,7 @@ export default function InterviewRoom({
                           href={stimulusUrl}
                           target="uservoice-service"
                           rel="noopener noreferrer"
+                          onClick={markFirstTaskStart}  // 小窓なしフォールバック時の計測開始
                           className="w-full inline-flex items-center justify-center gap-1.5 bg-gray-900 hover:bg-gray-800 text-white px-3 py-2.5 rounded-md text-sm font-medium transition-colors"
                         >
                           <Globe className="w-4 h-4" strokeWidth={2} />

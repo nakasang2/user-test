@@ -8,6 +8,9 @@ import { handleApiError } from '@/lib/api-auth'
 const joinSchema = z.object({
   name:  z.string().min(1, '名前を入力してください').max(100),
   email: z.string().email().optional().or(z.literal('')),
+  // 録画・表情分析・AI処理への同意。証跡として Session.consentedAt に記録する。
+  // 旧クライアント互換のため任意項目にするが、false 明示は拒否する。
+  consent: z.boolean().optional(),
 })
 
 /** GET /api/join/[interviewId] — インタビュータイトルなど公開情報を返す（認証不要） */
@@ -40,7 +43,10 @@ export async function POST(
     if (!parsed.success) {
       return NextResponse.json({ error: parsed.error.issues[0]?.message }, { status: 400 })
     }
-    const { name, email } = parsed.data
+    const { name, email, consent } = parsed.data
+    if (consent === false) {
+      return NextResponse.json({ error: '参加には同意が必要です' }, { status: 400 })
+    }
 
     const interview = await prisma.interview.findUnique({ where: { id: interviewId } })
     if (!interview) return NextResponse.json({ error: 'インタビューが見つかりません' }, { status: 404 })
@@ -66,7 +72,14 @@ export async function POST(
     // 高エントロピーの秘密トークンを発行する。被験者ページのサーバーコンポーネント経由でのみ渡す。
     const participantToken = randomBytes(32).toString('base64url')
     const session = await prisma.session.create({
-      data: { interviewId, participantId: participant.id, dailyRoomName: roomName, dailyRoomUrl, participantToken },
+      data: {
+        interviewId,
+        participantId: participant.id,
+        dailyRoomName: roomName,
+        dailyRoomUrl,
+        participantToken,
+        consentedAt: consent ? new Date() : null, // 同意の証跡
+      },
     })
 
     return NextResponse.json({
