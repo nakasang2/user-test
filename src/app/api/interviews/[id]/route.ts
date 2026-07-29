@@ -89,6 +89,18 @@ export async function PATCH(req: NextRequest, props: { params: Promise<{ id: str
 
     if (questions) {
       const keep = questions.map((q) => (q.id && ownQuestionIds.has(q.id) ? q.id : null)).filter(Boolean) as string[]
+      const keepSet = new Set(keep)
+      // 削除される質問の回答に、消える前に「集計対象外」の印を付ける。
+      // 削除すると questionId が NULL になり、どの質問の回答だったか特定できなくなる
+      // （text は実施時点のスナップショットなので、文言を直しただけの現存質問と区別できない）。
+      // この updateMany は deleteMany より前に積む必要がある（$transaction は配列順に実行される）。
+      const removedQuestionIds = existing.questions.map((q) => q.id).filter((qid) => !keepSet.has(qid))
+      if (removedQuestionIds.length > 0) {
+        ops.push(prisma.answer.updateMany({
+          where: { questionId: { in: removedQuestionIds }, excludedAt: null },
+          data: { excludedAt: new Date() },
+        }))
+      }
       ops.push(prisma.question.deleteMany({ where: { interviewId: id, NOT: { id: { in: keep.length ? keep : ['__none__'] } } } }))
       questions.forEach((q, index) => {
         const order = index + 1
@@ -102,6 +114,15 @@ export async function PATCH(req: NextRequest, props: { params: Promise<{ id: str
 
     if (tasks) {
       const keep = tasks.map((t) => (t.id && ownTaskIds.has(t.id) ? t.id : null)).filter(Boolean) as string[]
+      const keepSet = new Set(keep)
+      // 質問と同じ理由で、削除されるタスクの結果に先に印を付ける
+      const removedTaskIds = existing.tasks.map((t) => t.id).filter((tid) => !keepSet.has(tid))
+      if (removedTaskIds.length > 0) {
+        ops.push(prisma.taskResult.updateMany({
+          where: { taskId: { in: removedTaskIds }, excludedAt: null },
+          data: { excludedAt: new Date() },
+        }))
+      }
       ops.push(prisma.task.deleteMany({ where: { interviewId: id, NOT: { id: { in: keep.length ? keep : ['__none__'] } } } }))
       tasks.forEach((t, index) => {
         const order = index + 1

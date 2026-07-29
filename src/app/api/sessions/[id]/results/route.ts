@@ -120,27 +120,70 @@ export async function POST(req: NextRequest, props: { params: Promise<{ id: stri
     const validTaskIds = new Set(session?.interview.tasks.map((t) => t.id) ?? [])
     const validQuestionIds = new Set(session?.interview.questions.map((q) => q.id) ?? [])
 
+    /*
+     * excludedAt（集計対象外の印）の扱い。
+     *
+     * 行のキーは (sessionId, order) なので、調査からタスクを削除して順番が詰まると
+     * 「印が付いた枠」に別タスクの結果が入りうる。かといって保存のたびに印を消すと、
+     * 実施中のセッションは saveResults() で毎回その時点の全件を再送するため、
+     * 削除直後の再送で印が黙って外れ、削除済みタスクの結果が全体指標に復活してしまう。
+     *
+     * そこで「紐付き先が別の現存項目に変わったときだけ」印を外す。
+     *   - 同じタスクの再送 → id が同じ → 印はそのまま（手動で外した分も守られる）
+     *   - 削除済みタスクの再送 → id が解決できず null → 何もしない（印はそのまま）
+     *   - 枠が別の現存タスクに再利用された → id が変わる → 印を外す
+     * $transaction は配列順に実行されるので、必ず upsert より前に置く。
+     */
+    // Prisma の `not` は NULL 行に当たらないので、null を明示的に OR で含める
+    const clearTaskFlag = (newId: string | null, order: number) =>
+      newId
+        ? [prisma.taskResult.updateMany({
+            where: {
+              sessionId: id, order, excludedAt: { not: null },
+              OR: [{ taskId: null }, { taskId: { not: newId } }],
+            },
+            data: { excludedAt: null },
+          })]
+        : []
+
+    const clearAnswerFlag = (newId: string | null, order: number) =>
+      newId
+        ? [prisma.answer.updateMany({
+            where: {
+              sessionId: id, order, excludedAt: { not: null },
+              OR: [{ questionId: null }, { questionId: { not: newId } }],
+            },
+            data: { excludedAt: null },
+          })]
+        : []
+
     // (sessionId, order) をキーに行単位で upsert（並行送信に強い）
     await prisma.$transaction([
-      ...taskResults.map((t) => {
+      ...taskResults.flatMap((t) => {
         const data = { ...t, taskId: t.taskId && validTaskIds.has(t.taskId) ? t.taskId : null }
         const { sessionId: _s, order: _o, ...update } = data
         void _s; void _o
-        return prisma.taskResult.upsert({
-          where: { sessionId_order: { sessionId: id, order: data.order } },
-          create: data,
-          update,
-        })
+        return [
+          ...clearTaskFlag(data.taskId, data.order),
+          prisma.taskResult.upsert({
+            where: { sessionId_order: { sessionId: id, order: data.order } },
+            create: data,
+            update,
+          }),
+        ]
       }),
-      ...answers.map((a) => {
+      ...answers.flatMap((a) => {
         const data = { ...a, questionId: a.questionId && validQuestionIds.has(a.questionId) ? a.questionId : null }
         const { sessionId: _s, order: _o, ...update } = data
         void _s; void _o
-        return prisma.answer.upsert({
-          where: { sessionId_order: { sessionId: id, order: data.order } },
-          create: data,
-          update,
-        })
+        return [
+          ...clearAnswerFlag(data.questionId, data.order),
+          prisma.answer.upsert({
+            where: { sessionId_order: { sessionId: id, order: data.order } },
+            create: data,
+            update,
+          }),
+        ]
       }),
     ])
 

@@ -8,6 +8,7 @@ import EditInterviewModal from '@/components/EditInterviewModal'
 import FloatingAgentChat from '@/components/FloatingAgentChat'
 import StatusBadge from '@/components/StatusBadge'
 import InterviewMetrics from '@/components/InterviewMetrics'
+import InterviewSummary from '@/components/InterviewSummary'
 import TranscriptSearch from '@/components/TranscriptSearch'
 import AnswerMatrix from '@/components/AnswerMatrix'
 import { type TaskResultData, type AnswerData } from '@/components/SessionMetrics'
@@ -184,6 +185,11 @@ export default function InterviewComparePage(props: { params: Promise<{ id: stri
   }, [data, statusFilter, search, sortKey])
   const isFiltering = statusFilter !== 'all' || search.trim() !== ''
 
+  // 集計対象の変更後にデータを取り直すためのカウンタ。
+  // 画面全体をリロードすると AI インサイトの再取得やスクロール位置の喪失が起きるので、
+  // このページのデータだけを差し替える。
+  const [reloadKey, setReloadKey] = useState(0)
+
   useEffect(() => {
     let cancelled = false
     fetch(`/api/interviews/${id}/compare`)
@@ -195,7 +201,7 @@ export default function InterviewComparePage(props: { params: Promise<{ id: stri
       .then((d) => { if (!cancelled && d) { setData(d); setLoading(false) } })
       .catch(() => { if (!cancelled) { setError(true); setLoading(false) } })
     return () => { cancelled = true }
-  }, [id])
+  }, [id, reloadKey])
 
   if (loading) {
     return (
@@ -318,6 +324,29 @@ export default function InterviewComparePage(props: { params: Promise<{ id: stri
           </div>
         </div>
 
+        {/* 調査全体の結論。参加者一覧より先に「この調査がどうだったか」を出す */}
+        <InterviewSummary
+          sessions={realSessions}
+          commonInsights={commonInsights}
+          onBackfill={backfillAnswers}
+          backfilling={backfilling}
+        />
+
+        {/* 定量集計のタスク別内訳。AI 分析の完了を待たずに出せるので done で絞らない */}
+        <InterviewMetrics
+          sessions={realSessions}
+          interviewId={interview.id}
+          onChanged={() => setReloadKey((k) => k + 1)}
+        />
+
+        {/* 回答の比較（質問 × 参加者）。深掘りは元の質問にまとめて紐づくので列は崩れない */}
+        <AnswerMatrix
+          sessions={realSessions}
+          questions={interview.questions}
+          onBackfill={backfillAnswers}
+          backfilling={backfilling}
+        />
+
         {/* 個別の結果一覧（全ステータス・ソート/フィルタ/検索） */}
         <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
           <div className="px-4 py-3 border-b border-gray-200 flex flex-wrap items-center gap-2">
@@ -386,17 +415,6 @@ export default function InterviewComparePage(props: { params: Promise<{ id: stri
           )}
         </div>
 
-        {/* 回答の比較（質問 × 参加者）。深掘りは元の質問にまとめて紐づくので列は崩れない */}
-        <AnswerMatrix
-          sessions={realSessions}
-          questions={interview.questions}
-          onBackfill={backfillAnswers}
-          backfilling={backfilling}
-        />
-
-        {/* 定量集計（タスク成功率・スコア）。AI 分析の完了を待たずに出せるので done で絞らない */}
-        <InterviewMetrics sessions={realSessions} />
-
         {/* 発言の横断検索 */}
         <TranscriptSearch interviewId={interview.id} />
 
@@ -420,17 +438,7 @@ export default function InterviewComparePage(props: { params: Promise<{ id: stri
 
         {doneSessions.length === 0 ? null : (
           <>
-            {/* 共通インサイト */}
-            {commonInsights && (
-              <div className="bg-gray-50 border border-gray-200 rounded-lg p-6">
-                <h2 className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-3">
-                  AI 共通インサイト（全参加者）
-                </h2>
-                <div className="text-sm text-gray-900 leading-relaxed whitespace-pre-line">
-                  {commonInsights}
-                </div>
-              </div>
-            )}
+            {/* AI 共通インサイトは結果サマリー（ページ最上部）に移動した */}
 
             {/* テーマ頻度 */}
             {sortedThemes.length > 0 && (
