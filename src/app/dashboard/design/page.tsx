@@ -27,7 +27,7 @@ const Q_TYPES: { value: string; label: string }[] = [
   { value: 'rating', label: '5段階評価' },
   { value: 'nps',    label: 'NPS（0〜10）' },
 ]
-interface TaskItem  { text: string; order: number; hint?: string }
+interface TaskItem  { text: string; order: number; hint?: string; isPrerequisite?: boolean }
 interface InterviewPlot {
   title: string
   description: string
@@ -123,7 +123,7 @@ export default function DesignPage() {
   }
 
   /**
-   * まとめ入力のテキスト行に、元のタスクのヒントを引き継ぐ。
+   * まとめ入力のテキスト行に、元のタスクのヒントと「次の前提になる」設定を引き継ぐ。
    *
    * 引き継ぎは「文言が完全に一致するタスクがちょうど1つだけ」のときに限る。
    *   - 行の位置で引き継ぐと、並べ替えたときに別タスクのヒントが参加者に出る
@@ -131,10 +131,11 @@ export default function DesignPage() {
    * 決められないときは引き継がない（空欄として見えるので書き直せる）。
    * 誤ったヒントが参加者に表示されるより、消えているほうが気づける。
    */
-  function hintFor(text: string): string | undefined {
+  function metaFor(text: string): { hint?: string; isPrerequisite?: boolean } {
     const key = text.trim()
     const matched = tasks.filter((t) => t.text.trim() === key)
-    return matched.length === 1 ? matched[0].hint : undefined
+    if (matched.length !== 1) return {}
+    return { hint: matched[0].hint, isPrerequisite: matched[0].isPrerequisite }
   }
 
   async function saveInterview() {
@@ -165,13 +166,18 @@ export default function DesignPage() {
           tasks:            sessionType === 'usability'
             ? (taskBulkMode
                 // まとめ入力中に保存された場合も、文言が一致するタスクのヒントは引き継ぐ
-                ? taskBulkText.split('\n').filter((l) => l.trim()).map((text, i) => ({
-                    text,
-                    order: i + 1,
-                    hint: hintFor(text)?.trim() || null,
-                  }))
+                ? taskBulkText.split('\n').filter((l) => l.trim()).map((text, i) => {
+                    const meta = metaFor(text)
+                    return {
+                      text,
+                      order: i + 1,
+                      hint: meta.hint?.trim() || null,
+                      isPrerequisite: meta.isPrerequisite === true,
+                    }
+                  })
                 : tasks.filter((t) => t.text.trim()).map((t, i) => ({
                     text: t.text, order: i + 1, hint: t.hint?.trim() || null,
+                    isPrerequisite: t.isPrerequisite === true,
                   })))
             : undefined,
           // 上の保存前ガードで整数1〜30に確定しているので、そのまま秒に直す
@@ -438,7 +444,7 @@ export default function DesignPage() {
                         } else {
                           const lines = taskBulkText.split('\n').filter((l) => l.trim())
                           setTasks(lines.length > 0
-                            ? lines.map((text, i) => ({ text, order: i + 1, hint: hintFor(text) }))
+                            ? lines.map((text, i) => ({ text, order: i + 1, ...metaFor(text) }))
                             : [{ text: '', order: 1 }, { text: '', order: 2 }])
                         }
                         setTaskBulkMode(!taskBulkMode)
@@ -461,8 +467,8 @@ export default function DesignPage() {
                         1行 = 1タスク。空行は無視されます。
                         現在 {taskBulkText.split('\n').filter((l) => l.trim()).length} タスク
                         <br />
-                        ヒントはここでは編集できません（「1行ずつ編集」に戻すと入力できます）。
-                        文言を書き換えた行は、そのヒントが外れます。
+                        ヒントと「次のタスクの前提」の設定はここでは編集できません（「1行ずつ編集」に戻すと入力できます）。
+                        文言を書き換えた行は、その設定が外れます。
                       </p>
                     </div>
                   ) : (
@@ -498,11 +504,37 @@ export default function DesignPage() {
                                   setTasks(next)
                                 }}
                                 maxLength={2000}
-                                placeholder="詰まったときのヒント（任意）"
+                                placeholder={t.isPrerequisite
+                                  ? '操作の手順（例: 画面右上のハートを押すとお気に入りに入ります）'
+                                  : '詰まったときのヒント（任意）'}
                                 aria-label={`タスク ${i + 1} のヒント`}
                                 className="flex-1 bg-white border border-dashed border-gray-300 focus:border-gray-900 focus:border-solid focus:outline-none rounded-md px-3 py-1.5 text-xs text-gray-700 placeholder-gray-400" />
                               {tasks.length > 1 && <span className="w-[26px] flex-shrink-0" aria-hidden="true" />}
                             </div>
+                            {/* 次のタスクの前提になるか。最後のタスクには出さない（次が無いので効かない） */}
+                            {i < tasks.length - 1 && (
+                              <div className="flex gap-2 items-start">
+                                <span className="w-4 flex-shrink-0" aria-hidden="true" />
+                                <label className="flex items-start gap-1.5 text-[11px] text-gray-600 leading-snug cursor-pointer">
+                                  <input
+                                    type="checkbox"
+                                    checked={t.isPrerequisite === true}
+                                    onChange={(e) => {
+                                      const next = [...tasks]
+                                      next[i] = { ...next[i], isPrerequisite: e.target.checked }
+                                      setTasks(next)
+                                    }}
+                                    className="mt-0.5 flex-shrink-0"
+                                  />
+                                  <span>
+                                    このタスクができていないと、次のタスクを始められない
+                                    <span className="block text-gray-400">
+                                      チェックすると、できなかった人に上のヒントを手順として見せ、次のタスクの開始地点まで案内します
+                                    </span>
+                                  </span>
+                                </label>
+                              </div>
+                            )}
                           </div>
                         ))}
                       </div>

@@ -25,6 +25,7 @@ type TaskResultInput = {
   endedAt?: number | null
   seq?: number | null
   usedHint?: boolean
+  assistedStart?: boolean
 }
 
 type AnswerInput = {
@@ -38,7 +39,9 @@ type AnswerInput = {
   answeredAt?: number | null
 }
 
-const OUTCOMES = ['completed', 'gave_up']
+// not_attempted = 前のタスク（前提タスク）を達成できず、着手する機会が無かった。
+// 集計では試行回数（分母）から外すので、gave_up とは別の値として受け取る。
+const OUTCOMES = ['completed', 'gave_up', 'not_attempted']
 const ANSWER_TYPES = ['open', 'rating', 'nps']
 
 const num = (v: unknown): number | null =>
@@ -78,8 +81,10 @@ export async function POST(req: NextRequest, props: { params: Promise<{ id: stri
           outcome: t.outcome,
           startedAt,
           endedAt,
+          // 未実施は所要時間を持たない。着手していないので、経過秒があっても
+          // それは前のタスクで詰まっていた時間であり、time on task ではない
           durationSec:
-            startedAt !== null && endedAt !== null && endedAt >= startedAt
+            t.outcome !== 'not_attempted' && startedAt !== null && endedAt !== null && endedAt >= startedAt
               ? endedAt - startedAt
               : null,
           // SEQ は 1〜7 の整数のみ受け付ける
@@ -88,6 +93,7 @@ export async function POST(req: NextRequest, props: { params: Promise<{ id: stri
             return v !== null && Number.isInteger(v) && v >= 1 && v <= 7 ? v : null
           })(),
           usedHint: t.usedHint === true,
+          assistedStart: t.assistedStart === true,
         }
       })
 

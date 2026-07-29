@@ -5,12 +5,19 @@ import { useSearchParams } from 'next/navigation'
 import { Monitor, Check, X, AlertTriangle, CheckCircle2, Globe } from 'lucide-react'
 import SeqScale from '@/components/SeqScale'
 import StuckHelp from '@/components/StuckHelp'
+import TaskRecovery, { TaskRecoveryActions } from '@/components/TaskRecovery'
+import { blockedAfter, needsRecovery } from '@/lib/task-flow'
 
 interface Task {
   text: string
   order: number
-  /** 詰まったときに見せるヒント（リサーチャーが事前に書いたもの） */
+  /**
+   * 詰まったときに見せるヒント（リサーチャーが事前に書いたもの）。
+   * isPrerequisite のタスクでは、断念した人を次の開始地点まで案内する手順も兼ねる。
+   */
   hint?: string | null
+  /** このタスクの結果が次のタスクの前提になるか（断念しても即座に次へ進めない） */
+  isPrerequisite?: boolean | null
 }
 
 type WidgetPhase = 'task' | 'done'
@@ -46,6 +53,13 @@ function WidgetContent() {
   // （effect 内で同期的に setState すると連鎖レンダーの原因になる）。
   const [stuckAtIdx, setStuckAtIdx]             = useState<number | null>(null)
   const [hintShownAtIdx, setHintShownAtIdx]     = useState<number | null>(null)
+  // 前提タスクを断念した直後の立て直し待ち。stuckAtIdx と同じく「どのタスクで出したか」
+  // を持つので、タスクが進めば自動で引っ込む。
+  // 小窓を閉じて開き直した場合も引き継ぐ（メイン側が recovery=1 を付けて開く）。
+  // 引き継がないと通常の「達成／できなかった」が出て、断念の記録が上書きされる。
+  const [recoveryAtIdx, setRecoveryAtIdx]       = useState<number | null>(
+    searchParams.get('recovery') === '1' ? initialIdx : null,
+  )
   // ヒントを見たタスク番号（0始まり）。結果送信時に添えて集計で自力達成と分ける
   const usedHintIdxRef                          = useRef<Set<number>>(new Set())
 
@@ -68,7 +82,17 @@ function WidgetContent() {
       channel.onmessage = (e) => {
         const { type } = e.data
         if (type === 'task_update' && typeof e.data.currentTaskIndex === 'number') {
-          setCurrentTaskIndex(e.data.currentTaskIndex)
+          const next = e.data.currentTaskIndex
+          setCurrentTaskIndex(next)
+          // 立て直し待ちの持ち主はメイン側（記録を持っている方）。メインが別タスクへ
+          // 移った時点で待ちは解除されているので、小窓にも残さない。残すと元のタスクへ
+          // 戻ったときだけ小窓が立て直し画面を復活させ、押してもメインが受け取らない
+          // （無反応のうえ小窓とメインで現在タスクがズレる）。
+          setRecoveryAtIdx((cur) => (cur === next ? cur : null))
+        } else if (type === 'prereq_recovery' && typeof e.data.index === 'number') {
+          // メイン画面側で前提タスクの断念が記録された（フォールバック操作時）。
+          // 小窓でも同じ立て直し画面を出し、操作の起点が割れないようにする
+          setRecoveryAtIdx(e.data.index)
         } else if (type === 'session_ended') {
           setWidgetPhase('done')
           setDoneMessage('ウィンドウを閉じています...')
@@ -290,6 +314,13 @@ function WidgetContent() {
     setAwaitingSeq(null)
     // ヒントを見た上での結果は、集計で自力の達成と分ける必要がある
     const usedHint = usedHintIdxRef.current.has(currentTaskIndex)
+    // 前提タスクを断念した場合は、結果を送っても次へは進めない。
+    // 次のタスクはこのタスクができている状態から始まるので、先に立て直しを案内する
+    if (outcome === 'gave_up' && needsRecovery(tasks, currentTaskIndex)) {
+      channelRef.current?.postMessage({ type: 'task_outcome', outcome, seq, usedHint })
+      setRecoveryAtIdx(currentTaskIndex)
+      return
+    }
     if (!isLastTask) {
       // 途中のタスク: 結果だけ送って次へ（録画は継続）
       channelRef.current?.postMessage({ type: 'task_outcome', outcome, seq, usedHint })
@@ -314,6 +345,37 @@ function WidgetContent() {
     channelRef.current?.postMessage({ type: 'task_outcome', outcome, seq, usedHint })
     setDoneMessage('インタビューページに戻ります...')
     setWidgetPhase('done')
+  }
+
+  /* ── 前提タスクの立て直し ──────────────────────────────── */
+  // 開始地点まで到達できた → 次のタスクへ。
+  // 「前提を代行して開始した」印はメイン側（記録を持っている方）で付ける。
+  function recoveredPrereq() {
+    channelRef.current?.postMessage({ type: 'prereq_recovered' })
+    setRecoveryAtIdx(null)
+    setCurrentTaskIndex((i) => Math.min(i + 1, tasks.length - 1))
+  }
+
+  // 到達できなかった → 後続は未実施として記録される。
+  // この先に実施できるタスクが無い場合、メインはタスク完了とみなして小窓を閉じるため、
+  // 閉じられる前に録画を止めて blob を送る（最後のタスクを押したときと同じ順序）。
+  async function cannotRecoverPrereq() {
+    const { resume } = blockedAfter(tasks, currentTaskIndex)
+    if (resume >= tasks.length) {
+      // 録画を書き出している間は立て直し画面を閉じない。閉じると同じ位置に通常の
+      // 「達成／できなかった」が戻り、そこで達成を押されると断念の記録が達成に
+      // 上書きされ、遅れて届く prereq_failed も捨てられて未実施が記録されない。
+      focusInterviewPage()
+      await stopAndSendRecording()
+      channelRef.current?.postMessage({ type: 'prereq_failed' })
+      setDoneMessage('インタビューページに戻ります...')
+      setWidgetPhase('done')
+      setRecoveryAtIdx(null)
+      return
+    }
+    setRecoveryAtIdx(null)
+    channelRef.current?.postMessage({ type: 'prereq_failed' })
+    setCurrentTaskIndex(resume)
   }
 
   /* ── セッション終了 ───────────────────────────────────────── */
@@ -362,6 +424,8 @@ function WidgetContent() {
 
   const stuckOnTask = stuckAtIdx === currentTaskIndex
   const hintShown = hintShownAtIdx === currentTaskIndex
+  // 前提タスクの立て直し待ち。この間は達成/できなかったの操作を出さない
+  const recoveryPending = recoveryAtIdx === currentTaskIndex && needsRecovery(tasks, currentTaskIndex)
 
   // ヒントを開いたら、その場でメイン側へ伝える。
   // 小窓の ref だけに持つと、小窓を閉じて開き直したときに記録が消え、
@@ -453,9 +517,18 @@ function WidgetContent() {
                 <p className="text-[10px] text-gray-500 mb-1.5 uppercase tracking-wide font-medium">現在のタスク</p>
                 <p className="text-sm text-gray-900 leading-relaxed">{currentTask.text}</p>
               </div>
+              {/* 前提タスクの立て直し案内。手順が長くても操作ボタンが窓の外へ
+                  押し出されないよう、ボタンは下の sticky 領域に置く */}
+              {recoveryPending && (
+                <TaskRecovery
+                  compact
+                  hint={currentTask.hint ?? null}
+                  nextTaskText={tasks[currentTaskIndex + 1]?.text ?? null}
+                />
+              )}
               {/* SEQ 入力待ち中は出さない。達成を押した後にヒントを開くと、
                   自力の成功が「ヒントあり」として記録されてしまうため。 */}
-              {stuckOnTask && !awaitingSeq && (
+              {stuckOnTask && !awaitingSeq && !recoveryPending && (
                 <StuckHelp
                   compact
                   hint={currentTask.hint ?? null}
@@ -572,9 +645,11 @@ function WidgetContent() {
             )}
 
             <p className="text-[10px] text-gray-500 text-center leading-snug pt-1">
-              操作が終わったら押してください
+              {recoveryPending ? '上の手順で準備できたら押してください' : '操作が終わったら押してください'}
             </p>
-            {awaitingSeq ? (
+            {recoveryPending ? (
+              <TaskRecoveryActions compact onReady={recoveredPrereq} onCannot={() => void cannotRecoverPrereq()} />
+            ) : awaitingSeq ? (
               /* SEQ 入力中: 評価を選ぶまで次に進まない（1タップで確定） */
               <div className="border border-gray-200 rounded-lg p-3 bg-gray-50">
                 <SeqScale compact onSelect={(v) => void commitOutcome(awaitingSeq, v)} />

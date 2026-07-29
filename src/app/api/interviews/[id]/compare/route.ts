@@ -22,7 +22,9 @@ export async function GET(req: NextRequest, props: { params: Promise<{ id: strin
       seqEnabled: true,
       hintDelaySec: true,
       screeners: { orderBy: { order: 'asc' }, select: { id: true, label: true, options: true, disqualify: true, required: true, order: true } },
-      tasks: { orderBy: { order: 'asc' }, select: { id: true, text: true, order: true, hint: true } },
+      // isPrerequisite を落とすと、編集モーダルが false で初期化して保存し、
+      // 「次のタスクの前提」の設定が編集のたびに静かに消える
+      tasks: { orderBy: { order: 'asc' }, select: { id: true, text: true, order: true, hint: true, isPrerequisite: true } },
       questions: { orderBy: { order: 'asc' }, select: { id: true, text: true, order: true, type: true } },
       // 一覧表示のため全ステータスのセッションを返す（分析・レーダーは done のみで算出）
       sessions: {
@@ -36,7 +38,7 @@ export async function GET(req: NextRequest, props: { params: Promise<{ id: strin
           transcript: { select: { summary: true, themes: true, _count: { select: { segments: true } } } },
           emotions: { select: { happy: true, neutral: true, sad: true, surprised: true } },
           // 定量集計（タスク成功率・スコア平均）用
-          taskResults: { orderBy: { order: 'asc' }, select: { taskId: true, order: true, text: true, outcome: true, durationSec: true, seq: true, excludedAt: true, usedHint: true } },
+          taskResults: { orderBy: { order: 'asc' }, select: { taskId: true, order: true, text: true, outcome: true, durationSec: true, seq: true, excludedAt: true, usedHint: true, assistedStart: true } },
           answers: { orderBy: { order: 'asc' }, select: { questionId: true, order: true, text: true, type: true, valueNum: true, valueText: true, followUpCount: true, sentiment: true, excludedAt: true } },
           // 人が付けたタグの横断集計（アフィニティ分析）用
           highlights: { select: { tags: true } },

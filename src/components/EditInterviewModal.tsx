@@ -13,7 +13,7 @@ export interface EditableInterview {
   seqEnabled?: boolean
   hintDelaySec?: number | null
   questions: { id: string; text: string; order: number; type: string }[]
-  tasks?: { id: string; text: string; order: number; hint?: string | null }[]
+  tasks?: { id: string; text: string; order: number; hint?: string | null; isPrerequisite?: boolean | null }[]
   screeners?: { id: string; label: string; options: string[]; disqualify: string[]; required: boolean; order: number }[]
 }
 
@@ -25,7 +25,7 @@ interface ScreenerRow {
   required: boolean
 }
 
-interface Row { id?: string; text: string; type: QType; hint?: string }
+interface Row { id?: string; text: string; type: QType; hint?: string; isPrerequisite?: boolean }
 
 const Q_TYPES: { value: QType; label: string }[] = [
   { value: 'open',   label: '自由回答' },
@@ -54,7 +54,10 @@ export default function EditInterviewModal({
     interview.questions.map((q) => ({ id: q.id, text: q.text, type: (q.type as QType) ?? 'open' }))
   )
   const [tasks, setTasks] = useState<Row[]>(
-    (interview.tasks ?? []).map((t) => ({ id: t.id, text: t.text, type: 'open', hint: t.hint ?? '' }))
+    (interview.tasks ?? []).map((t) => ({
+      id: t.id, text: t.text, type: 'open', hint: t.hint ?? '',
+      isPrerequisite: t.isPrerequisite === true,
+    }))
   )
   const [seqEnabled, setSeqEnabled] = useState(interview.seqEnabled ?? false)
   // 声かけまでの秒数。空欄なら声かけ自体を出さない
@@ -124,7 +127,10 @@ export default function EditInterviewModal({
             ? {
                 tasks: tasks
                   .filter((t) => t.text.trim())
-                  .map((t) => ({ id: t.id, text: t.text.trim(), hint: t.hint?.trim() || null })),
+                  .map((t) => ({
+                    id: t.id, text: t.text.trim(), hint: t.hint?.trim() || null,
+                    isPrerequisite: t.isPrerequisite === true,
+                  })),
                 seqEnabled,
                 // 空欄は「声かけしない」として null で送る。
                 // 判定は上の保存前ガードと同じ条件にする（片方だけ緩いと、
@@ -434,18 +440,43 @@ function RowEditor({
             </button>
           </div>
           {withHint && (
-            <div className="flex items-start gap-1.5 mt-1">
-              <span className="w-4 flex-shrink-0" aria-hidden="true" />
-              <input
-                value={row.hint ?? ''}
-                onChange={(e) => setRows(rows.map((r, j) => (j === i ? { ...r, hint: e.target.value } : r)))}
-                maxLength={2000}
-                placeholder="詰まったときのヒント（任意）例: 画面右上のメニューから探せます"
-                aria-label={`タスク ${i + 1} のヒント`}
-                className="flex-1 border border-dashed border-gray-300 focus:border-gray-900 focus:border-solid rounded-md px-2.5 py-1.5 text-xs text-gray-700 placeholder-gray-400 focus:outline-none"
-              />
-              <span className="w-[52px] flex-shrink-0" aria-hidden="true" />
-            </div>
+            <>
+              <div className="flex items-start gap-1.5 mt-1">
+                <span className="w-4 flex-shrink-0" aria-hidden="true" />
+                <input
+                  value={row.hint ?? ''}
+                  onChange={(e) => setRows(rows.map((r, j) => (j === i ? { ...r, hint: e.target.value } : r)))}
+                  maxLength={2000}
+                  placeholder={row.isPrerequisite
+                    ? '操作の手順（例: 画面右上のハートを押すとお気に入りに入ります）'
+                    : '詰まったときのヒント（任意）例: 画面右上のメニューから探せます'}
+                  aria-label={`タスク ${i + 1} のヒント`}
+                  className="flex-1 border border-dashed border-gray-300 focus:border-gray-900 focus:border-solid rounded-md px-2.5 py-1.5 text-xs text-gray-700 placeholder-gray-400 focus:outline-none"
+                />
+                <span className="w-[52px] flex-shrink-0" aria-hidden="true" />
+              </div>
+              {/* 次のタスクの前提になるか。最後の行には出さない（次が無いので効かない） */}
+              {i < rows.length - 1 && (
+                <div className="flex items-start gap-1.5 mt-1">
+                  <span className="w-4 flex-shrink-0" aria-hidden="true" />
+                  <label className="flex items-start gap-1.5 text-[11px] text-gray-600 leading-snug cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={row.isPrerequisite === true}
+                      onChange={(e) => setRows(rows.map((r, j) => (j === i ? { ...r, isPrerequisite: e.target.checked } : r)))}
+                      className="mt-0.5 flex-shrink-0"
+                    />
+                    <span>
+                      このタスクができていないと、次のタスクを始められない
+                      <span className="block text-gray-400">
+                        チェックすると、できなかった人に上のヒントを手順として見せ、次のタスクの開始地点まで案内します。案内しても到達できない場合、後続は「未実施」として記録し成功率の分母から外します
+                      </span>
+                    </span>
+                  </label>
+                  <span className="w-[52px] flex-shrink-0" aria-hidden="true" />
+                </div>
+              )}
+            </>
           )}
           </div>
         ))}

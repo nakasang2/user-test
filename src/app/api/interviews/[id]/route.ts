@@ -50,6 +50,8 @@ const patchSchema = z.object({
     text: z.string().min(1).max(2000),
     // 詰まったときに参加者へ見せるヒント。全員に同じ文言を出して比較可能性を保つ
     hint: z.string().max(2000).nullable().optional(),
+    // このタスクの結果が次のタスクの前提になるか（断念しても即座に次へ進めない）
+    isPrerequisite: z.boolean().optional(),
   })).optional(),
   // 事前質問（スクリーニング／属性）。disqualify に入れた選択肢を選んだ人は参加不可。
   screeners: z.array(z.object({
@@ -132,10 +134,11 @@ export async function PATCH(req: NextRequest, props: { params: Promise<{ id: str
       tasks.forEach((t, index) => {
         const order = index + 1
         const hint = t.hint?.trim() ? t.hint.trim() : null
+        const isPrerequisite = t.isPrerequisite === true
         if (t.id && ownTaskIds.has(t.id)) {
-          ops.push(prisma.task.update({ where: { id: t.id }, data: { text: t.text, order, hint } }))
+          ops.push(prisma.task.update({ where: { id: t.id }, data: { text: t.text, order, hint, isPrerequisite } }))
         } else {
-          ops.push(prisma.task.create({ data: { interviewId: id, text: t.text, order, hint } }))
+          ops.push(prisma.task.create({ data: { interviewId: id, text: t.text, order, hint, isPrerequisite } }))
         }
       })
     }

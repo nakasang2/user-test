@@ -21,7 +21,7 @@ interface QuestionItem {
   type: 'open' | 'rating' | 'nps'
 }
 
-interface TaskItem { text: string; hint?: string }
+interface TaskItem { text: string; hint?: string; isPrerequisite?: boolean }
 
 interface Props {
   onClose: () => void
@@ -99,7 +99,10 @@ export default function CreateInterviewModal({ onClose, onCreated }: Props) {
           stimulusUrl:      (sessionType === 'impression' || sessionType === 'usability') ? (stimulusUrl || undefined) : undefined,
           stimulusDuration: sessionType === 'impression' ? stimulusDuration : undefined,
           tasks:            sessionType === 'usability'
-            ? tasks.filter((t) => t.text.trim()).map((t, i) => ({ text: t.text, order: i + 1, hint: t.hint?.trim() || null }))
+            ? tasks.filter((t) => t.text.trim()).map((t, i) => ({
+                text: t.text, order: i + 1, hint: t.hint?.trim() || null,
+                isPrerequisite: t.isPrerequisite === true,
+              }))
             : undefined,
           // 上の保存前ガードで整数1〜30に確定しているので、そのまま秒に直す
           hintDelaySec:     sessionType === 'usability' && hintDelayMin.trim()
@@ -308,12 +311,35 @@ export default function CreateInterviewModal({ onClose, onCreated }: Props) {
                         value={t.hint ?? ''}
                         onChange={(e) => setTasks(tasks.map((x, j) => (j === i ? { ...x, hint: e.target.value } : x)))}
                         maxLength={2000}
-                        placeholder="詰まったときのヒント（任意）"
+                        placeholder={t.isPrerequisite
+                          ? '操作の手順（例: 画面右上のハートを押すとお気に入りに入ります）'
+                          : '詰まったときのヒント（任意）'}
                         aria-label={`タスク ${i + 1} のヒント`}
                         className="flex-1 border border-dashed border-gray-300 focus:border-gray-900 focus:border-solid rounded-md px-2.5 py-1.5 text-xs text-gray-700 placeholder-gray-400 focus:outline-none"
                       />
                       {tasks.length > 1 && <span className="w-[26px] flex-shrink-0" aria-hidden="true" />}
                     </div>
+                    {/* 次のタスクの前提になるか。最後のタスクには出さない（次が無いので効かない）。
+                        並べ替え・削除で最後になったタスクの設定はそのまま残るが、実行時は無視される */}
+                    {i < tasks.length - 1 && (
+                      <div className="flex gap-2 items-start">
+                        <span className="w-5 flex-shrink-0" aria-hidden="true" />
+                        <label className="flex items-start gap-1.5 text-[11px] text-gray-600 leading-snug cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={t.isPrerequisite === true}
+                            onChange={(e) => setTasks(tasks.map((x, j) => (j === i ? { ...x, isPrerequisite: e.target.checked } : x)))}
+                            className="mt-0.5 flex-shrink-0"
+                          />
+                          <span>
+                            このタスクができていないと、次のタスクを始められない
+                            <span className="block text-gray-400">
+                              チェックすると、できなかった人に上のヒントを手順として見せ、次のタスクの開始地点まで案内します（ヒントには操作方法そのものを書いてください）
+                            </span>
+                          </span>
+                        </label>
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>

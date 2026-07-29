@@ -1,18 +1,21 @@
 'use client'
 
-import { CheckCircle2, XCircle, Clock, Star } from 'lucide-react'
+import { CheckCircle2, XCircle, MinusCircle, Clock, Star } from 'lucide-react'
 
 export interface TaskResultData {
   taskId?: string | null
   order: number
   text: string
-  outcome: string          // completed | gave_up
+  /** completed | gave_up | not_attempted（未実施＝前提を満たせず着手できなかった） */
+  outcome: string
   durationSec?: number | null
   seq?: number | null
   /** 集計対象外にした日時。null なら集計に含める */
   excludedAt?: string | null
   /** ヒントを見た上での結果か。自力の達成と混ぜると成功率が実態より良く見える */
   usedHint?: boolean | null
+  /** 前提タスクの立て直し案内を受けて開始したか。自力で到達した人と分けて見る */
+  assistedStart?: boolean | null
 }
 
 export interface AnswerData {
@@ -56,8 +59,13 @@ export default function SessionMetrics({
   const scored = answers.filter((a) => (a.type === 'rating' || a.type === 'nps') && typeof a.valueNum === 'number')
   if (taskResults.length === 0 && scored.length === 0) return null
 
-  const completed = taskResults.filter((t) => t.outcome === 'completed').length
-  const successRate = taskResults.length ? Math.round((completed / taskResults.length) * 100) : null
+  // 未実施（前のタスクの前提を満たせず着手できなかった分）は成功率の分母に入れない。
+  // 「やってみて出来なかった」と同じ扱いにすると、タスクの難しさではなく
+  // 前提の欠落を難しさとして数えてしまう。件数は別に出す。
+  const notAttempted = taskResults.filter((t) => t.outcome === 'not_attempted')
+  const attempted = taskResults.filter((t) => t.outcome !== 'not_attempted')
+  const completed = attempted.filter((t) => t.outcome === 'completed').length
+  const successRate = attempted.length ? Math.round((completed / attempted.length) * 100) : null
   const durations = taskResults.map((t) => t.durationSec).filter((d): d is number => typeof d === 'number' && d > 0)
   const totalDuration = durations.reduce((a, b) => a + b, 0)
 
@@ -71,8 +79,19 @@ export default function SessionMetrics({
           <div className="grid grid-cols-3 gap-3">
             <div className="bg-gray-50 border border-gray-200 rounded-lg p-3">
               <p className="text-[10px] text-gray-500 uppercase tracking-wide font-medium mb-1">タスク成功率</p>
-              <p className="text-2xl font-semibold text-gray-900 leading-none">{successRate}<span className="text-sm font-normal text-gray-500 ml-0.5">%</span></p>
-              <p className="text-[11px] text-gray-500 mt-1">{completed} / {taskResults.length} 件</p>
+              <p className="text-2xl font-semibold text-gray-900 leading-none">
+                {successRate !== null
+                  ? <>{successRate}<span className="text-sm font-normal text-gray-500 ml-0.5">%</span></>
+                  : <span className="text-sm font-normal text-gray-400">—</span>}
+              </p>
+              <p className="text-[11px] text-gray-500 mt-1">
+                {completed} / {attempted.length} 件
+                {notAttempted.length > 0 && (
+                  <span className="text-gray-400" title="前のタスクの前提を満たせず、着手する機会が無かった分。成功率には含めていません">
+                    ・未実施 {notAttempted.length}
+                  </span>
+                )}
+              </p>
             </div>
             <div className="bg-gray-50 border border-gray-200 rounded-lg p-3">
               <p className="text-[10px] text-gray-500 uppercase tracking-wide font-medium mb-1">合計所要時間</p>
@@ -94,22 +113,35 @@ export default function SessionMetrics({
           <ul className="divide-y divide-gray-100 border border-gray-200 rounded-lg overflow-hidden">
             {taskResults.map((t) => {
               const ok = t.outcome === 'completed'
+              const skipped = t.outcome === 'not_attempted'
               return (
                 <li key={t.order} className="flex items-start gap-2.5 px-3 py-2.5 bg-white">
-                  {ok
+                  {skipped
+                    ? <MinusCircle className="w-4 h-4 text-gray-400 flex-shrink-0 mt-0.5" strokeWidth={2} />
+                    : ok
                     ? <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0 mt-0.5" strokeWidth={2} />
                     : <XCircle className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5" strokeWidth={2} />}
                   <div className="min-w-0 flex-1">
                     <p className="text-xs text-gray-500">タスク {t.order}</p>
-                    <p className="text-sm text-gray-900 leading-snug break-words">{t.text}</p>
+                    <p className={`text-sm leading-snug break-words ${skipped ? 'text-gray-500' : 'text-gray-900'}`}>{t.text}</p>
                   </div>
                   <div className="flex-shrink-0 text-right">
-                    <p className={`text-xs font-medium ${ok ? 'text-emerald-700' : 'text-red-600'}`}>
-                      {ok ? '達成' : 'できなかった'}
+                    <p className={`text-xs font-medium ${skipped ? 'text-gray-500' : ok ? 'text-emerald-700' : 'text-red-600'}`}>
+                      {skipped ? '未実施' : ok ? '達成' : 'できなかった'}
                     </p>
+                    {skipped && (
+                      <p className="text-[11px] text-gray-400 mt-0.5" title="成功率の分母には含めていません">
+                        前提を満たせず
+                      </p>
+                    )}
                     {t.usedHint === true && (
                       <p className="text-[11px] text-amber-700 mt-0.5" title="ヒントを見た上での結果">
                         ヒントあり
+                      </p>
+                    )}
+                    {t.assistedStart === true && (
+                      <p className="text-[11px] text-amber-700 mt-0.5" title="前のタスクを断念したため、開始地点まで案内した上で実施">
+                        前提を代行
                       </p>
                     )}
                     {typeof t.durationSec === 'number' && t.durationSec > 0 && (
