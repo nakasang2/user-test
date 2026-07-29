@@ -108,7 +108,15 @@ export default function InterviewSummary({
         <Tile
           label="タスク成功率"
           value={success ? `${success.rate}%` : null}
-          sub={success ? `${success.completed} / ${success.total} 回` : '測定データなし'}
+          sub={
+            success
+              ? success.hintUsed > 0
+                // ヒントを使った人がいるときは「自力では何%か」を必ず併記する。
+                // 併記しないと「助けがあれば出来る」を「出来る」と読み違える
+                ? `${success.completed} / ${success.total} 回・自力 ${success.unaidedRate}%`
+                : `${success.completed} / ${success.total} 回`
+              : '測定データなし'
+          }
         >
           {success && (
             <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden mt-2">

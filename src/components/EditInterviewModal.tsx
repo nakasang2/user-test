@@ -11,8 +11,9 @@ export interface EditableInterview {
   description: string | null
   type: string
   seqEnabled?: boolean
+  hintDelaySec?: number | null
   questions: { id: string; text: string; order: number; type: string }[]
-  tasks?: { id: string; text: string; order: number }[]
+  tasks?: { id: string; text: string; order: number; hint?: string | null }[]
   screeners?: { id: string; label: string; options: string[]; disqualify: string[]; required: boolean; order: number }[]
 }
 
@@ -24,7 +25,7 @@ interface ScreenerRow {
   required: boolean
 }
 
-interface Row { id?: string; text: string; type: QType }
+interface Row { id?: string; text: string; type: QType; hint?: string }
 
 const Q_TYPES: { value: QType; label: string }[] = [
   { value: 'open',   label: '自由回答' },
@@ -53,9 +54,15 @@ export default function EditInterviewModal({
     interview.questions.map((q) => ({ id: q.id, text: q.text, type: (q.type as QType) ?? 'open' }))
   )
   const [tasks, setTasks] = useState<Row[]>(
-    (interview.tasks ?? []).map((t) => ({ id: t.id, text: t.text, type: 'open' }))
+    (interview.tasks ?? []).map((t) => ({ id: t.id, text: t.text, type: 'open', hint: t.hint ?? '' }))
   )
   const [seqEnabled, setSeqEnabled] = useState(interview.seqEnabled ?? false)
+  // 声かけまでの秒数。空欄なら声かけ自体を出さない
+  // 1分未満が入っていると "0" になり、保存前ガードに弾かれてこの調査を一切保存できなくなる。
+  // 最低1分に丸めて、少なくとも編集は続けられるようにする。
+  const [hintDelayMin, setHintDelayMin] = useState(
+    interview.hintDelaySec != null ? String(Math.max(1, Math.round(interview.hintDelaySec / 60))) : ''
+  )
   const [screeners, setScreeners] = useState<ScreenerRow[]>(
     (interview.screeners ?? []).map((x) => ({
       id: x.id,
@@ -80,6 +87,15 @@ export default function EditInterviewModal({
     if (!title.trim()) { setError('タイトルを入力してください'); return }
     const badScreener = screeners.find((x) => x.label.trim() && !x.optionsText.split('\n').some((o) => o.trim()))
     if (badScreener) { setError(`事前質問「${badScreener.label.trim()}」に選択肢を入力してください`); return }
+    // 範囲外のまま送るとサーバー側の英語エラーになり、同じ画面で直した他の項目
+    // （タイトル・タスク・質問など）も一緒に保存されず消えてしまう。ここで止める。
+    if (isUsability && hintDelayMin.trim()) {
+      const m = Number(hintDelayMin)
+      if (!Number.isFinite(m) || m < 1 || m > 30) {
+        setError('声かけまでの時間は1〜30分で入力してください（空欄にすると声かけしません）')
+        return
+      }
+    }
     setSaving(true)
     setError(null)
     try {
@@ -104,8 +120,15 @@ export default function EditInterviewModal({
             })),
           ...(isUsability
             ? {
-                tasks: tasks.filter((t) => t.text.trim()).map((t) => ({ id: t.id, text: t.text.trim() })),
+                tasks: tasks
+                  .filter((t) => t.text.trim())
+                  .map((t) => ({ id: t.id, text: t.text.trim(), hint: t.hint?.trim() || null })),
                 seqEnabled,
+                // 空欄・0以下は「声かけしない」として null で送る
+                hintDelaySec: (() => {
+                  const m = Number(hintDelayMin)
+                  return hintDelayMin.trim() && Number.isFinite(m) && m > 0 ? Math.round(m * 60) : null
+                })(),
               }
             : {}),
         }),
@@ -190,12 +213,40 @@ export default function EditInterviewModal({
           )}
 
           {isUsability && (
+            <div className="bg-gray-50 border border-gray-200 rounded-md p-3">
+              <label htmlFor="edit-hint-delay" className="block text-xs font-medium text-gray-900 mb-1">
+                詰まった参加者への声かけ
+              </label>
+              <p className="text-xs text-gray-600 leading-relaxed mb-2">
+                タスクに着手してから指定した時間が経つと、「うまくいかないときは次に進めます」という案内を出します。
+                タスクにヒントを書いておくと、そこから見られるようになります。
+                <br />
+                <span className="text-gray-500">空欄にすると声かけは出ません。</span>
+              </p>
+              <div className="flex items-center gap-2">
+                <input
+                  id="edit-hint-delay"
+                  type="number"
+                  min={1}
+                  max={30}
+                  value={hintDelayMin}
+                  onChange={(e) => setHintDelayMin(e.target.value)}
+                  placeholder="3"
+                  className="w-20 border border-gray-300 focus:border-gray-900 rounded-md px-2.5 py-1.5 text-sm focus:outline-none"
+                />
+                <span className="text-xs text-gray-600">分後に声かけする（1〜30分）</span>
+              </div>
+            </div>
+          )}
+
+          {isUsability && (
             <RowEditor
               label="タスク"
               rows={tasks}
               setRows={setTasks}
               placeholder="例: 作品を一つ選んでください"
               withType={false}
+              withHint
             />
           )}
 
@@ -312,13 +363,15 @@ export default function EditInterviewModal({
 
 /** 質問／タスクの共通エディタ（追加・削除・並べ替え） */
 function RowEditor({
-  label, rows, setRows, placeholder, withType,
+  label, rows, setRows, placeholder, withType, withHint = false,
 }: {
   label: string
   rows: Row[]
   setRows: (r: Row[]) => void
   placeholder: string
   withType: boolean
+  /** タスク用: 詰まったときに見せるヒントも入力する */
+  withHint?: boolean
 }) {
   const move = (from: number, to: number) => {
     if (to < 0 || to >= rows.length) return
@@ -342,7 +395,8 @@ function RowEditor({
       <div className="space-y-2">
         {rows.length === 0 && <p className="text-xs text-gray-400">まだありません</p>}
         {rows.map((row, i) => (
-          <div key={row.id ?? `new-${i}`} className="flex items-start gap-1.5">
+          <div key={row.id ?? `new-${i}`}>
+          <div className="flex items-start gap-1.5">
             <span className="text-xs text-gray-400 w-4 pt-2 flex-shrink-0">{i + 1}.</span>
             <input
               value={row.text}
@@ -372,6 +426,20 @@ function RowEditor({
             >
               <Trash2 className="w-3.5 h-3.5" strokeWidth={2} />
             </button>
+          </div>
+          {withHint && (
+            <div className="flex items-start gap-1.5 mt-1">
+              <span className="w-4 flex-shrink-0" aria-hidden="true" />
+              <input
+                value={row.hint ?? ''}
+                onChange={(e) => setRows(rows.map((r, j) => (j === i ? { ...r, hint: e.target.value } : r)))}
+                placeholder="詰まったときのヒント（任意）例: 画面右上のメニューから探せます"
+                aria-label={`タスク ${i + 1} のヒント`}
+                className="flex-1 border border-dashed border-gray-300 focus:border-gray-900 focus:border-solid rounded-md px-2.5 py-1.5 text-xs text-gray-700 placeholder-gray-400 focus:outline-none"
+              />
+              <span className="w-[52px] flex-shrink-0" aria-hidden="true" />
+            </div>
+          )}
           </div>
         ))}
       </div>

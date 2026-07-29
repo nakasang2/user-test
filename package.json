@@ -8,6 +8,7 @@
     "db:push": "prisma db push",
     "start": "next start",
     "lint": "eslint",
+    "test": "node --experimental-strip-types --disable-warning=ExperimentalWarning src/lib/__tests__/interview-aggregate.test.ts",
     "test:data": "node --env-file-if-exists=.env scripts/test-data-capture.mjs"
   },
   "dependencies": {
