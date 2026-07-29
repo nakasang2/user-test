@@ -90,7 +90,10 @@ export default function AnswerMatrix({
   const cells = useMemo(() => {
     const m = new Map<string, AnswerData>()
     sessions.forEach((s) => {
-      const answers = s.answers ?? []
+      // 集計対象外にした回答はここでも出さない。
+      // 特に、質問を削除してから同じ文言で作り直した場合、下の文言一致で
+      // 「集計から外したはずの古い回答」が新しい列に現役として並んでしまう。
+      const answers = (s.answers ?? []).filter((a) => a.excludedAt == null)
       const used = new Set<AnswerData>()
 
       // 1周目: questionId が一致するものを確定させる
@@ -114,9 +117,11 @@ export default function AnswerMatrix({
     const q = filter.trim().toLowerCase()
     let list = sessions.filter((s) => {
       if (!q) return true
-      // 参加者名か、いずれかの回答本文に一致すれば残す
+      // 参加者名か、いずれかの回答本文に一致すれば残す。
+      // 表に出していない（集計対象外の）回答にヒットさせると、
+      // 行は残るのに一致箇所がどこにも見えない状態になるので同じ条件で絞る。
       if (s.participantName.toLowerCase().includes(q)) return true
-      return (s.answers ?? []).some(
+      return (s.answers ?? []).filter((a) => a.excludedAt == null).some(
         (a) =>
           a.valueText?.toLowerCase().includes(q) ||
           String(a.valueNum ?? '').includes(q) ||
@@ -165,6 +170,9 @@ export default function AnswerMatrix({
 
   // 回答が1件も無いとき、黙って消えると「機能が無い」ように見えるので理由を出す。
   // 回答の構造化保存より前に実施したセッションは、回答が文字起こしの中にしか無い。
+  // ここは意図的に excludedAt を見ない。抽出 API 側の対象条件が
+  // 「Answer が1件も無いセッション」（excludedAt を問わない）なので、
+  // ここだけ除外済みを未取得に数えると、押しても件数が減らないボタンになる。
   const answeredCount = sessions.filter((s) => (s.answers?.length ?? 0) > 0).length
   // 回答が入っていないセッション。1件でも埋まるとボタンが消えて
   // 残りを埋められなくなるため、テーブル表示中も導線を残す。

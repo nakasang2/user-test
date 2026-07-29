@@ -35,8 +35,8 @@ export async function GET(req: NextRequest, props: { params: Promise<{ id: strin
           transcript: { select: { summary: true, themes: true, _count: { select: { segments: true } } } },
           emotions: { select: { happy: true, neutral: true, sad: true, surprised: true } },
           // 定量集計（タスク成功率・スコア平均）用
-          taskResults: { orderBy: { order: 'asc' }, select: { taskId: true, order: true, text: true, outcome: true, durationSec: true, seq: true } },
-          answers: { orderBy: { order: 'asc' }, select: { questionId: true, order: true, text: true, type: true, valueNum: true, valueText: true, followUpCount: true, sentiment: true } },
+          taskResults: { orderBy: { order: 'asc' }, select: { taskId: true, order: true, text: true, outcome: true, durationSec: true, seq: true, excludedAt: true } },
+          answers: { orderBy: { order: 'asc' }, select: { questionId: true, order: true, text: true, type: true, valueNum: true, valueText: true, followUpCount: true, sentiment: true, excludedAt: true } },
           // 人が付けたタグの横断集計（アフィニティ分析）用
           highlights: { select: { tags: true } },
           screenerAnswers: { orderBy: { order: 'asc' }, select: { label: true, value: true, order: true } },

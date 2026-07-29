@@ -185,6 +185,11 @@ export default function InterviewComparePage(props: { params: Promise<{ id: stri
   }, [data, statusFilter, search, sortKey])
   const isFiltering = statusFilter !== 'all' || search.trim() !== ''
 
+  // 集計対象の変更後にデータを取り直すためのカウンタ。
+  // 画面全体をリロードすると AI インサイトの再取得やスクロール位置の喪失が起きるので、
+  // このページのデータだけを差し替える。
+  const [reloadKey, setReloadKey] = useState(0)
+
   useEffect(() => {
     let cancelled = false
     fetch(`/api/interviews/${id}/compare`)
@@ -196,7 +201,7 @@ export default function InterviewComparePage(props: { params: Promise<{ id: stri
       .then((d) => { if (!cancelled && d) { setData(d); setLoading(false) } })
       .catch(() => { if (!cancelled) { setError(true); setLoading(false) } })
     return () => { cancelled = true }
-  }, [id])
+  }, [id, reloadKey])
 
   if (loading) {
     return (
@@ -328,7 +333,11 @@ export default function InterviewComparePage(props: { params: Promise<{ id: stri
         />
 
         {/* 定量集計のタスク別内訳。AI 分析の完了を待たずに出せるので done で絞らない */}
-        <InterviewMetrics sessions={realSessions} />
+        <InterviewMetrics
+          sessions={realSessions}
+          interviewId={interview.id}
+          onChanged={() => setReloadKey((k) => k + 1)}
+        />
 
         {/* 回答の比較（質問 × 参加者）。深掘りは元の質問にまとめて紐づくので列は崩れない */}
         <AnswerMatrix

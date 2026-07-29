@@ -232,23 +232,27 @@ export default function SessionDetail(props: { params: Promise<{ id: string }> }
 
     // 測定結果（定量）を先頭に。表計算ソフトで成功率・スコアを扱えるようにする
     if (session.taskResults?.length) {
-      rows.push(['# タスク結果'], ['order', 'task', 'outcome', 'durationSec', 'seq'])
+      // includedInMetrics: 画面の「測定結果」が対象にしている行か。
+      // この列が無いと、CSV を手元で集計した数字と画面の数字が食い違う
+      rows.push(['# タスク結果'], ['order', 'task', 'outcome', 'durationSec', 'seq', 'includedInMetrics'])
       session.taskResults.forEach((t) => rows.push([
         String(t.order), q(t.text),
         t.outcome === 'completed' ? '達成' : 'できなかった',
         t.durationSec != null ? String(Math.round(t.durationSec)) : '',
         t.seq != null ? String(t.seq) : '',
+        t.excludedAt ? '集計対象外' : '集計対象',
       ]))
       rows.push([])
     }
     if (session.answers?.length) {
-      rows.push(['# 回答'], ['order', 'question', 'type', 'value', 'text', 'followUpCount', 'sentiment'])
+      rows.push(['# 回答'], ['order', 'question', 'type', 'value', 'text', 'followUpCount', 'sentiment', 'includedInMetrics'])
       session.answers.forEach((a) => rows.push([
         String(a.order), q(a.text), a.type,
         a.valueNum != null ? String(a.valueNum) : '',
         q(a.valueText ?? ''),
         a.followUpCount != null ? String(a.followUpCount) : '',
         q(a.sentiment ?? ''),
+        a.excludedAt ? '集計対象外' : '集計対象',
       ]))
       rows.push([])
     }

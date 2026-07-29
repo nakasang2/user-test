@@ -9,6 +9,8 @@ export interface TaskResultData {
   outcome: string          // completed | gave_up
   durationSec?: number | null
   seq?: number | null
+  /** 集計対象外にした日時。null なら集計に含める */
+  excludedAt?: string | null
 }
 
 export interface AnswerData {
@@ -22,6 +24,8 @@ export interface AnswerData {
   followUpCount?: number | null
   /** 自由回答に対する AI の肯定/否定判定 */
   sentiment?: string | null
+  /** 集計対象外にした日時。null なら集計に含める */
+  excludedAt?: string | null
 }
 
 /** 秒を「1分23秒」形式に */
@@ -36,12 +40,17 @@ export function formatDuration(sec: number): string {
  * 文字起こしと違い、ここは構造化データなので数値として集計できる。
  */
 export default function SessionMetrics({
-  taskResults,
-  answers,
+  taskResults: allTaskResults,
+  answers: allAnswers,
 }: {
   taskResults: TaskResultData[]
   answers: AnswerData[]
 }) {
+  // 集計対象外にした行（削除したタスクの結果など）は除く。
+  // ここを絞らないと、同じ数字が調査全体のページと食い違う。
+  const taskResults = allTaskResults.filter((t) => t.excludedAt == null)
+  const answers = allAnswers.filter((a) => a.excludedAt == null)
+
   const scored = answers.filter((a) => (a.type === 'rating' || a.type === 'nps') && typeof a.valueNum === 'number')
   if (taskResults.length === 0 && scored.length === 0) return null
 

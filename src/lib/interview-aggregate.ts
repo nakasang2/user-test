@@ -37,20 +37,17 @@ export interface ScoreAgg {
 }
 
 /*
- * 【既知の課題】削除済みタスク・質問の結果が集計に残り続ける
+ * 【集計対象外の扱い】
  *
- * タスクを削除すると TaskResult.taskId は SetNull になる（結果自体は残す設計）。
- * そのため削除済みタスクの結果は「文言キー」の行として生き残り、集計に混ざる。
+ * タスク・質問を削除すると外部キーは SetNull になる（結果自体は残す設計）。
+ * そのため削除後は「どのタスクの結果だったか」を後から特定できない。
+ * text は実施時点のスナップショットなので、文言を修正しただけの現存タスクと
+ * 区別できず、文言の突き合わせで判定すると誤って集計から落ちる
+ * （落ちるのは古いデータに偏るので、数字が良い方向に黙ってズレる）。
  *
- * 「現在のタスク一覧と文言で突き合わせて、一致しないものを削除済みとみなす」実装を
- * 一度入れたが、取りやめた。TaskResult.text は実施時点のスナップショットなので、
- * タスクの文言を修正しただけ（タスクは存在する）でも旧データが一致しなくなり、
- * 「削除済み」と誤判定されて集計から落ちる。落ちるのは古いデータに偏るため、
- * 数字が実態より良く見える方向にズレる。気づけない誤りなので、
- * 「削除済みが混ざる」ほうを選んでいる（混ざっても行として画面に見えるため気づける）。
- *
- * 恒久対応するなら、TaskResult に「削除時点で確定した除外フラグ」を持たせるなど
- * スナップショット文言に依存しない方法が要る。
+ * そこで削除する「前」に excludedAt を立てる方式にしている（編集 API 側）。
+ * ここではその印を見るだけで、推測はしない。リサーチャーが手動で
+ * 外した／戻した分も同じ印で表現される。
  */
 
 /** NPS = 推奨者(9-10)% − 批判者(0-6)% */
@@ -60,15 +57,26 @@ export function calcNps(values: number[]): number {
   return Math.round(((promoters - detractors) / values.length) * 100)
 }
 
+/** 集計対象外にする印が付いているか */
+function isExcluded(row: { excludedAt?: string | null }): boolean {
+  return row.excludedAt != null
+}
+
 /**
  * タスク単位に集約する。
  * キーは order ではなく taskId（無ければ文言）。order は調査を編集して並べ替える
  * たびに振り直されるため、order でまとめると別タスクの結果が合算されてしまう。
+ *
+ * 既定では集計対象外の行を除く。`{ excluded: true }` を渡すと対象外の行だけを返す
+ * （画面で「集計から外した分」を別枠に出すため）。混在した1行にはならないよう、
+ * どちらのモードでも片方だけを集める。
  */
-export function aggregateTasks(sessions: SessionLike[]): TaskAgg[] {
+export function aggregateTasks(sessions: SessionLike[], opts?: { excluded?: boolean }): TaskAgg[] {
+  const want = opts?.excluded === true
   const map = new Map<string, TaskAgg>()
   sessions.forEach((s) => {
     s.taskResults?.forEach((t) => {
+      if (isExcluded(t) !== want) return
       const key = t.taskId ?? `text:${t.text}`
       const cur = map.get(key) ?? { key, text: t.text, order: t.order, completed: 0, total: 0, durations: [], seqs: [] }
       cur.total += 1
@@ -82,11 +90,16 @@ export function aggregateTasks(sessions: SessionLike[]): TaskAgg[] {
   return [...map.values()].sort((a, b) => a.order - b.order)
 }
 
-/** スコア質問（rating / nps）を質問単位に集約する。キーは questionId（無ければ文言） */
-export function aggregateScores(sessions: SessionLike[]): ScoreAgg[] {
+/**
+ * スコア質問（rating / nps）を質問単位に集約する。キーは questionId（無ければ文言）。
+ * 集計対象外の扱いは aggregateTasks と同じ。
+ */
+export function aggregateScores(sessions: SessionLike[], opts?: { excluded?: boolean }): ScoreAgg[] {
+  const want = opts?.excluded === true
   const map = new Map<string, ScoreAgg>()
   sessions.forEach((s) => {
     s.answers?.forEach((a) => {
+      if (isExcluded(a) !== want) return
       if ((a.type !== 'rating' && a.type !== 'nps') || typeof a.valueNum !== 'number') return
       const key = a.questionId ?? `text:${a.text}`
       const cur = map.get(key) ?? { key, text: a.text, order: a.order, type: a.type, values: [] }
@@ -114,10 +127,10 @@ export function overallSuccess(tasks: TaskAgg[]): { completed: number; total: nu
 export function avgSessionDuration(sessions: SessionLike[]): { mean: number; n: number } | null {
   const totals = sessions
     .map((s) =>
-      (s.taskResults ?? []).reduce(
-        (sum, t) => sum + (typeof t.durationSec === 'number' && t.durationSec > 0 ? t.durationSec : 0),
-        0
-      )
+      (s.taskResults ?? [])
+        // 成功率が集計対象外を除くので、所要時間も同じ基準に揃える
+        .filter((t) => !isExcluded(t))
+        .reduce((sum, t) => sum + (typeof t.durationSec === 'number' && t.durationSec > 0 ? t.durationSec : 0), 0)
     )
     .filter((v) => v > 0)
   if (totals.length === 0) return null
