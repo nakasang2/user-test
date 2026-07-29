@@ -17,8 +17,17 @@ const createSchema = z.object({
   usabilityMode:    z.enum(['prototype', 'service']).optional(),
   stimulusUrl:      z.string().url().optional().or(z.literal('')),
   stimulusDuration: z.number().int().min(1).max(60).optional(),
-  tasks:            z.array(z.object({ text: z.string(), order: z.number() })).optional(),
+  // hint: 詰まった参加者に見せるヒント。全員に同じ文言を出して比較可能性を保つ
+  tasks:            z.array(z.object({
+    // 編集 API（[id]/route.ts）と同じ制約に揃える
+    text: z.string().min(1).max(2000),
+    order: z.number(),
+    hint: z.string().max(2000).nullable().optional(),
+  })).optional(),
   seqEnabled:       z.boolean().optional(),
+  // 詰まった参加者への声かけまでの秒数。null / 未指定なら声かけしない。
+  // 編集 API（[id]/route.ts）と同じ範囲にする
+  hintDelaySec:     z.number().int().min(10).max(1800).nullable().optional(),
 })
 
 export async function GET() {
@@ -48,7 +57,7 @@ export async function POST(req: NextRequest) {
     if (!parsed.success) {
       return NextResponse.json({ error: parsed.error.issues[0]?.message }, { status: 400 })
     }
-    const { title, description, questions, autoGenerate, topic, type, usabilityMode, stimulusUrl, stimulusDuration, tasks, seqEnabled } = parsed.data
+    const { title, description, questions, autoGenerate, topic, type, usabilityMode, stimulusUrl, stimulusDuration, tasks, seqEnabled, hintDelaySec } = parsed.data
 
     type QuestionInput = { text: string; type?: string } | string
     let questionList: QuestionInput[] = questions ?? []
@@ -68,6 +77,7 @@ export async function POST(req: NextRequest) {
         stimulusUrl: stimulusUrl || null,
         stimulusDuration: stimulusDuration ?? null,
         seqEnabled: seqEnabled ?? false,
+        hintDelaySec: hintDelaySec ?? null,
         questions: {
           create: questionList.map((q: QuestionInput, index: number) => ({
             text: typeof q === 'string' ? q : q.text,
@@ -75,7 +85,7 @@ export async function POST(req: NextRequest) {
             order: index + 1,
           })),
         },
-        tasks: { create: (tasks ?? []).map(t => ({ text: t.text, order: t.order })) },
+        tasks: { create: (tasks ?? []).map(t => ({ text: t.text.trim(), order: t.order, hint: t.hint?.trim() || null })) },
       },
       include: {
         questions: { orderBy: { order: 'asc' } },
