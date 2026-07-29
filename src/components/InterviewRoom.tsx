@@ -25,7 +25,9 @@ import {
 } from 'lucide-react'
 import SeqScale from '@/components/SeqScale'
 import StuckHelp from '@/components/StuckHelp'
+import TaskRecovery, { TaskRecoveryActions } from '@/components/TaskRecovery'
 import { elapsedSec, nowMs, cacheBustToken } from '@/lib/elapsed'
+import { blockedAfter, needsRecovery } from '@/lib/task-flow'
 
 interface Question {
   id?: string
@@ -44,7 +46,7 @@ interface Props {
   usabilityMode?: 'prototype' | 'service'
   stimulusUrl?: string
   stimulusDuration?: number  // seconds (default 5)
-  tasks?: { id?: string; text: string; order: number; hint?: string | null }[]
+  tasks?: { id?: string; text: string; order: number; hint?: string | null; isPrerequisite?: boolean | null }[]
   seqEnabled?: boolean
   /** タスク着手から何秒で「詰まっていませんか」の声かけを出すか。未設定なら出さない */
   hintDelaySec?: number
@@ -55,12 +57,15 @@ interface TaskResultEntry {
   taskId?: string | null
   order: number
   text: string
-  outcome: 'completed' | 'gave_up'
+  /** not_attempted = 前のタスクの前提を満たせず、着手する機会が無かった */
+  outcome: 'completed' | 'gave_up' | 'not_attempted'
   startedAt: number
   endedAt: number
   seq?: number
   /** ヒントを見た上での結果か。自力の達成と混ぜると成功率が実態より良く見える */
   usedHint?: boolean
+  /** 前提タスクの立て直し案内を受けて開始したか。自力で到達した人と分けて集計する */
+  assistedStart?: boolean
 }
 
 interface AnswerEntry {
@@ -184,7 +189,31 @@ export default function InterviewRoom({
     usedHintOrdersRef.current.add(currentTaskIndexRef.current + 1)
   }
 
+  // ── 前提タスク（次のタスクの前提になるタスク）で断念したときの立て直し ──
+  // 「どのタスクで出したか」を持ち、現在のタスクと一致するときだけ表示する。
+  // タスクが変われば自動で引っ込むので、遷移のたびにリセットしなくてよい。
+  const [recoveryAtIdx, setRecoveryAtIdx] = useState<number | null>(null)
+  // BroadcastChannel のハンドラは startInterview 時のクロージャを保持するため、
+  // 立て直し待ちかどうかは ref で参照する（state だけだと陳腐化する）
+  const recoveryAtIdxRef = useRef<number | null>(null)
+  function setRecovery(idx: number | null) {
+    recoveryAtIdxRef.current = idx
+    setRecoveryAtIdx(idx)
+  }
+  // 前提を代行して開始したタスク番号（1始まり）。
+  // 本人が操作した結果なので成功として数えるが、前提のUIを教えられた状態で
+  // 入っているため、自力で到達した人と同条件ではない。集計で分ける。
+  const assistedStartOrdersRef = useRef<Set<number>>(new Set())
+
   function gotoTask(idx: number) {
+    // 立て直し待ちから次のタスクへ移るときは「前提を代行して開始」の印を付ける。
+    // メイン画面のタスク一覧から直接飛んだ場合も同じ扱いにする（この経路で印が
+    // 抜けると、前提を教えられた人が自力で到達した人と同じ枠に入ってしまう）。
+    const pending = recoveryAtIdxRef.current
+    if (pending !== null) {
+      if (idx === pending + 1) assistedStartOrdersRef.current.add(idx + 1)
+      if (idx !== pending) setRecovery(null)
+    }
     currentTaskIndexRef.current = idx
     setCurrentTaskIndex(idx)
     // 次タスクの計測開始（前タスクの終了時刻＝次タスクの開始時刻）
@@ -702,7 +731,13 @@ export default function InterviewRoom({
     // widget 側の atob/JSON.parse が失敗する（タスクが空表示になる）ため、必ず encode する。
     // 小窓が使うのは文言・順番・ヒントだけ。Task 行をそのまま渡すと interviewId 等も
     // URL に載る。ヒントを載せるようになった分 URL が伸びるので、必要な項目に絞る。
-    const taskPayload = (tasks ?? []).map((t) => ({ text: t.text, order: t.order, hint: t.hint ?? null }))
+    const taskPayload = (tasks ?? []).map((t) => ({
+      text: t.text,
+      order: t.order,
+      hint: t.hint ?? null,
+      // 小窓側でも「断念したら立て直し画面を出すか」を判定する必要がある
+      isPrerequisite: t.isPrerequisite === true,
+    }))
     const tasksEncoded = encodeURIComponent(btoa(encodeURIComponent(JSON.stringify(taskPayload))))
     // 小窓（別ウィンドウの iframe）が古い版をキャッシュして表示するのを防ぐため、
     // 開くたびに一意なパラメータを付けて必ず最新を読み込ませる。
@@ -712,7 +747,11 @@ export default function InterviewRoom({
     const seqParam = seqEnabled ? '&seq=1' : ''
     // 声かけまでの秒数。小窓側でもタスク着手からの経過を測って同じ案内を出す
     const hintParam = hintDelaySec && hintDelaySec > 0 ? `&hintdelay=${hintDelaySec}` : ''
-    const url = `/interview/widget?session=${encodeURIComponent(sessionId)}&tasks=${tasksEncoded}&current=${currentTaskIndex}&_t=${cacheBust}${stimulusParam}${seqParam}${hintParam}`
+    // 立て直し待ちのまま小窓を開き直したとき、そのことを引き継ぐ。
+    // 引き継がないと開き直した小窓が通常の「達成／できなかった」を出してしまい、
+    // ここで達成を押すと断念の記録が達成に上書きされる（自力達成として集計される）。
+    const recoveryParam = recoveryAtIdxRef.current === currentTaskIndex ? '&recovery=1' : ''
+    const url = `/interview/widget?session=${encodeURIComponent(sessionId)}&tasks=${tasksEncoded}&current=${currentTaskIndex}&_t=${cacheBust}${stimulusParam}${seqParam}${hintParam}${recoveryParam}`
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const docPiP = (window as any).documentPictureInPicture
@@ -750,6 +789,13 @@ export default function InterviewRoom({
     const task = tasks?.[idx]
     // ヒントはメイン画面と小窓のどちらからでも開ける。どちらで見ても記録に残す
     const usedHint = usedHintOrdersRef.current.has(idx + 1) || usedHintFromWidget === true
+    const assistedStart = assistedStartOrdersRef.current.has(idx + 1)
+    // 前提タスクをやり直して達成した場合、次のタスクの「前提を代行」の印を外す。
+    // 印は Set に足すだけなので、外さないと自力で前提を達成した人にまで代行の
+    // ラベルが残る（一覧から先に次のタスクへ飛んで戻ってきた場合に起こる）。
+    if (outcome === 'completed' && tasks?.[idx]?.isPrerequisite === true) {
+      assistedStartOrdersRef.current.delete(idx + 2)
+    }
     if (task) {
       // 定量データとして構造化保存（成功率・所要時間の集計用）
       const now = elapsedSec(startTimeRef.current)
@@ -764,12 +810,14 @@ export default function InterviewRoom({
           endedAt: now,
           seq,
           usedHint,
+          assistedStart,
         },
       ]
       saveResults()
 
       const base = outcome === 'completed' ? '達成' : '断念（たどり着けなかった）'
-      const label = usedHint ? `${base}（ヒントあり）` : base
+      const notes = [usedHint ? 'ヒントあり' : null, assistedStart ? '前提を代行' : null].filter(Boolean)
+      const label = notes.length > 0 ? `${base}（${notes.join('・')}）` : base
       const text = `タスク${idx + 1}「${task.text}」→ ${label}`
       const entry: TranscriptEntry = {
         speaker: 'System',
@@ -782,6 +830,16 @@ export default function InterviewRoom({
       saveProgress()
     }
     const total = tasks?.length ?? 0
+    // 前提タスクを断念した場合は自動で次へ進めない。
+    // 次のタスクはこのタスクができている状態から始まるので、そのまま進めると
+    // 「タスクが難しかった」ではなく「前提が無かった」を測ってしまう。
+    // 立て直し手順（ヒント欄）を見せて開始地点まで案内してから進む。
+    if (outcome === 'gave_up' && needsRecovery(tasks ?? [], idx)) {
+      setRecovery(idx)
+      // 小窓側でも同じ画面を出す（メイン画面のフォールバックから押された場合に備える）
+      widgetChannelRef.current?.postMessage({ type: 'prereq_recovery', index: idx })
+      return
+    }
     if (idx + 1 < total) {
       const next = idx + 1
       // 小窓への同期は gotoTask 内で行う（一覧からのジャンプでも必ず送るため）
@@ -789,6 +847,59 @@ export default function InterviewRoom({
     } else {
       completeTasksAndStartInterview()
     }
+  }
+
+  // ── 立て直し完了 → 次のタスクへ ────────────────────────
+  // 断念したタスクの結果は「断念」のまま（助けたから成功にはしない）。
+  // 次のタスクには「前提を代行して開始」の印を付ける（gotoTask 側で付ける）。
+  //
+  // 立て直し待ちでなければ何もしない。小窓とメインの両方から同じ通知が届いても
+  // 二重に進めないため（進むとタスクが1件、結果行ゼロで飛ぶ）。
+  function proceedAfterRecovery() {
+    const pending = recoveryAtIdxRef.current
+    if (pending === null) return
+    const next = pending + 1
+    if (next >= (tasks?.length ?? 0)) { setRecovery(null); completeTasksAndStartInterview(); return }
+    gotoTask(next)
+  }
+
+  // ── 立て直せなかった → 後続を「未実施」として記録 ──────────
+  // 「やってみて出来なかった」と混ぜると、着手する機会が無かった分まで
+  // タスクの失敗として数えてしまう。別の値で残し、集計では分母から外す。
+  function skipBlockedTasks() {
+    const pending = recoveryAtIdxRef.current
+    if (pending === null) return   // 二重通知で余分に飛ばさない
+    const list = tasks ?? []
+    const { blocked, resume } = blockedAfter(list, pending)
+    const now = elapsedSec(startTimeRef.current)
+    // すでに結果がある枠は上書きしない。参加者はメイン画面の一覧から任意の
+    // タスクへ飛べるので、後続タスクを先に実施している場合がある。その達成を
+    // 未実施で潰すと、成功率の分子・分母と所要時間から黙って消える。
+    const entries: TaskResultEntry[] = blocked
+      .filter((j) => !taskResultsRef.current.some((r) => r.order === j + 1))
+      .map((j) => ({
+        taskId: list[j].id ?? null,
+        order: j + 1,
+        text: list[j].text,
+        outcome: 'not_attempted' as const,
+        // 着手していないので所要時間は持たない（保存側でも null に落とす）
+        startedAt: now,
+        endedAt: now,
+      }))
+    if (entries.length > 0) {
+      taskResultsRef.current = [...taskResultsRef.current, ...entries]
+      saveResults()
+      entries.forEach((e) => {
+        const text = `タスク${e.order}「${e.text}」→ 未実施（前のタスクの前提を満たせなかった）`
+        transcriptRef.current = [...transcriptRef.current, { speaker: 'System', text, start: now }]
+        conversationBufferRef.current += `\n[タスク記録] ${text}`
+      })
+      setTranscript([...transcriptRef.current])
+      saveProgress()
+    }
+    setRecovery(null)
+    if (resume < list.length) gotoTask(resume)
+    else completeTasksAndStartInterview()
   }
 
   // ── タスク完了 → 事後インタビュー開始 ─────────────────
@@ -842,6 +953,9 @@ export default function InterviewRoom({
         else if (e.data.type === 'recording_started') setScreenSharing(true)
         else if (e.data.type === 'service_opened') setServiceOpened(true)
         else if (e.data.type === 'task_ready') markFirstTaskStart() // 小窓でタスクが見えた＝着手できる時点
+        // 前提タスクの立て直し: 小窓での選択をメイン側の記録に反映する
+        else if (e.data.type === 'prereq_recovered') proceedAfterRecovery()
+        else if (e.data.type === 'prereq_failed') skipBlockedTasks()
         // 小窓でヒントを開いた。小窓を閉じて開き直しても記録が消えないよう、メイン側で保持する
         else if (e.data.type === 'hint_used' && typeof e.data.index === 'number') {
           usedHintOrdersRef.current.add(e.data.index + 1)
@@ -1152,6 +1266,18 @@ export default function InterviewRoom({
 
   const progress = ((currentQuestionIndex + 1) / questions.length) * 100
   const currentQ = questions[currentQuestionIndex]
+
+  // 前提タスクを断念した直後の立て直し待ち。この間は達成/できなかったの操作を出さず、
+  // 「次のタスクの開始地点まで到達できたか」だけを聞く。
+  const recoveryPending = recoveryAtIdx === currentTaskIndex && needsRecovery(tasks ?? [], currentTaskIndex)
+  const recoveryPanel = recoveryPending ? (
+    <TaskRecovery
+      hint={tasks?.[currentTaskIndex]?.hint ?? null}
+      nextTaskText={tasks?.[currentTaskIndex + 1]?.text ?? null}
+    >
+      <TaskRecoveryActions onReady={proceedAfterRecovery} onCannot={skipBlockedTasks} />
+    </TaskRecovery>
+  ) : null
 
   // ── ブラウザチェック画面 ──────────────────────────────
   if (speechSupported === false && !textOnlyMode) {
@@ -1466,7 +1592,7 @@ export default function InterviewRoom({
                     案内しても、その操作がこの画面には無い。ヒントの二重露出も防ぐ。
                     SEQ の入力待ち中も出さない（達成を押した後にヒントを開くと、
                     自力の成功が「ヒントあり」に化けてしまうため）。 */}
-                {stuckOnTask && !awaitingSeq && !(usabilityMode === 'service' && !widgetBlocked) && (
+                {stuckOnTask && !awaitingSeq && !recoveryPending && !(usabilityMode === 'service' && !widgetBlocked) && (
                   <StuckHelp
                     hint={tasks?.[currentTaskIndex]?.hint ?? null}
                     hintShown={hintShown}
@@ -1516,7 +1642,7 @@ export default function InterviewRoom({
                           サービスを開く（新しいタブ）
                         </a>
                       )}
-                      {awaitingSeq ? (
+                      {recoveryPanel ? recoveryPanel : awaitingSeq ? (
                         <div className="pt-2 border-t border-gray-200">
                           <SeqScale onSelect={commitSeq} />
                           <button onClick={() => setAwaitingSeq(null)} className="mt-2 w-full text-xs text-gray-500 hover:text-gray-900 py-1">戻る</button>
@@ -1631,7 +1757,7 @@ export default function InterviewRoom({
                         </button>
                       </div>
                     )}
-                    {awaitingSeq ? (
+                    {recoveryPanel ? recoveryPanel : awaitingSeq ? (
                       <div className="border border-gray-200 rounded-md p-3 bg-gray-50">
                         <SeqScale onSelect={commitSeq} />
                         <button onClick={() => setAwaitingSeq(null)} className="mt-2 w-full text-xs text-gray-500 hover:text-gray-900 py-1">戻る</button>

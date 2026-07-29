@@ -133,7 +133,14 @@ model Task {
   // 詰まった参加者に見せるヒント（リサーチャーが事前に書く）。
   // 全員に同じ文言を出すことで、助けを出しつつ参加者間の比較可能性を保つ。
   // 未設定なら「できなかったで next に進める」案内だけを出す。
+  // isPrerequisite が true のタスクでは、断念した参加者を次のタスクの開始地点まで
+  // 連れて行く「立て直し手順」も兼ねる（＝答えそのものを書く運用）。
   hint        String?
+  // このタスクの結果が次のタスクの前提になるか（例: 1「お気に入りに追加」→
+  // 2「お気に入りから購入」）。true なら、断念しても自動で次へ進めず、
+  // ヒント＝立て直し手順を見せて開始地点まで到達させる。到達できない場合は
+  // 後続を not_attempted（未実施）として記録し、成功率の分母から外す。
+  isPrerequisite Boolean   @default(false)
   results     TaskResult[]
 }
 
@@ -152,7 +159,11 @@ model TaskResult {
   task        Task?    @relation(fields: [taskId], references: [id], onDelete: SetNull)
   order       Int      // タスク番号（1始まり）
   text        String   // 実施時点のタスク文言のスナップショット
-  outcome     String   // completed | gave_up
+  // completed | gave_up | not_attempted
+  // not_attempted は「前のタスクの前提を満たせず、着手する機会が無かった」。
+  // 「やってみて出来なかった（gave_up）」と混ぜると、タスクの難しさではなく
+  // 前提の欠落を難しさとして数えてしまうため、集計では分母から外す。
+  outcome     String
   startedAt   Float?   // セッション開始からの経過秒
   endedAt     Float?
   durationSec Float?   // 所要時間（time on task）
@@ -161,6 +172,11 @@ model TaskResult {
   // ヒントを見たか。見た上での達成は「条件付き成功」であり、自力の達成と
   // 同じ数字に混ぜると成功率が実態より良く見える。集計で必ず分ける。
   usedHint    Boolean  @default(false)
+  // 前のタスク（前提タスク）を断念したため、立て直し手順を見せて開始地点まで
+  // 案内した上で始めたか。このタスク自体は本人が操作しているので成功として数えるが、
+  // 前提のUIを教えられた状態で入っているので自力で到達した人と同条件ではない。
+  // 既存の「自力成功」の定義は変えず、別カウントとして持つ（usedHint と同じ思想）。
+  assistedStart Boolean @default(false)
   // 集計対象外にした日時。null なら集計に含める。
   // タスクを削除すると taskId は SetNull になり、どのタスクの結果だったか
   // 特定できなくなる（text は実施時点のスナップショットなので、文言を修正した

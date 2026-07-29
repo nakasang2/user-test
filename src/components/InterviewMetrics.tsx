@@ -95,17 +95,30 @@ export default function InterviewMetrics({
                     <span className="text-gray-400">（ヒント {overall.hintUsed}回）</span>
                   </span>
                 )}
+                {/* 未実施は分母に入っていない。件数を出さないと「なぜ試行数が
+                    人数×タスク数より少ないのか」が読み取れなくなる */}
+                {overall.notAttempted > 0 && (
+                  <span className="ml-2 text-gray-500" title="前のタスクの前提を満たせず、着手する機会が無かった分。成功率の分母には含めていません">
+                    未実施 {overall.notAttempted}回
+                  </span>
+                )}
+                {overall.assistedStart > 0 && (
+                  <span className="ml-2 text-gray-500" title="前のタスクを断念したため、開始地点まで案内した上で実施した回数。自力で到達した人と同条件ではない">
+                    前提を代行 {overall.assistedStart}回
+                  </span>
+                )}
               </p>
             )}
           </div>
           <div className="space-y-3">
             {taskRows.map((t) => {
-              const rate = Math.round((t.completed / t.total) * 100)
+              // 全員が未実施だったタスクは試行 0。0 除算で NaN% を出さないよう分ける
+              const rate = t.total > 0 ? Math.round((t.completed / t.total) * 100) : null
               const avgDur = t.durations.length
                 ? t.durations.reduce((a, b) => a + b, 0) / t.durations.length
                 : null
               // 一般に成功率 70% 未満は要改善のシグナルとして扱われる
-              const tone = rate >= 90 ? 'bg-emerald-500' : rate >= 70 ? 'bg-amber-500' : 'bg-red-500'
+              const tone = rate === null ? 'bg-gray-300' : rate >= 90 ? 'bg-emerald-500' : rate >= 70 ? 'bg-amber-500' : 'bg-red-500'
               return (
                 <div key={t.key}>
                   <div className="flex items-baseline justify-between gap-3 mb-1">
@@ -114,8 +127,32 @@ export default function InterviewMetrics({
                     </p>
                     <p className="text-xs text-gray-600 flex-shrink-0 tabular-nums flex items-baseline gap-2">
                       <span>
-                        <span className="font-semibold text-gray-900">{rate}%</span>
-                        <span className="text-gray-400"> ({t.completed}/{t.total})</span>
+                        {rate !== null ? (
+                          <>
+                            <span className="font-semibold text-gray-900">{rate}%</span>
+                            <span className="text-gray-400"> ({t.completed}/{t.total})</span>
+                          </>
+                        ) : (
+                          <span className="text-gray-500" title="全員が未実施（前のタスクの前提を満たせなかった）のため、成功率を出せません">
+                            試行なし
+                          </span>
+                        )}
+                        {t.notAttempted > 0 && (
+                          <span
+                            className="ml-2 text-gray-500"
+                            title="前のタスクの前提を満たせず、着手する機会が無かった人数。成功率の分母には含めていません"
+                          >
+                            未実施 {t.notAttempted}人
+                          </span>
+                        )}
+                        {t.assistedStart > 0 && (
+                          <span
+                            className="ml-2 text-amber-700"
+                            title="前のタスクを断念したため、開始地点まで案内した上で実施した人数。自力で到達した人と同条件ではない"
+                          >
+                            前提を代行 {t.assistedStart}人
+                          </span>
+                        )}
                         {t.hintUsed > 0 && (
                           <span
                             className="ml-2 text-amber-700"
@@ -139,7 +176,7 @@ export default function InterviewMetrics({
                     </p>
                   </div>
                   <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
-                    <div className={`h-full ${tone} rounded-full transition-all`} style={{ width: `${rate}%` }} />
+                    <div className={`h-full ${tone} rounded-full transition-all`} style={{ width: `${rate ?? 0}%` }} />
                   </div>
                 </div>
               )
@@ -194,7 +231,11 @@ export default function InterviewMetrics({
               <ExcludedRow
                 key={t.key}
                 text={t.text}
-                detail={`${Math.round((t.completed / t.total) * 100)}%（${t.completed}/${t.total}）`}
+                detail={
+                  t.total > 0
+                    ? `${Math.round((t.completed / t.total) * 100)}%（${t.completed}/${t.total}）`
+                    : `未実施 ${t.notAttempted}件`
+                }
                 busy={busy === t.key}
                 onRestore={() => setExcluded('task', t.key, t.text, false)}
               />

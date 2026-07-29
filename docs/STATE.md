@@ -5,10 +5,14 @@
 - **最終更新**: 2026-07-29（PR #27 まで本番反映済み。ブランチ qa/release-readiness は main に追随済み）
 
 ## 進行中
-- なし（結果サマリー・集計対象外の恒久対応・感情表示の撤去・詰まった参加者への声かけとヒント、いずれも本番反映済み）
+- **地続きのタスク（前提タスク）の扱い**: 実装完了・未コミット。ブランチ qa/release-readiness。DECISIONS.md 2026-07-29 のA案。
+  - タスクに「次のタスクの前提になる」印（`Task.isPrerequisite`）、断念時の立て直し画面（`TaskRecovery`）、`TaskResult.outcome = 'not_attempted'`（未実施）と `TaskResult.assistedStart`（前提を代行）を追加
+  - 集計は未実施を分母から除外し、未実施件数・前提を代行の件数を別表示（`interview-aggregate.ts`＋テスト追加、67件パス）
+  - **DBスキーマ変更を含む**（追加のみ・既存データ無影響）。ローカルの `.env` の接続先はテナント未検出で db push 不可 → デプロイ時の `prisma db push` で反映される
+  - 未検証: 立て直し画面の実物（画面録画が必要で preview では到達不可）／リサーチャー側チェックボックス（ログイン必須・ローカルDB無効）
 
 ## 出荷の進め方（2026-07-29 に変更）
-- **マージまで Claude が行う**。「push it」で 検証 → push → PR 作成 → `gh pr merge --squash` → 本番反映の確認 まで。ユーザーの GitHub 操作は不要
+- **マージまで Claude が行う**。「push it」で 検証 → push → PR 作成 → `gh pr merge --merge` → 本番反映の確認 まで。ユーザーの GitHub 操作は不要（**`--squash` は使わない**。作業ブランチが main の祖先でなくなり次の push が拒否される。DECISIONS.md の絶対ルール参照）
 - DB スキーマの破壊的変更を含む場合だけ、マージ前に確認する
 - 以前「`gh pr merge` はブロックされる」と台帳に書いていたが誤りだった（PR #27 で実行して成功）
 

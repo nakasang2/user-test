@@ -49,7 +49,7 @@ interface CompareData {
     description: string | null
     type: string
     questions: { id: string; text: string; order: number; type: string }[]
-    tasks: { id: string; text: string; order: number; hint?: string | null }[]
+    tasks: { id: string; text: string; order: number; hint?: string | null; isPrerequisite?: boolean | null }[]
     seqEnabled?: boolean
     hintDelaySec?: number | null
     screeners?: { id: string; label: string; options: string[]; disqualify: string[]; required: boolean; order: number }[]

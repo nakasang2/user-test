@@ -10,6 +10,7 @@ import SessionMetrics, { type TaskResultData, type AnswerData } from '@/componen
 import HighlightPanel, { type HighlightData } from '@/components/HighlightPanel'
 import { Video, Download, X, Folder } from 'lucide-react'
 import { track } from '@/lib/analytics'
+import { outcomeLabel } from '@/lib/task-flow'
 
 interface Segment {
   id: string
@@ -234,11 +235,12 @@ export default function SessionDetail(props: { params: Promise<{ id: string }> }
     if (session.taskResults?.length) {
       // includedInMetrics: 画面の「測定結果」が対象にしている行か。
       // この列が無いと、CSV を手元で集計した数字と画面の数字が食い違う
-      rows.push(['# タスク結果'], ['order', 'task', 'outcome', 'usedHint', 'durationSec', 'seq', 'includedInMetrics'])
+      rows.push(['# タスク結果'], ['order', 'task', 'outcome', 'usedHint', 'assistedStart', 'durationSec', 'seq', 'includedInMetrics'])
       session.taskResults.forEach((t) => rows.push([
         String(t.order), q(t.text),
-        t.outcome === 'completed' ? '達成' : 'できなかった',
+        outcomeLabel(t.outcome),
         t.usedHint ? 'ヒントあり' : '自力',
+        t.assistedStart ? '前提を代行' : '',
         t.durationSec != null ? String(Math.round(t.durationSec)) : '',
         t.seq != null ? String(t.seq) : '',
         t.excludedAt ? '集計対象外' : '集計対象',

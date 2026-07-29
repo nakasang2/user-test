@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { requireAuth, handleApiError } from '@/lib/api-auth'
+import { outcomeLabel } from '@/lib/task-flow'
 
 /**
  * GET /api/interviews/[id]/export — インタビュー配下の全セッションを1つの CSV にまとめて出力。
@@ -80,13 +81,14 @@ export async function GET(_req: NextRequest, props: { params: Promise<{ id: stri
     rows.push(['# タスク結果'])
     // includedInMetrics 列: 画面の全体指標が対象にしている行かどうか。
     // これが無いと、CSV を手元で集計した数字と画面の数字が食い違う。
-    rows.push(['participant', 'taskOrder', 'task', 'outcome', 'usedHint', 'durationSec', 'seq', 'includedInMetrics'].map(q))
+    rows.push(['participant', 'taskOrder', 'task', 'outcome', 'usedHint', 'assistedStart', 'durationSec', 'seq', 'includedInMetrics'].map(q))
     for (const s of interview.sessions) {
       for (const t of s.taskResults) {
         rows.push([
           q(name(s)), q(t.order), q(t.text),
-          q(t.outcome === 'completed' ? '達成' : 'できなかった'),
+          q(outcomeLabel(t.outcome)),
           q(t.usedHint ? 'ヒントあり' : '自力'),
+          q(t.assistedStart ? '前提を代行' : ''),
           q(t.durationSec != null ? Math.round(t.durationSec) : ''),
           q(t.seq ?? ''),
           q(t.excludedAt ? '集計対象外' : '集計対象'),

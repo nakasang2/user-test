@@ -40,7 +40,7 @@ eq('order が入れ替わっても taskId で正しく2タスクに集約', t.le
 eq('T1 は 2/2 成功', [t.find(x=>x.key==='T1')!.completed, t.find(x=>x.key==='T1')!.total], [2,2])
 eq('T2 は 0/2 成功', [t.find(x=>x.key==='T2')!.completed, t.find(x=>x.key==='T2')!.total], [0,2])
 eq('表示順は最小 order を採用（T1が先）', t[0].key, 'T1')
-eq('全体成功率 50%', overallSuccess(t), { completed:2, completedUnaided:2, hintUsed:0, total:4, rate:50, unaidedRate:50 })
+eq('全体成功率 50%', overallSuccess(t), { completed:2, completedUnaided:2, hintUsed:0, assistedStart:0, notAttempted:0, total:4, rate:50, unaidedRate:50 })
 eq('最も苦戦は T2 の 0%', [hardestTask(t)!.key, hardestTask(t)!.rate], ['T2', 0])
 eq('平均所要時間は人単位の合計の平均 (180+140)/2', avgSessionDuration(reordered), {mean:160,n:2})
 
@@ -109,7 +109,7 @@ console.log('■ 削除済み（印あり）は集計に入らない')
 const s=[1,2,3].map(i=>S('s'+i,[
   T('T1',1,'現存タスク','completed',60),
   T(null,2,'削除したタスク','gave_up',900,EX)]))
-eq('現存のみ 3/3', overallSuccess(aggregateTasks(s)), {completed:3,completedUnaided:3,hintUsed:0,total:3,rate:100,unaidedRate:100})
+eq('現存のみ 3/3', overallSuccess(aggregateTasks(s)), {completed:3,completedUnaided:3,hintUsed:0,assistedStart:0,notAttempted:0,total:3,rate:100,unaidedRate:100})
 eq('最も苦戦は出ない（全問成功）', hardestTask(aggregateTasks(s)), null)
 eq('所要時間も除外分を含まない', avgSessionDuration(s), {mean:60,n:3})
 eq('除外分は別枠で取れる', aggregateTasks(s,{excluded:true}).map(r=>[r.text,r.completed,r.total]), [['削除したタスク',0,3]])
@@ -117,7 +117,7 @@ eq('通常の集計に除外分は現れない', aggregateTasks(s).length, 1)
 
 console.log('■ 同じ文言で「除外あり」と「除外なし」が混在しても1行に混ざらない')
 const mixed=[S('a',[T(null,1,'同じ文言','completed',10,EX)]), S('b',[T(null,1,'同じ文言','gave_up',10,null)])]
-eq('通常側は 0/1', overallSuccess(aggregateTasks(mixed)), {completed:0,completedUnaided:0,hintUsed:0,total:1,rate:0,unaidedRate:0})
+eq('通常側は 0/1', overallSuccess(aggregateTasks(mixed)), {completed:0,completedUnaided:0,hintUsed:0,assistedStart:0,notAttempted:0,total:1,rate:0,unaidedRate:0})
 eq('除外側は 1/1', aggregateTasks(mixed,{excluded:true})[0].completed, 1)
 eq('合算されていない（各1行）', [aggregateTasks(mixed).length, aggregateTasks(mixed,{excluded:true}).length], [1,1])
 
@@ -131,7 +131,7 @@ eq('除外分は別枠', aggregateScores(sc,{excluded:true}).map(r=>r.text), ['�
 
 console.log('■ excludedAt が無い旧データ（undefined）は集計対象')
 const legacy=[{id:'x',participantName:'x',taskResults:[{taskId:'T1',order:1,text:'A',outcome:'completed',durationSec:30}]}]
-eq('undefined は除外扱いしない', overallSuccess(aggregateTasks(legacy)), {completed:1,completedUnaided:1,hintUsed:0,total:1,rate:100,unaidedRate:100})
+eq('undefined は除外扱いしない', overallSuccess(aggregateTasks(legacy)), {completed:1,completedUnaided:1,hintUsed:0,assistedStart:0,notAttempted:0,total:1,rate:100,unaidedRate:100})
 eq('  所要時間も入る', avgSessionDuration(legacy), {mean:30,n:1})
 
 console.log('■ 全部が除外なら通常側は空')
@@ -152,24 +152,24 @@ const r=aggregateTasks(mixed)[0]
 eq('達成は2件（ヒント有無を問わず）', r.completed, 2)
 eq('自力達成は1件', r.completedUnaided, 1)
 eq('全体: 成功率67%・自力33%', overallSuccess(aggregateTasks(mixed)),
-   {completed:2, completedUnaided:1, hintUsed:2, total:3, rate:67, unaidedRate:33})
+   {completed:2, completedUnaided:1, hintUsed:2, assistedStart:0, notAttempted:0, total:3, rate:67, unaidedRate:33})
 
 console.log('■ ヒント欄が無かった時代のデータ（usedHint 未定義）は自力扱い')
 const legacy=[{id:'x',participantName:'x',taskResults:[{taskId:'T1',order:1,text:'A',outcome:'completed',durationSec:5}]}]
 eq('undefined は自力', overallSuccess(aggregateTasks(legacy)),
-   {completed:1, completedUnaided:1, hintUsed:0, total:1, rate:100, unaidedRate:100})
+   {completed:1, completedUnaided:1, hintUsed:0, assistedStart:0, notAttempted:0, total:1, rate:100, unaidedRate:100})
 
 console.log('■ 全員ヒントあり')
 const allHint=[S('a',[T('completed',true)]),S('b',[T('completed',true)])]
 eq('成功率100%・自力0%', overallSuccess(aggregateTasks(allHint)),
-   {completed:2, completedUnaided:0, hintUsed:2, total:2, rate:100, unaidedRate:0})
+   {completed:2, completedUnaided:0, hintUsed:2, assistedStart:0, notAttempted:0, total:2, rate:100, unaidedRate:0})
 eq('全員達成なので「最も苦戦」は出ない', hardestTask(aggregateTasks(allHint)), null)
 
 console.log('■ 除外との組み合わせ')
 const withEx=[S('a',[T('completed',true)]),
   {id:'b',participantName:'b',taskResults:[{taskId:null,order:1,text:'消した',outcome:'gave_up',usedHint:true,excludedAt:'2026-07-29T00:00:00.000Z'}]}]
 eq('除外行は自力/ヒントどちらにも数えない', overallSuccess(aggregateTasks(withEx)),
-   {completed:1, completedUnaided:0, hintUsed:1, total:1, rate:100, unaidedRate:0})
+   {completed:1, completedUnaided:0, hintUsed:1, assistedStart:0, notAttempted:0, total:1, rate:100, unaidedRate:0})
 eq('除外側にも completedUnaided が入る', aggregateTasks(withEx,{excluded:true})[0].completedUnaided, 0)
 
 console.log('■ 指摘6: 全員ヒントを見て全員断念でも、ヒント提示の事実が残る')
@@ -180,6 +180,56 @@ eq('全体でも hintUsed が残る', overallSuccess(aggregateTasks(allFail))!.h
 
 console.log('■ 結果ゼロ')
 eq('null のまま', overallSuccess([]), null)
+}
+
+console.log('\n=== 未実施（前提タスクを満たせず着手できなかった） ===')
+{
+const T=(taskId:string,order:number,text:string,outcome:string,extra:{durationSec?:number;assistedStart?:boolean}={})=>
+  ({taskId,order,text,outcome,...extra})
+const S=(id:string,trs:ReturnType<typeof T>[])=>({id,participantName:id,status:'done',taskResults:trs})
+
+console.log('■ 未実施は成功率の分母に入らない')
+// A: 1を達成して2も達成 / B: 1を断念し、立て直せず2は未実施
+const s=[
+  S('a',[T('T1',1,'お気に入り追加','completed',{durationSec:30}),T('T2',2,'お気に入りから購入','completed',{durationSec:40})]),
+  S('b',[T('T1',1,'お気に入り追加','gave_up',{durationSec:120}),T('T2',2,'お気に入りから購入','not_attempted')]),
+]
+const rows=aggregateTasks(s)
+const t2=rows.find(r=>r.key==='T2')!
+eq('T2 の試行は1回だけ（未実施を数えない）', [t2.completed,t2.total,t2.notAttempted], [1,1,1])
+eq('T2 の成功率は 100%（0/2 の 50% にしない）', Math.round((t2.completed/t2.total)*100), 100)
+eq('全体は 2/3（未実施を除いた分母）', overallSuccess(rows),
+   {completed:2, completedUnaided:2, hintUsed:0, assistedStart:0, notAttempted:1, total:3, rate:67, unaidedRate:67})
+eq('未実施は「最も苦戦」の判定にも効かない', hardestTask(rows)!.key, 'T1')
+// A: 30+40=70 / B: 120（未実施の行は所要時間を持たない）→ (70+120)/2
+eq('未実施は所要時間を持たない', avgSessionDuration(s), {mean:95,n:2})
+
+console.log('■ 全員が未実施のタスクは試行 0（0% と区別できる）')
+const allSkip=[S('a',[T('T2',1,'X','not_attempted')]),S('b',[T('T2',1,'X','not_attempted')])]
+const rs=aggregateTasks(allSkip)[0]
+eq('total 0 で notAttempted 2', [rs.total, rs.notAttempted, rs.completed], [0,2,0])
+eq('全体成功率は null（試行が無い）', overallSuccess(aggregateTasks(allSkip)), null)
+eq('「最も苦戦」も出さない（0% として選ばない）', hardestTask(aggregateTasks(allSkip)), null)
+
+console.log('■ 前提を代行して開始した分は別カウント（自力成功の定義は変えない）')
+const assisted=[
+  S('a',[T('T2',1,'X','completed')]),
+  S('b',[T('T2',1,'X','completed',{assistedStart:true})]),
+]
+const ra=aggregateTasks(assisted)[0]
+eq('達成2・自力2（ヒントは見ていない）', [ra.completed, ra.completedUnaided], [2,2])
+eq('前提を代行は1件として別に残る', ra.assistedStart, 1)
+eq('全体にも出る', overallSuccess(aggregateTasks(assisted))!.assistedStart, 1)
+
+console.log('■ 除外（削除済み）との組み合わせ')
+const withEx=[
+  S('a',[T('T2',1,'X','completed')]),
+  {id:'b',participantName:'b',taskResults:[
+    {taskId:null,order:1,text:'消した',outcome:'not_attempted',excludedAt:'2026-07-29T00:00:00.000Z'}]},
+]
+eq('除外された未実施は通常側に出ない', overallSuccess(aggregateTasks(withEx)),
+   {completed:1, completedUnaided:1, hintUsed:0, assistedStart:0, notAttempted:0, total:1, rate:100, unaidedRate:100})
+eq('除外側で未実施として数えられる', aggregateTasks(withEx,{excluded:true})[0].notAttempted, 1)
 }
 
 console.log(`

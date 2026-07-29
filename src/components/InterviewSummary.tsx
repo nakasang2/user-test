@@ -110,11 +110,14 @@ export default function InterviewSummary({
           value={success ? `${success.rate}%` : null}
           sub={
             success
-              ? success.hintUsed > 0
-                // ヒントを使った人がいるときは「自力では何%か」を必ず併記する。
-                // 併記しないと「助けがあれば出来る」を「出来る」と読み違える
-                ? `${success.completed} / ${success.total} 回・自力 ${success.unaidedRate}%`
-                : `${success.completed} / ${success.total} 回`
+              ? [
+                  `${success.completed} / ${success.total} 回`,
+                  // ヒントを使った人がいるときは「自力では何%か」を必ず併記する。
+                  // 併記しないと「助けがあれば出来る」を「出来る」と読み違える
+                  success.hintUsed > 0 ? `自力 ${success.unaidedRate}%` : null,
+                  // 未実施は分母に入っていない。件数を出さないと試行数が少ない理由が分からない
+                  success.notAttempted > 0 ? `未実施 ${success.notAttempted}回` : null,
+                ].filter(Boolean).join('・')
               : '測定データなし'
           }
         >

@@ -23,6 +23,8 @@ const createSchema = z.object({
     text: z.string().min(1).max(2000),
     order: z.number(),
     hint: z.string().max(2000).nullable().optional(),
+    // このタスクの結果が次のタスクの前提になるか（断念しても即座に次へ進めない）
+    isPrerequisite: z.boolean().optional(),
   })).optional(),
   seqEnabled:       z.boolean().optional(),
   // 詰まった参加者への声かけまでの秒数。null / 未指定なら声かけしない。
@@ -85,7 +87,14 @@ export async function POST(req: NextRequest) {
             order: index + 1,
           })),
         },
-        tasks: { create: (tasks ?? []).map(t => ({ text: t.text.trim(), order: t.order, hint: t.hint?.trim() || null })) },
+        tasks: {
+          create: (tasks ?? []).map(t => ({
+            text: t.text.trim(),
+            order: t.order,
+            hint: t.hint?.trim() || null,
+            isPrerequisite: t.isPrerequisite === true,
+          })),
+        },
       },
       include: {
         questions: { orderBy: { order: 'asc' } },
