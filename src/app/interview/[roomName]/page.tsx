@@ -38,6 +38,7 @@ export default async function InterviewPage(props: { params: Promise<{ roomName:
       stimulusDuration={session.interview.stimulusDuration ?? undefined}
       tasks={session.interview.tasks}
       seqEnabled={session.interview.seqEnabled}
+      hintDelaySec={session.interview.hintDelaySec ?? undefined}
     />
   )
 }

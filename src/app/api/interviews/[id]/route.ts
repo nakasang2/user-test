@@ -35,6 +35,9 @@ const patchSchema = z.object({
   stimulusUrl:      z.string().url().nullable().optional().or(z.literal('')),
   stimulusDuration: z.number().int().min(1).max(60).nullable().optional(),
   seqEnabled:       z.boolean().optional(),
+  // 詰まった参加者への声かけまでの秒数。null なら声かけしない。
+  // 上限は30分（それ以上は事実上「声かけしない」と同じで、誤入力の可能性が高い）
+  hintDelaySec:     z.number().int().min(10).max(1800).nullable().optional(),
   // id 付き = 既存を更新（過去の回答との紐づけを保つ）、id 無し = 新規追加。
   // 送られてこなかった既存項目は削除される。
   questions: z.array(z.object({
@@ -45,6 +48,8 @@ const patchSchema = z.object({
   tasks: z.array(z.object({
     id:   z.string().optional(),
     text: z.string().min(1).max(2000),
+    // 詰まったときに参加者へ見せるヒント。全員に同じ文言を出して比較可能性を保つ
+    hint: z.string().max(2000).nullable().optional(),
   })).optional(),
   // 事前質問（スクリーニング／属性）。disqualify に入れた選択肢を選んだ人は参加不可。
   screeners: z.array(z.object({
@@ -79,7 +84,7 @@ export async function PATCH(req: NextRequest, props: { params: Promise<{ id: str
     if (!parsed.success) {
       return NextResponse.json({ error: parsed.error.issues[0]?.message ?? 'Invalid body' }, { status: 400 })
     }
-    const { title, description, stimulusUrl, stimulusDuration, seqEnabled, questions, tasks, screeners } = parsed.data
+    const { title, description, stimulusUrl, stimulusDuration, seqEnabled, hintDelaySec, questions, tasks, screeners } = parsed.data
 
     // 他インタビューの id を送られても触らないよう、自分の配下だけを対象にする
     const ownQuestionIds = new Set(existing.questions.map((q) => q.id))
@@ -126,10 +131,11 @@ export async function PATCH(req: NextRequest, props: { params: Promise<{ id: str
       ops.push(prisma.task.deleteMany({ where: { interviewId: id, NOT: { id: { in: keep.length ? keep : ['__none__'] } } } }))
       tasks.forEach((t, index) => {
         const order = index + 1
+        const hint = t.hint?.trim() ? t.hint.trim() : null
         if (t.id && ownTaskIds.has(t.id)) {
-          ops.push(prisma.task.update({ where: { id: t.id }, data: { text: t.text, order } }))
+          ops.push(prisma.task.update({ where: { id: t.id }, data: { text: t.text, order, hint } }))
         } else {
-          ops.push(prisma.task.create({ data: { interviewId: id, text: t.text, order } }))
+          ops.push(prisma.task.create({ data: { interviewId: id, text: t.text, order, hint } }))
         }
       })
     }
@@ -157,6 +163,7 @@ export async function PATCH(req: NextRequest, props: { params: Promise<{ id: str
     if (stimulusUrl !== undefined) data.stimulusUrl = stimulusUrl || null
     if (stimulusDuration !== undefined) data.stimulusDuration = stimulusDuration
     if (seqEnabled !== undefined) data.seqEnabled = seqEnabled
+    if (hintDelaySec !== undefined) data.hintDelaySec = hintDelaySec
     if (Object.keys(data).length > 0) {
       ops.push(prisma.interview.update({ where: { id }, data }))
     }

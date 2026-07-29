@@ -86,6 +86,15 @@ export default function InterviewMetrics({
               <p className="text-xs text-gray-500">
                 全体 <span className="text-base font-semibold text-gray-900">{overall.rate}%</span>
                 <span className="ml-1">（{overall.completed} / {overall.total}）・{withResults.length}人</span>
+                {/* ヒントを使った人がいるときだけ「自力では何%か」を併記する */}
+                {overall.hintUsed > 0 && (
+                  <span className="ml-2 text-gray-500" title="ヒントを見ずに達成できた割合（自力成功率）">
+                    自力 {overall.unaidedRate}%
+                    {/* 人数も出す。ヒントを見た人が全員失敗すると成功率と自力成功率が
+                        同じ数字になり、なぜ併記されているのか読み取れなくなるため */}
+                    <span className="text-gray-400">（ヒント {overall.hintUsed}回）</span>
+                  </span>
+                )}
               </p>
             )}
           </div>
@@ -107,6 +116,15 @@ export default function InterviewMetrics({
                       <span>
                         <span className="font-semibold text-gray-900">{rate}%</span>
                         <span className="text-gray-400"> ({t.completed}/{t.total})</span>
+                        {t.hintUsed > 0 && (
+                          <span
+                            className="ml-2 text-amber-700"
+                            title="ヒントを見た人数（達成できなかった人も含む）。うち達成した人数は括弧内"
+                          >
+                            ヒント {t.hintUsed}人
+                            <span className="text-gray-400">（達成 {t.completed - t.completedUnaided}）</span>
+                          </span>
+                        )}
                         {avgDur !== null && <span className="ml-2 text-gray-500">平均 {formatDuration(avgDur)}</span>}
                         {t.seqs.length > 0 && (
                           <span className="ml-2 text-gray-500" title="SEQ: 操作の簡単さの平均（7が最も簡単）">

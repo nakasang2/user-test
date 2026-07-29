@@ -234,10 +234,11 @@ export default function SessionDetail(props: { params: Promise<{ id: string }> }
     if (session.taskResults?.length) {
       // includedInMetrics: 画面の「測定結果」が対象にしている行か。
       // この列が無いと、CSV を手元で集計した数字と画面の数字が食い違う
-      rows.push(['# タスク結果'], ['order', 'task', 'outcome', 'durationSec', 'seq', 'includedInMetrics'])
+      rows.push(['# タスク結果'], ['order', 'task', 'outcome', 'usedHint', 'durationSec', 'seq', 'includedInMetrics'])
       session.taskResults.forEach((t) => rows.push([
         String(t.order), q(t.text),
         t.outcome === 'completed' ? '達成' : 'できなかった',
+        t.usedHint ? 'ヒントあり' : '自力',
         t.durationSec != null ? String(Math.round(t.durationSec)) : '',
         t.seq != null ? String(t.seq) : '',
         t.excludedAt ? '集計対象外' : '集計対象',

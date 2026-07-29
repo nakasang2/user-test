@@ -22,7 +22,17 @@ export interface TaskAgg {
   text: string
   /** 表示順。編集で振り直されるので集計キーには使わない */
   order: number
+  /** 達成した数（ヒントを見た人も含む。従来の「成功率」の定義を変えないため） */
   completed: number
+  /** そのうちヒントを見ずに達成した数。UXリサーチでいう「自力成功」 */
+  completedUnaided: number
+  /**
+   * ヒントを見た人数（達成・断念を問わない）。
+   * 「達成した人のうち何人がヒントを見たか」だけだと、全員がヒントを見て全員が
+   * 断念したタスクでヒント提示の事実が消える。ヒント文が悪いのか、ヒントがあっても
+   * 無理なタスクなのかを切り分けるには、達成しなかった人の分も要る。
+   */
+  hintUsed: number
   total: number
   durations: number[]
   seqs: number[]
@@ -78,10 +88,15 @@ export function aggregateTasks(sessions: SessionLike[], opts?: { excluded?: bool
     s.taskResults?.forEach((t) => {
       if (isExcluded(t) !== want) return
       const key = t.taskId ?? `text:${t.text}`
-      const cur = map.get(key) ?? { key, text: t.text, order: t.order, completed: 0, total: 0, durations: [], seqs: [] }
+      const cur = map.get(key) ?? { key, text: t.text, order: t.order, completed: 0, completedUnaided: 0, hintUsed: 0, total: 0, durations: [], seqs: [] }
       cur.total += 1
       cur.order = Math.min(cur.order, t.order) // 表示順は最小の order を採用
-      if (t.outcome === 'completed') cur.completed += 1
+      // ヒント欄が無い時代のデータは usedHint が undefined。ヒントは存在しなかったので自力扱い
+      if (t.usedHint === true) cur.hintUsed += 1
+      if (t.outcome === 'completed') {
+        cur.completed += 1
+        if (t.usedHint !== true) cur.completedUnaided += 1
+      }
       if (typeof t.durationSec === 'number' && t.durationSec > 0) cur.durations.push(t.durationSec)
       if (typeof t.seq === 'number') cur.seqs.push(t.seq)
       map.set(key, cur)
@@ -111,12 +126,29 @@ export function aggregateScores(sessions: SessionLike[], opts?: { excluded?: boo
   return [...map.values()].sort((a, b) => a.order - b.order)
 }
 
-/** タスク全体の成功率。1件も結果が無ければ null（0% と区別する） */
-export function overallSuccess(tasks: TaskAgg[]): { completed: number; total: number; rate: number } | null {
+/**
+ * タスク全体の成功率。1件も結果が無ければ null（0% と区別する）。
+ *
+ * rate は「達成／試行」で、ヒントを見た達成も含む（従来の定義を変えないため）。
+ * unaidedRate は「自力で達成／試行」。ヒントを出す運用では、この2つを並べないと
+ * 「助けがあれば出来る」と「助け無しで出来る」の区別が付かない。
+ */
+export function overallSuccess(
+  tasks: TaskAgg[]
+): { completed: number; completedUnaided: number; hintUsed: number; total: number; rate: number; unaidedRate: number } | null {
   const total = tasks.reduce((sum, t) => sum + t.total, 0)
   if (total === 0) return null
   const completed = tasks.reduce((sum, t) => sum + t.completed, 0)
-  return { completed, total, rate: Math.round((completed / total) * 100) }
+  const completedUnaided = tasks.reduce((sum, t) => sum + t.completedUnaided, 0)
+  const hintUsed = tasks.reduce((sum, t) => sum + t.hintUsed, 0)
+  return {
+    completed,
+    completedUnaided,
+    hintUsed,
+    total,
+    rate: Math.round((completed / total) * 100),
+    unaidedRate: Math.round((completedUnaided / total) * 100),
+  }
 }
 
 /**

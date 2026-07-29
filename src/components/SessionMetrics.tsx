@@ -11,6 +11,8 @@ export interface TaskResultData {
   seq?: number | null
   /** 集計対象外にした日時。null なら集計に含める */
   excludedAt?: string | null
+  /** ヒントを見た上での結果か。自力の達成と混ぜると成功率が実態より良く見える */
+  usedHint?: boolean | null
 }
 
 export interface AnswerData {
@@ -105,6 +107,11 @@ export default function SessionMetrics({
                     <p className={`text-xs font-medium ${ok ? 'text-emerald-700' : 'text-red-600'}`}>
                       {ok ? '達成' : 'できなかった'}
                     </p>
+                    {t.usedHint === true && (
+                      <p className="text-[11px] text-amber-700 mt-0.5" title="ヒントを見た上での結果">
+                        ヒントあり
+                      </p>
+                    )}
                     {typeof t.durationSec === 'number' && t.durationSec > 0 && (
                       <p className="text-[11px] text-gray-500 flex items-center gap-1 justify-end mt-0.5">
                         <Clock className="w-3 h-3" strokeWidth={2} />

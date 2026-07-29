@@ -4,10 +4,13 @@ import { useEffect, useState, useRef, useMemo, Suspense } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { Monitor, Check, X, AlertTriangle, CheckCircle2, Globe } from 'lucide-react'
 import SeqScale from '@/components/SeqScale'
+import StuckHelp from '@/components/StuckHelp'
 
 interface Task {
   text: string
   order: number
+  /** 詰まったときに見せるヒント（リサーチャーが事前に書いたもの） */
+  hint?: string | null
 }
 
 type WidgetPhase = 'task' | 'done'
@@ -19,6 +22,8 @@ function WidgetContent() {
   const initialIdx = parseInt(searchParams.get('current') ?? '0', 10)
   const stimulusUrl = searchParams.get('stimulus') ?? ''
   const seqEnabled  = searchParams.get('seq') === '1'
+  // 詰まった参加者への声かけまでの秒数。0 / 未指定なら声かけしない
+  const hintDelaySec = Number(searchParams.get('hintdelay') ?? '0') || 0
 
   // タスクは URL パラメータから決まるので state に持たない（effect での setState も不要になる）
   const tasks = useMemo<Task[]>(() => {
@@ -35,6 +40,14 @@ function WidgetContent() {
   const [cameraError, setCameraError]           = useState(false)
   // 顔フレーミング判定: null=判定前 / 'ok'=正常 / 'no_face'=写っていない / 'cut_off'=見切れ
   const [faceStatus, setFaceStatus]             = useState<'ok' | 'no_face' | 'cut_off' | null>(null)
+  // 詰まった参加者への声かけ。
+  // 「どのタスクで出したか」を持ち、現在のタスクと一致するときだけ表示する。
+  // こうするとタスクが変わった瞬間に自動で引っ込むので、effect でリセットしなくてよい
+  // （effect 内で同期的に setState すると連鎖レンダーの原因になる）。
+  const [stuckAtIdx, setStuckAtIdx]             = useState<number | null>(null)
+  const [hintShownAtIdx, setHintShownAtIdx]     = useState<number | null>(null)
+  // ヒントを見たタスク番号（0始まり）。結果送信時に添えて集計で自力達成と分ける
+  const usedHintIdxRef                          = useRef<Set<number>>(new Set())
 
   const channelRef             = useRef<BroadcastChannel | null>(null)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -275,9 +288,11 @@ function WidgetContent() {
 
   async function commitOutcome(outcome: 'completed' | 'gave_up', seq?: number) {
     setAwaitingSeq(null)
+    // ヒントを見た上での結果は、集計で自力の達成と分ける必要がある
+    const usedHint = usedHintIdxRef.current.has(currentTaskIndex)
     if (!isLastTask) {
       // 途中のタスク: 結果だけ送って次へ（録画は継続）
-      channelRef.current?.postMessage({ type: 'task_outcome', outcome, seq })
+      channelRef.current?.postMessage({ type: 'task_outcome', outcome, seq, usedHint })
       setCurrentTaskIndex((i) => Math.min(i + 1, tasks.length - 1))
       return
     }
@@ -293,9 +308,10 @@ function WidgetContent() {
 
   async function finalize(outcome: 'completed' | 'gave_up', seq?: number) {
     setWarnNoRecord(false)
+    const usedHint = usedHintIdxRef.current.has(currentTaskIndex)
     focusInterviewPage()            // ① フォーカス（ユーザージェスチャー文脈）
     await stopAndSendRecording()    // ② 録画停止 & blob 送信
-    channelRef.current?.postMessage({ type: 'task_outcome', outcome, seq })
+    channelRef.current?.postMessage({ type: 'task_outcome', outcome, seq, usedHint })
     setDoneMessage('インタビューページに戻ります...')
     setWidgetPhase('done')
   }
@@ -304,7 +320,11 @@ function WidgetContent() {
   async function endSession() {
     // SEQ 入力待ちのまま終了された場合、押した達成/断念を取りこぼさない（評価なしで確定）
     if (awaitingSeq) {
-      channelRef.current?.postMessage({ type: 'task_outcome', outcome: awaitingSeq })
+      channelRef.current?.postMessage({
+        type: 'task_outcome',
+        outcome: awaitingSeq,
+        usedHint: usedHintIdxRef.current.has(currentTaskIndex),
+      })
       setAwaitingSeq(null)
     }
     focusInterviewPage()
@@ -329,6 +349,28 @@ function WidgetContent() {
     taskReadySentRef.current = true
     channelRef.current?.postMessage({ type: 'task_ready' })
   }, [readyForTask])
+
+  // 詰まった参加者への声かけ。着手（readyForTask）してから hintDelaySec 後に出す。
+  // タスクが変わるとタイマーを張り直すので、前のタスクの経過は持ち越さない。
+  // ※フック規則のため、必ず早期 return より前に置くこと。
+  useEffect(() => {
+    if (!hintDelaySec || !readyForTask) return
+    const idx = currentTaskIndex
+    const timer = setTimeout(() => setStuckAtIdx(idx), hintDelaySec * 1000)
+    return () => clearTimeout(timer)
+  }, [hintDelaySec, readyForTask, currentTaskIndex])
+
+  const stuckOnTask = stuckAtIdx === currentTaskIndex
+  const hintShown = hintShownAtIdx === currentTaskIndex
+
+  // ヒントを開いたら、その場でメイン側へ伝える。
+  // 小窓の ref だけに持つと、小窓を閉じて開き直したときに記録が消え、
+  // 条件付き成功が自力成功として集計されてしまう（数字が良い方向に狂う）。
+  function revealHint() {
+    setHintShownAtIdx(currentTaskIndex)
+    usedHintIdxRef.current.add(currentTaskIndex)
+    channelRef.current?.postMessage({ type: 'hint_used', index: currentTaskIndex })
+  }
 
   /* ── 完了画面 ─────────────────────────────────────────────── */
   if (widgetPhase === 'done') {
@@ -406,9 +448,21 @@ function WidgetContent() {
       <div className="px-3 py-3 max-h-64 overflow-y-auto">
         {readyForTask ? (
           currentTask ? (
-            <div className="bg-gray-50 border border-gray-200 rounded-lg p-3">
-              <p className="text-[10px] text-gray-500 mb-1.5 uppercase tracking-wide font-medium">現在のタスク</p>
-              <p className="text-sm text-gray-900 leading-relaxed">{currentTask.text}</p>
+            <div className="space-y-2">
+              <div className="bg-gray-50 border border-gray-200 rounded-lg p-3">
+                <p className="text-[10px] text-gray-500 mb-1.5 uppercase tracking-wide font-medium">現在のタスク</p>
+                <p className="text-sm text-gray-900 leading-relaxed">{currentTask.text}</p>
+              </div>
+              {/* SEQ 入力待ち中は出さない。達成を押した後にヒントを開くと、
+                  自力の成功が「ヒントあり」として記録されてしまうため。 */}
+              {stuckOnTask && !awaitingSeq && (
+                <StuckHelp
+                  compact
+                  hint={currentTask.hint ?? null}
+                  hintShown={hintShown}
+                  onRevealHint={revealHint}
+                />
+              )}
             </div>
           ) : (
             <div className="bg-gray-50 border border-gray-200 rounded-lg p-3">
@@ -426,8 +480,13 @@ function WidgetContent() {
       </div>
 
       {/* ボタン群。操作はこの小窓に集約し、黒い主 CTA が常に 1 つだけになるよう段階表示する。
-          録画 →（録画後に）サービスを開く →（開いた後に）達成/できなかった/終了、と主役が入れ替わる。 */}
-      <div className="px-3 pb-3 pt-1 space-y-2">
+          録画 →（録画後に）サービスを開く →（開いた後に）達成/できなかった/終了、と主役が入れ替わる。
+
+          sticky で最下部に貼り付ける。小窓は 400×560 と狭く、上に何か（声かけバナー・
+          長いタスク文言・ヒント本文）が増えると、この操作群が窓の外へ押し出されてしまう。
+          特に「うまくいかないときは『できなかった』で次へ」と案内しながら、その
+          「できなかった」自体が見えなくなるのは、救済のつもりが詰みを作ることになる。 */}
+      <div className="px-3 pb-3 pt-2 space-y-2 sticky bottom-0 bg-white border-t border-gray-100">
         {/* 録画状態: 未開始なら開始ボタン、開始後は「画面録画中」インジケータ（常に単一表示） */}
         {!isScreenRecording ? (
           <div className="space-y-1">

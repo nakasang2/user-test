@@ -6,7 +6,8 @@
 
 ## 進行中
 - **PR #25 がマージ待ち**: 調査ページ最上部の結果サマリー（成功率・NPS・所要時間・完了、最も苦戦したタスク、AI総括）、並びの変更（結果 → 比較 → 個別）、削除済みタスク・質問を集計から外す恒久対応（excludedAt）、参加者画面から感情表示を撤去
-  - **このPRには DB スキーマ変更が含まれる**（TaskResult / Answer に NULL 許容の `excludedAt` を追加）。ビルド時の `prisma db push` が `next build` より先に走るので、列が無いままアプリが動くことはない
+  さらに、参加者画面から感情表示を撤去、詰まった参加者への声かけ＋ヒント（記録付き）
+  - **このPRには DB スキーマ変更が含まれる**。TaskResult / Answer に `excludedAt`（NULL 許容）、Task に `hint`（NULL 許容）、Interview に `hintDelaySec`（NULL 許容）、TaskResult に `usedHint`（Boolean 既定 false）。いずれも追加のみ。ビルド時の `prisma db push` が `next build` より先に走るので、列が無いままアプリが動くことはない
 
 ## 既知の制約（対応済みだが把握しておくこと）
 - **削除済みタスク・質問の扱い**は excludedAt（集計対象外の印）方式で恒久対応済み。削除する「前」に印を付けるので、後から推測しない。手動での除外／復帰もできる

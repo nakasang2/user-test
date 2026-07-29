@@ -24,6 +24,7 @@ type TaskResultInput = {
   startedAt?: number | null
   endedAt?: number | null
   seq?: number | null
+  usedHint?: boolean
 }
 
 type AnswerInput = {
@@ -86,6 +87,7 @@ export async function POST(req: NextRequest, props: { params: Promise<{ id: stri
             const v = num(t.seq)
             return v !== null && Number.isInteger(v) && v >= 1 && v <= 7 ? v : null
           })(),
+          usedHint: t.usedHint === true,
         }
       })
 

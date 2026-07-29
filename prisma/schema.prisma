@@ -107,6 +107,9 @@ model Interview {
   // 各タスク直後に SEQ（Single Ease Question: 1〜7 の主観的な易しさ）を聞くか。
   // 既存調査の進行を変えないため既定は無効。
   seqEnabled       Boolean       @default(false)
+  // タスクに着手してから何秒で「詰まっていませんか」の声かけを出すか。
+  // null なら声かけ自体を出さない（既存調査の進行を変えないため既定は無効）。
+  hintDelaySec     Int?
   createdAt        DateTime      @default(now())
   updatedAt        DateTime      @updatedAt
 }
@@ -127,6 +130,10 @@ model Task {
   interview   Interview    @relation(fields: [interviewId], references: [id], onDelete: Cascade)
   text        String
   order       Int
+  // 詰まった参加者に見せるヒント（リサーチャーが事前に書く）。
+  // 全員に同じ文言を出すことで、助けを出しつつ参加者間の比較可能性を保つ。
+  // 未設定なら「できなかったで next に進める」案内だけを出す。
+  hint        String?
   results     TaskResult[]
 }
 
@@ -151,6 +158,9 @@ model TaskResult {
   durationSec Float?   // 所要時間（time on task）
   // SEQ: タスク直後の「どれくらい簡単でしたか」1（とても難しい）〜7（とても簡単）
   seq         Int?
+  // ヒントを見たか。見た上での達成は「条件付き成功」であり、自力の達成と
+  // 同じ数字に混ぜると成功率が実態より良く見える。集計で必ず分ける。
+  usedHint    Boolean  @default(false)
   // 集計対象外にした日時。null なら集計に含める。
   // タスクを削除すると taskId は SetNull になり、どのタスクの結果だったか
   // 特定できなくなる（text は実施時点のスナップショットなので、文言を修正した

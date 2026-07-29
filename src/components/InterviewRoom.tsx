@@ -24,6 +24,7 @@ import {
   Copy,
 } from 'lucide-react'
 import SeqScale from '@/components/SeqScale'
+import StuckHelp from '@/components/StuckHelp'
 import { elapsedSec, nowMs, cacheBustToken } from '@/lib/elapsed'
 
 interface Question {
@@ -43,8 +44,10 @@ interface Props {
   usabilityMode?: 'prototype' | 'service'
   stimulusUrl?: string
   stimulusDuration?: number  // seconds (default 5)
-  tasks?: { id?: string; text: string; order: number }[]
+  tasks?: { id?: string; text: string; order: number; hint?: string | null }[]
   seqEnabled?: boolean
+  /** タスク着手から何秒で「詰まっていませんか」の声かけを出すか。未設定なら出さない */
+  hintDelaySec?: number
 }
 
 // 測定結果（構造化して /results に保存する定量データ）
@@ -56,6 +59,8 @@ interface TaskResultEntry {
   startedAt: number
   endedAt: number
   seq?: number
+  /** ヒントを見た上での結果か。自力の達成と混ぜると成功率が実態より良く見える */
+  usedHint?: boolean
 }
 
 interface AnswerEntry {
@@ -90,6 +95,7 @@ export default function InterviewRoom({
   stimulusDuration,
   tasks,
   seqEnabled,
+  hintDelaySec,
 }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const streamRef = useRef<MediaStream | null>(null)
@@ -158,12 +164,38 @@ export default function InterviewRoom({
   // BroadcastChannel の onmessage は startInterview 時のクロージャを保持するため、
   // 最新のタスク番号は ref で参照する（state だけだと陳腐化して複数タスクで進めない）
   const currentTaskIndexRef = useRef(0)
+  // 小窓（service モード）との通信チャンネル。gotoTask から現在タスクを送るため、
+  // それより前に宣言しておく。
+  const widgetChannelRef = useRef<BroadcastChannel | null>(null)
+
+  // ── 詰まった参加者への声かけ ──
+  // 一定時間そのタスクに留まっていたら「次に進めます」と案内し、ヒントがあれば見せる。
+  // タスクを移るたびにリセットする（前のタスクの経過を持ち越さない）。
+  const [stuckOnTask, setStuckOnTask] = useState(false)
+  // ヒントを見たタスク番号（1始まり）。達成/断念の記録時に添える
+  const usedHintOrdersRef = useRef<Set<number>>(new Set())
+  const [hintShown, setHintShown] = useState(false)
+  function resetStuckTimer() {
+    setStuckOnTask(false)
+    setHintShown(false)
+  }
+  function revealHint() {
+    setHintShown(true)
+    usedHintOrdersRef.current.add(currentTaskIndexRef.current + 1)
+  }
+
   function gotoTask(idx: number) {
     currentTaskIndexRef.current = idx
     setCurrentTaskIndex(idx)
     // 次タスクの計測開始（前タスクの終了時刻＝次タスクの開始時刻）
     taskStartedAtRef.current = elapsedSec(startTimeRef.current)
     firstTaskStartedRef.current = true
+    resetStuckTimer()
+    setTaskStartTick((n) => n + 1)
+    // 小窓にも同じタスク番号を送る。ここで送らないと、メイン画面のタスク一覧から
+    // 別のタスクへ飛んだときに小窓だけ古い番号のままになり、参加者が小窓で見て
+    // 操作した内容が、メイン側では別タスクの結果・所要時間・ヒント有無として記録される。
+    widgetChannelRef.current?.postMessage({ type: 'task_update', currentTaskIndex: idx })
   }
   // 測定結果（定量データ）。文字起こしとは別に /results へ構造化保存する
   const taskResultsRef = useRef<TaskResultEntry[]>([])
@@ -188,7 +220,21 @@ export default function InterviewRoom({
     if (firstTaskStartedRef.current) return
     firstTaskStartedRef.current = true
     taskStartedAtRef.current = elapsedSec(startTimeRef.current)
+    setTaskStartTick((n) => n + 1)  // 声かけタイマーの起点
   }
+  // 「タスクに着手した瞬間」を effect に伝えるためのカウンタ。
+  // ref の更新では再レンダーが起きずタイマーを張り直せないため、state で持つ。
+  const [taskStartTick, setTaskStartTick] = useState(0)
+
+  // 声かけタイマー。着手（taskStartTick）から hintDelaySec 後に一度だけ立てる。
+  // hintDelaySec 未設定なら何もしない（既存調査の進行を変えない）。
+  useEffect(() => {
+    if (!hintDelaySec || hintDelaySec <= 0) return
+    if (taskStartTick === 0) return   // まだ着手していない
+    if (phase !== 'task') return      // タスク中以外では出さない
+    const timer = setTimeout(() => setStuckOnTask(true), hintDelaySec * 1000)
+    return () => clearTimeout(timer)
+  }, [hintDelaySec, taskStartTick, phase])
   const [stimulusCountdown, setStimulusCountdown] = useState(0)
   const [stimulusError, setStimulusError] = useState(false)
   const stimulusStartedRef = useRef(false)   // カウント開始の二重起動防止
@@ -202,7 +248,6 @@ export default function InterviewRoom({
   const [screenRecordingDownloadUrl, setScreenRecordingDownloadUrl] = useState<string | null>(null)
 
   // フローティングウィジェット (service モード)
-  const widgetChannelRef = useRef<BroadcastChannel | null>(null)
   const [widgetBlocked, setWidgetBlocked] = useState(false)
   const pipWindowRef = useRef<Window | null>(null)   // Document PiP または popup の window 参照
   const startedRef = useRef(false)  // startInterview の二重起動防止
@@ -655,14 +700,19 @@ export default function InterviewRoom({
   async function openWidget() {
     // btoa の出力には + / = が含まれうる。URLSearchParams で + が空白に化けて
     // widget 側の atob/JSON.parse が失敗する（タスクが空表示になる）ため、必ず encode する。
-    const tasksEncoded = encodeURIComponent(btoa(encodeURIComponent(JSON.stringify(tasks ?? []))))
+    // 小窓が使うのは文言・順番・ヒントだけ。Task 行をそのまま渡すと interviewId 等も
+    // URL に載る。ヒントを載せるようになった分 URL が伸びるので、必要な項目に絞る。
+    const taskPayload = (tasks ?? []).map((t) => ({ text: t.text, order: t.order, hint: t.hint ?? null }))
+    const tasksEncoded = encodeURIComponent(btoa(encodeURIComponent(JSON.stringify(taskPayload))))
     // 小窓（別ウィンドウの iframe）が古い版をキャッシュして表示するのを防ぐため、
     // 開くたびに一意なパラメータを付けて必ず最新を読み込ませる。
     const cacheBust = cacheBustToken()
     // サービス起動も小窓に一本化するため、対象サービスの URL を小窓へ渡す。
     const stimulusParam = stimulusUrl ? `&stimulus=${encodeURIComponent(stimulusUrl)}` : ''
     const seqParam = seqEnabled ? '&seq=1' : ''
-    const url = `/interview/widget?session=${encodeURIComponent(sessionId)}&tasks=${tasksEncoded}&current=${currentTaskIndex}&_t=${cacheBust}${stimulusParam}${seqParam}`
+    // 声かけまでの秒数。小窓側でもタスク着手からの経過を測って同じ案内を出す
+    const hintParam = hintDelaySec && hintDelaySec > 0 ? `&hintdelay=${hintDelaySec}` : ''
+    const url = `/interview/widget?session=${encodeURIComponent(sessionId)}&tasks=${tasksEncoded}&current=${currentTaskIndex}&_t=${cacheBust}${stimulusParam}${seqParam}${hintParam}`
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const docPiP = (window as any).documentPictureInPicture
@@ -695,9 +745,11 @@ export default function InterviewRoom({
   }
 
   // ── タスクの結果を記録して次へ（達成 / 断念）。最後のタスクなら質問フェーズへ ──
-  function recordTaskOutcome(outcome: 'completed' | 'gave_up', seq?: number) {
+  function recordTaskOutcome(outcome: 'completed' | 'gave_up', seq?: number, usedHintFromWidget?: boolean) {
     const idx = currentTaskIndexRef.current
     const task = tasks?.[idx]
+    // ヒントはメイン画面と小窓のどちらからでも開ける。どちらで見ても記録に残す
+    const usedHint = usedHintOrdersRef.current.has(idx + 1) || usedHintFromWidget === true
     if (task) {
       // 定量データとして構造化保存（成功率・所要時間の集計用）
       const now = elapsedSec(startTimeRef.current)
@@ -711,11 +763,13 @@ export default function InterviewRoom({
           startedAt: taskStartedAtRef.current,
           endedAt: now,
           seq,
+          usedHint,
         },
       ]
       saveResults()
 
-      const label = outcome === 'completed' ? '達成' : '断念（たどり着けなかった）'
+      const base = outcome === 'completed' ? '達成' : '断念（たどり着けなかった）'
+      const label = usedHint ? `${base}（ヒントあり）` : base
       const text = `タスク${idx + 1}「${task.text}」→ ${label}`
       const entry: TranscriptEntry = {
         speaker: 'System',
@@ -730,9 +784,8 @@ export default function InterviewRoom({
     const total = tasks?.length ?? 0
     if (idx + 1 < total) {
       const next = idx + 1
+      // 小窓への同期は gotoTask 内で行う（一覧からのジャンプでも必ず送るため）
       gotoTask(next)
-      // サービスモードの小窓へ現在タスクを同期
-      widgetChannelRef.current?.postMessage({ type: 'task_update', currentTaskIndex: next })
     } else {
       completeTasksAndStartInterview()
     }
@@ -783,12 +836,16 @@ export default function InterviewRoom({
       const channel = new BroadcastChannel(`uservoice-widget-${sessionId}`)
       widgetChannelRef.current = channel
       channel.onmessage = (e) => {
-        if (e.data.type === 'task_outcome') recordTaskOutcome(e.data.outcome === 'gave_up' ? 'gave_up' : 'completed', typeof e.data.seq === 'number' ? e.data.seq : undefined)
+        if (e.data.type === 'task_outcome') recordTaskOutcome(e.data.outcome === 'gave_up' ? 'gave_up' : 'completed', typeof e.data.seq === 'number' ? e.data.seq : undefined, e.data.usedHint === true)
         else if (e.data.type === 'task_complete') completeTasksAndStartInterview() // 後方互換
         else if (e.data.type === 'end_session') endInterview()
         else if (e.data.type === 'recording_started') setScreenSharing(true)
         else if (e.data.type === 'service_opened') setServiceOpened(true)
         else if (e.data.type === 'task_ready') markFirstTaskStart() // 小窓でタスクが見えた＝着手できる時点
+        // 小窓でヒントを開いた。小窓を閉じて開き直しても記録が消えないよう、メイン側で保持する
+        else if (e.data.type === 'hint_used' && typeof e.data.index === 'number') {
+          usedHintOrdersRef.current.add(e.data.index + 1)
+        }
         else if (e.data.type === 'screen_recording_blob') {
           const blob: Blob = e.data.blob
           if (blob.size > 0) {
@@ -1402,6 +1459,19 @@ export default function InterviewRoom({
                       {tasks[currentTaskIndex]?.text}
                     </p>
                   </div>
+                )}
+
+                {/* タスク文言と同じ条件で出す。service モードで小窓が生きているときは
+                    操作も文言も小窓に一本化しているので、ここに「できなかったで次へ」と
+                    案内しても、その操作がこの画面には無い。ヒントの二重露出も防ぐ。
+                    SEQ の入力待ち中も出さない（達成を押した後にヒントを開くと、
+                    自力の成功が「ヒントあり」に化けてしまうため）。 */}
+                {stuckOnTask && !awaitingSeq && !(usabilityMode === 'service' && !widgetBlocked) && (
+                  <StuckHelp
+                    hint={tasks?.[currentTaskIndex]?.hint ?? null}
+                    hintShown={hintShown}
+                    onRevealHint={revealHint}
+                  />
                 )}
 
                 {usabilityMode === 'service' ? (
