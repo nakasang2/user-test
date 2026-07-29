@@ -62,7 +62,11 @@ export default function InterviewSummary({
   const avgDur = avgSessionDuration(sessions)
   const worst = hardestTask(tasks)
 
-  const finished = sessions.filter((s) => s.status === 'done' || s.status === 'completed').length
+  // completed（被験者が完了）→ processing（AI分析中）→ done。
+  // processing を外すと分析中の数分だけ「未完了」に見えてしまう。
+  const finished = sessions.filter(
+    (s) => s.status === 'done' || s.status === 'completed' || s.status === 'processing'
+  ).length
   const hasMeasurements = success !== null || score !== null
 
   // 測定データも AI 総括も無い場合。黙って消すと「機能が無い」ように見えるので、
@@ -136,8 +140,8 @@ export default function InterviewSummary({
 
         <Tile
           label="平均所要時間"
-          value={avgDur !== null ? formatDuration(avgDur) : null}
-          sub={avgDur !== null ? '参加者1人あたり' : '計測データなし'}
+          value={avgDur !== null ? formatDuration(avgDur.mean) : null}
+          sub={avgDur !== null ? `参加者1人あたり · n=${avgDur.n}` : '計測データなし'}
         />
 
         <Tile label="完了" value={`${finished}人`} sub={`全 ${sessions.length} 人中`} />

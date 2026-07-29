@@ -36,6 +36,23 @@ export interface ScoreAgg {
   values: number[]
 }
 
+/*
+ * 【既知の課題】削除済みタスク・質問の結果が集計に残り続ける
+ *
+ * タスクを削除すると TaskResult.taskId は SetNull になる（結果自体は残す設計）。
+ * そのため削除済みタスクの結果は「文言キー」の行として生き残り、集計に混ざる。
+ *
+ * 「現在のタスク一覧と文言で突き合わせて、一致しないものを削除済みとみなす」実装を
+ * 一度入れたが、取りやめた。TaskResult.text は実施時点のスナップショットなので、
+ * タスクの文言を修正しただけ（タスクは存在する）でも旧データが一致しなくなり、
+ * 「削除済み」と誤判定されて集計から落ちる。落ちるのは古いデータに偏るため、
+ * 数字が実態より良く見える方向にズレる。気づけない誤りなので、
+ * 「削除済みが混ざる」ほうを選んでいる（混ざっても行として画面に見えるため気づける）。
+ *
+ * 恒久対応するなら、TaskResult に「削除時点で確定した除外フラグ」を持たせるなど
+ * スナップショット文言に依存しない方法が要る。
+ */
+
 /** NPS = 推奨者(9-10)% − 批判者(0-6)% */
 export function calcNps(values: number[]): number {
   const promoters = values.filter((v) => v >= 9).length
@@ -94,12 +111,18 @@ export function overallSuccess(tasks: TaskAgg[]): { completed: number; total: nu
  * タスクごとの平均ではなく「1人がこのテストに要した時間」を出したいので、
  * まずセッション単位で合計してから人数で割る。
  */
-export function avgSessionDuration(sessions: SessionLike[]): number | null {
+export function avgSessionDuration(sessions: SessionLike[]): { mean: number; n: number } | null {
   const totals = sessions
-    .map((s) => (s.taskResults ?? []).reduce((sum, t) => sum + (typeof t.durationSec === 'number' && t.durationSec > 0 ? t.durationSec : 0), 0))
+    .map((s) =>
+      (s.taskResults ?? []).reduce(
+        (sum, t) => sum + (typeof t.durationSec === 'number' && t.durationSec > 0 ? t.durationSec : 0),
+        0
+      )
+    )
     .filter((v) => v > 0)
   if (totals.length === 0) return null
-  return totals.reduce((a, b) => a + b, 0) / totals.length
+  // n も返す。計測できた人だけの平均なので、母数が分からないと誤読される
+  return { mean: totals.reduce((a, b) => a + b, 0) / totals.length, n: totals.length }
 }
 
 /**
@@ -126,10 +149,26 @@ export function headlineScore(scores: ScoreAgg[]):
 /**
  * 最も成功率が低いタスク。全問 100% なら null（警告を出す意味がない）。
  * 同率のときは order が小さい方（先に出てくる方）を返す。
+ *
+ * 試行回数が極端に少ない行は除外する。旧データが文言違いで分裂した断片は
+ * n=1 になりがちで、そのままだと「0%（0/1）」が本当の問題箇所（例 2/9）を
+ * 押しのけて見出しに出てしまう。
+ *
+ * 基準は「3回以上試行されていること」。全体の割合（例: 最多の半数）にすると、
+ * 調査の途中で追加したタスク（10人中4人しか実施していない等）が本当に
+ * 成功率 0% でも警告が出なくなるため、絶対値で持つ。
+ * どのタスクも3回に届かない小規模な調査では、その中の最大値まで基準を下げる。
  */
 export function hardestTask(tasks: TaskAgg[]): (TaskAgg & { rate: number }) | null {
-  const withRate = tasks.filter((t) => t.total > 0).map((t) => ({ ...t, rate: Math.round((t.completed / t.total) * 100) }))
-  if (withRate.length === 0) return null
-  const worst = withRate.reduce((min, t) => (t.rate < min.rate ? t : min), withRate[0])
-  return worst.rate >= 100 ? null : worst
+  const done = tasks.filter((t) => t.total > 0)
+  if (done.length === 0) return null
+  const maxTotal = Math.max(...done.map((t) => t.total))
+  const minTotal = Math.min(3, maxTotal)
+  const eligible = done
+    .filter((t) => t.total >= minTotal)
+    .map((t) => ({ ...t, rate: Math.round((t.completed / t.total) * 100) }))
+  if (eligible.length === 0) return null
+  const worst = eligible.reduce((min, t) => (t.rate < min.rate ? t : min), eligible[0])
+  // 丸め前で判定する（199/200 が 100% に丸まって警告が消えるのを防ぐ）
+  return worst.completed >= worst.total ? null : worst
 }

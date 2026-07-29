@@ -32,10 +32,14 @@ export default function InterviewMetrics({ sessions }: { sessions: SessionLike[]
         <div className="bg-white border border-gray-200 rounded-xl p-5">
           <div className="flex items-baseline justify-between mb-4">
             <h2 className="text-sm font-semibold text-gray-900">タスク成功率</h2>
-            <p className="text-xs text-gray-500">
-              全体 <span className="text-base font-semibold text-gray-900">{overall?.rate ?? 0}%</span>
-              <span className="ml-1">（{overall?.completed ?? 0} / {overall?.total ?? 0}）・{withResults.length}人</span>
-            </p>
+            {/* overall が null になるのは taskRows が空のときだけで、その場合この枠自体を描画しない。
+                それでも 0 除算で NaN を出さないよう分岐しておく */}
+            {overall && (
+              <p className="text-xs text-gray-500">
+                全体 <span className="text-base font-semibold text-gray-900">{overall.rate}%</span>
+                <span className="ml-1">（{overall.completed} / {overall.total}）・{withResults.length}人</span>
+              </p>
+            )}
           </div>
           <div className="space-y-3">
             {taskRows.map((t) => {
