@@ -3,8 +3,9 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { upload } from '@vercel/blob/client'
 import { track } from '@/lib/analytics'
-import { useEmotionDetection, EmotionSnapshot } from '@/hooks/useEmotionDetection'
-import { AreaChart, Area, ResponsiveContainer, XAxis, YAxis } from 'recharts'
+// 参加者に感情を見せなくなったため、グラフ描画（recharts）は読み込まない。
+// 被験者側の画面が軽くなり、テストの妨げになる要素も減る。
+import { useEmotionDetection } from '@/hooks/useEmotionDetection'
 import {
   Mic,
   Monitor,
@@ -110,28 +111,17 @@ export default function InterviewRoom({
   // 実感情検出フック
   const { status: emotionStatus, lastEmotion, faceStatus, startDetection, stopDetection, getSnapshots } = useEmotionDetection(5000)
   const [cameraReady, setCameraReady] = useState(false)
-  // リアルタイムグラフ用：lastEmotion が更新されるたびに履歴に追加（最大 30 件 ≈ 2.5 分）
-  //
-  // この effect は履歴の追記だけでなく、感情スナップショットの逐次サーバー保存も担う
-  //（下の /api/emotions への POST）。検出フックの更新に反応して動く必要があるため
-  // effect 自体を無くせない。追記もレンダー中には算出できないので、規則を個別に外す。
-  // ※全件は useEmotionDetection 側の getSnapshots() が保持しており、ここは
-  //   直近30件の表示用。
-  const [emotionHistory, setEmotionHistory] = useState<EmotionSnapshot[]>([])
+  // 途中離脱でも残るよう、感情スナップショットを検出のたびに逐次サーバー保存する（失敗は無視）。
+  // 最終的には submitResults→/process が全件で上書きする。全件は useEmotionDetection 側の
+  // getSnapshots() が保持しているので、ここで履歴を持つ必要はない
+  //（参加者には感情を見せないため、表示用の履歴も不要）。
   useEffect(() => {
-    if (lastEmotion) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setEmotionHistory((prev) => [...prev, lastEmotion].slice(-30))
-      // 途中離脱でも残るよう、感情スナップショットを逐次サーバー保存（失敗は無視）。
-      // 最終的には submitResults→/process が全件で上書きする。
-      if (participantToken) {
-        fetch('/api/emotions', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'x-participant-token': participantToken },
-          body: JSON.stringify({ sessionId, ...lastEmotion }),
-        }).catch(() => {})
-      }
-    }
+    if (!lastEmotion || !participantToken) return
+    fetch('/api/emotions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-participant-token': participantToken },
+      body: JSON.stringify({ sessionId, ...lastEmotion }),
+    }).catch(() => {})
   }, [lastEmotion, sessionId, participantToken])
 
   const [phase, setPhase] = useState<Phase>('guide') // Feature 6: 初期フェーズを guide に
@@ -1257,22 +1247,14 @@ export default function InterviewRoom({
 
           {/* ユーザビリティテスト(service): ウェブカメラが全画面表示（サービスは別ウィンドウで操作） */}
 
-          {/* 感情検出ステータス（右上オーバーレイ） */}
-          {emotionStatus === 'loading' && (
-            <div className="absolute top-4 right-4 bg-white/95 border border-gray-200 text-gray-600 text-[10px] px-2 py-1 rounded-md shadow-sm font-medium">
-              感情検出準備中
-            </div>
-          )}
-          {emotionStatus === 'ready' && lastEmotion && (
-            <div className="absolute top-4 right-4 bg-white/95 border border-gray-200 text-[10px] px-2 py-1 rounded-md shadow-sm text-gray-900 font-medium">
-              {getDominantEmotionLabel(lastEmotion)}
-            </div>
-          )}
-          {emotionStatus === 'error' && (
-            <div className="absolute top-4 right-4 bg-white/95 border border-red-200 text-red-600 text-[10px] px-2 py-1 rounded-md shadow-sm font-medium">
-              検出エラー
-            </div>
-          )}
+          {/*
+            感情の検出状況・判定結果は参加者に見せない。
+            自分がどう判定されているかが見えると、それを意識して振る舞いが変わり、
+            測ろうとしている自然な反応そのものが歪む（観察者効果）。
+            準備中であることは開始ボタン側に出しており、検出エラーは参加者には
+            対処できず進行も止めないため、不安を与えるだけで伝える意味がない。
+            顔の見切れ警告だけは参加者が直せるので残している（上部）。
+          */}
 
           {/* AI ステータスバッジ（左下オーバーレイ） */}
           {isSpeaking && (
@@ -1791,13 +1773,7 @@ export default function InterviewRoom({
             </div>
           )}
 
-          {/* リアルタイム感情モニター */}
-          {(phase === 'interview' || phase === 'thinking' || phase === 'ending') && emotionStatus === 'ready' && (
-            <div className="border-b border-gray-200 p-3 flex-shrink-0 bg-white">
-              <div className="text-[10px] text-gray-500 uppercase tracking-wide mb-2 font-medium">感情モニター</div>
-              <RealtimeEmotionGraph history={emotionHistory} />
-            </div>
-          )}
+          {/* 感情モニター（グラフ）は参加者に見せない。理由は映像オーバーレイ側のコメント参照 */}
 
           {liveText && (
             <div className="p-3 border-b border-gray-200 bg-emerald-50/50 flex-shrink-0">
@@ -1866,107 +1842,6 @@ export default function InterviewRoom({
       </div>
     </div>
   )
-}
-
-// リアルタイム感情グラフ（折れ線 + 現在値バー）
-type ChartPoint = { t: number; happy: number; neutral: number; sad: number; surprised: number }
-
-const EMOTION_BARS = [
-  { key: 'happy',     label: '喜び',  color: '#34d399' },
-  { key: 'neutral',   label: '中立',  color: '#9ca3af' },
-  { key: 'sad',       label: '悲しみ', color: '#60a5fa' },
-  { key: 'surprised', label: '驚き',  color: '#fb923c' },
-  { key: 'angry',     label: '怒り',  color: '#f87171' },
-  { key: 'fearful',   label: '恐怖',  color: '#a78bfa' },
-  { key: 'disgusted', label: '嫌悪',  color: '#4ade80' },
-] as const
-
-function RealtimeEmotionGraph({ history }: { history: EmotionSnapshot[] }) {
-  const latest = history[history.length - 1]
-
-  // recharts 用データ（最新 15 点）
-  const chartData: ChartPoint[] = history.slice(-15).map((s, i) => ({
-    t: i,
-    happy:     Math.round(s.happy * 100),
-    neutral:   Math.round(s.neutral * 100),
-    sad:       Math.round(s.sad * 100),
-    surprised: Math.round(s.surprised * 100),
-  }))
-
-  return (
-    <div>
-      {/* 折れ線グラフ（happy / neutral / sad / surprised） */}
-      <div className="mb-2">
-        {chartData.length >= 2 ? (
-          <ResponsiveContainer width="100%" height={72}>
-            <AreaChart data={chartData} margin={{ top: 2, right: 2, left: -28, bottom: 0 }}>
-              <XAxis dataKey="t" hide />
-              <YAxis domain={[0, 100]} hide />
-              <Area type="monotone" dataKey="happy"     stroke="#34d399" fill="#34d39918" strokeWidth={1.5} dot={false} isAnimationActive={false} />
-              <Area type="monotone" dataKey="neutral"   stroke="#9ca3af" fill="#9ca3af18" strokeWidth={1.5} dot={false} isAnimationActive={false} />
-              <Area type="monotone" dataKey="sad"       stroke="#60a5fa" fill="#60a5fa18" strokeWidth={1.5} dot={false} isAnimationActive={false} />
-              <Area type="monotone" dataKey="surprised" stroke="#fb923c" fill="#fb923c18" strokeWidth={1.5} dot={false} isAnimationActive={false} />
-            </AreaChart>
-          </ResponsiveContainer>
-        ) : (
-          <div className="h-[72px] flex items-center justify-center text-[10px] text-gray-700">
-            検出待ち...
-          </div>
-        )}
-        {/* 凡例 */}
-        <div className="flex gap-3 justify-center mt-1">
-          {[
-            { label: '喜び',  color: '#10b981' },
-            { label: '中立',  color: '#6b7280' },
-            { label: '悲しみ', color: '#3b82f6' },
-            { label: '驚き',  color: '#f97316' },
-          ].map((e) => (
-            <span key={e.label} className="flex items-center gap-1 text-[9px] text-gray-500">
-              <span className="w-2 h-0.5 rounded-full inline-block" style={{ backgroundColor: e.color }} />
-              {e.label}
-            </span>
-          ))}
-        </div>
-      </div>
-
-      {/* 現在値バー（全7感情） */}
-      {latest && (
-        <div className="space-y-1 mt-2">
-          {EMOTION_BARS.map(({ key, label, color }) => {
-            const pct = Math.round((latest[key] as number) * 100)
-            return (
-              <div key={key} className="flex items-center gap-1.5">
-                <span className="text-[9px] text-gray-500 w-7 text-right leading-none">{label}</span>
-                <div className="flex-1 h-1 bg-gray-200 rounded-full overflow-hidden">
-                  <div
-                    className="h-full rounded-full transition-all duration-700"
-                    style={{ width: `${pct}%`, backgroundColor: color }}
-                  />
-                </div>
-                <span className="text-[9px] text-gray-500 w-5 text-right leading-none">{pct}%</span>
-              </div>
-            )
-          })}
-        </div>
-      )}
-    </div>
-  )
-}
-
-// 感情スナップショットから最も強い感情のラベルを返す
-function getDominantEmotionLabel(e: EmotionSnapshot): string {
-  const keys = ['happy', 'sad', 'angry', 'fearful', 'disgusted', 'surprised', 'neutral'] as const
-  const dominant = keys.reduce((a, b) => (e[a] >= e[b] ? a : b))
-  const labels: Record<typeof dominant, string> = {
-    happy: '喜び',
-    sad: '悲しみ',
-    angry: '怒り',
-    fearful: '恐怖',
-    disgusted: '嫌悪',
-    surprised: '驚き',
-    neutral: '中立',
-  }
-  return labels[dominant]
 }
 
 // Feature 5: 5段階評価コンポーネント
