@@ -27,7 +27,7 @@ const Q_TYPES: { value: string; label: string }[] = [
   { value: 'rating', label: '5段階評価' },
   { value: 'nps',    label: 'NPS（0〜10）' },
 ]
-interface TaskItem  { text: string; order: number }
+interface TaskItem  { text: string; order: number; hint?: string }
 interface InterviewPlot {
   title: string
   description: string
@@ -59,6 +59,8 @@ export default function DesignPage() {
   const [stimulusUrl, setStimulusUrl]           = useState('')
   const [stimulusDuration, setStimulusDuration] = useState(5)
   const [tasks, setTasks]                       = useState<TaskItem[]>([{ text: '', order: 1 }, { text: '', order: 2 }])
+  // 詰まった参加者への声かけまでの分数。空欄なら声かけしない
+  const [hintDelayMin, setHintDelayMin]         = useState('')
   const [taskBulkMode, setTaskBulkMode]         = useState(false)
   const [taskBulkText, setTaskBulkText]         = useState('')
 
@@ -120,8 +122,33 @@ export default function DesignPage() {
     }
   }
 
+  /**
+   * まとめ入力のテキスト行に、元のタスクのヒントを引き継ぐ。
+   *
+   * 引き継ぎは「文言が完全に一致するタスクがちょうど1つだけ」のときに限る。
+   *   - 行の位置で引き継ぐと、並べ替えたときに別タスクのヒントが参加者に出る
+   *   - 同じ文言のタスクが複数あると、どちらのヒントか決められない
+   * 決められないときは引き継がない（空欄として見えるので書き直せる）。
+   * 誤ったヒントが参加者に表示されるより、消えているほうが気づける。
+   */
+  function hintFor(text: string): string | undefined {
+    const key = text.trim()
+    const matched = tasks.filter((t) => t.text.trim() === key)
+    return matched.length === 1 ? matched[0].hint : undefined
+  }
+
   async function saveInterview() {
     if (!plot) return
+    // 範囲外のまま送るとサーバー側の英語エラーになり、設計した内容が保存されない
+    if (sessionType === 'usability' && hintDelayMin.trim()) {
+      const m = Number(hintDelayMin)
+      // 整数のみ。フォーム外の保存ボタン（設計ページ）ではブラウザ標準の step 検証が
+      // 効かないため、3画面で受理される値が食い違わないよう JS 側でも弾く
+      if (!Number.isInteger(m) || m < 1 || m > 30) {
+        alert('声かけまでの時間は1〜30分で入力してください（空欄にすると声かけしません）')
+        return
+      }
+    }
     setSaving(true)
     try {
       const res = await fetch('/api/interviews', {
@@ -137,8 +164,19 @@ export default function DesignPage() {
           stimulusDuration: sessionType === 'impression' ? stimulusDuration : undefined,
           tasks:            sessionType === 'usability'
             ? (taskBulkMode
-                ? taskBulkText.split('\n').filter((l) => l.trim()).map((text, i) => ({ text, order: i + 1 }))
-                : tasks.filter((t) => t.text.trim()).map((t, i) => ({ text: t.text, order: i + 1 })))
+                // まとめ入力中に保存された場合も、文言が一致するタスクのヒントは引き継ぐ
+                ? taskBulkText.split('\n').filter((l) => l.trim()).map((text, i) => ({
+                    text,
+                    order: i + 1,
+                    hint: hintFor(text)?.trim() || null,
+                  }))
+                : tasks.filter((t) => t.text.trim()).map((t, i) => ({
+                    text: t.text, order: i + 1, hint: t.hint?.trim() || null,
+                  })))
+            : undefined,
+          // 上の保存前ガードで整数1〜30に確定しているので、そのまま秒に直す
+          hintDelaySec:     sessionType === 'usability' && hintDelayMin.trim()
+            ? Number(hintDelayMin) * 60
             : undefined,
         }),
       })
@@ -400,7 +438,7 @@ export default function DesignPage() {
                         } else {
                           const lines = taskBulkText.split('\n').filter((l) => l.trim())
                           setTasks(lines.length > 0
-                            ? lines.map((text, i) => ({ text, order: i + 1 }))
+                            ? lines.map((text, i) => ({ text, order: i + 1, hint: hintFor(text) }))
                             : [{ text: '', order: 1 }, { text: '', order: 2 }])
                         }
                         setTaskBulkMode(!taskBulkMode)
@@ -422,28 +460,49 @@ export default function DesignPage() {
                       <p className="text-[10px] text-gray-500 mt-1">
                         1行 = 1タスク。空行は無視されます。
                         現在 {taskBulkText.split('\n').filter((l) => l.trim()).length} タスク
+                        <br />
+                        ヒントはここでは編集できません（「1行ずつ編集」に戻すと入力できます）。
+                        文言を書き換えた行は、そのヒントが外れます。
                       </p>
                     </div>
                   ) : (
                     <>
                       <div className="space-y-1.5">
                         {tasks.map((t, i) => (
-                          <div key={i} className="flex gap-2 items-center">
-                            <span className="text-gray-400 text-xs w-4 text-right">{i + 1}</span>
-                            <input value={t.text}
-                              onChange={(e) => {
-                                const next = [...tasks]
-                                next[i] = { ...next[i], text: e.target.value }
-                                setTasks(next)
-                              }}
-                              placeholder={`タスク ${i + 1}`}
-                              className="flex-1 bg-white border border-gray-300 focus:border-gray-900 focus:ring-1 focus:ring-gray-900 focus:outline-none rounded-md px-3 py-2 text-sm text-gray-900 placeholder-gray-500" />
-                            {tasks.length > 1 && (
-                              <button type="button" onClick={() => setTasks(tasks.filter((_, j) => j !== i))}
-                                className="text-gray-300 hover:text-red-600 transition-colors p-1">
-                                <X className="w-3.5 h-3.5" strokeWidth={2} />
-                              </button>
-                            )}
+                          <div key={i} className="space-y-1">
+                            <div className="flex gap-2 items-center">
+                              <span className="text-gray-400 text-xs w-4 text-right">{i + 1}</span>
+                              <input value={t.text}
+                                onChange={(e) => {
+                                  const next = [...tasks]
+                                  next[i] = { ...next[i], text: e.target.value }
+                                  setTasks(next)
+                                }}
+                                maxLength={2000}
+                                placeholder={`タスク ${i + 1}`}
+                                className="flex-1 bg-white border border-gray-300 focus:border-gray-900 focus:ring-1 focus:ring-gray-900 focus:outline-none rounded-md px-3 py-2 text-sm text-gray-900 placeholder-gray-500" />
+                              {tasks.length > 1 && (
+                                <button type="button" onClick={() => setTasks(tasks.filter((_, j) => j !== i))}
+                                  className="text-gray-300 hover:text-red-600 transition-colors p-1">
+                                  <X className="w-3.5 h-3.5" strokeWidth={2} />
+                                </button>
+                              )}
+                            </div>
+                            {/* 詰まったときに見せるヒント。タスク文言の直下に置いて対応関係を明確にする */}
+                            <div className="flex gap-2 items-center">
+                              <span className="w-4 flex-shrink-0" aria-hidden="true" />
+                              <input value={t.hint ?? ''}
+                                onChange={(e) => {
+                                  const next = [...tasks]
+                                  next[i] = { ...next[i], hint: e.target.value }
+                                  setTasks(next)
+                                }}
+                                maxLength={2000}
+                                placeholder="詰まったときのヒント（任意）"
+                                aria-label={`タスク ${i + 1} のヒント`}
+                                className="flex-1 bg-white border border-dashed border-gray-300 focus:border-gray-900 focus:border-solid focus:outline-none rounded-md px-3 py-1.5 text-xs text-gray-700 placeholder-gray-400" />
+                              {tasks.length > 1 && <span className="w-[26px] flex-shrink-0" aria-hidden="true" />}
+                            </div>
                           </div>
                         ))}
                       </div>
@@ -454,6 +513,32 @@ export default function DesignPage() {
                       </button>
                     </>
                   )}
+
+                  <div className="mt-3 bg-gray-50 border border-gray-200 rounded-md p-3">
+                    <label htmlFor="design-hint-delay" className="block text-xs font-medium text-gray-900 mb-1">
+                      詰まった参加者への声かけ
+                    </label>
+                    <p className="text-xs text-gray-600 leading-relaxed mb-2">
+                      指定した時間タスクが進まないと、「うまくいかないときは次に進めます」という案内を出します。
+                      上のヒントを書いておくと、そこから見られます。
+                      <br />
+                      <span className="text-gray-500">空欄にすると声かけは出ません。あとから編集画面で変更できます。</span>
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <input
+                        id="design-hint-delay"
+                        type="number"
+                        min={1}
+                        max={30}
+                        step={1}
+                        value={hintDelayMin}
+                        onChange={(e) => setHintDelayMin(e.target.value)}
+                        placeholder="3"
+                        className="w-20 bg-white border border-gray-300 focus:border-gray-900 focus:outline-none rounded-md px-2.5 py-1.5 text-sm"
+                      />
+                      <span className="text-xs text-gray-600">分後に声かけする（1〜30分）</span>
+                    </div>
+                  </div>
                 </div>
               )}
 

@@ -21,7 +21,7 @@ interface QuestionItem {
   type: 'open' | 'rating' | 'nps'
 }
 
-interface TaskItem { text: string }
+interface TaskItem { text: string; hint?: string }
 
 interface Props {
   onClose: () => void
@@ -56,6 +56,8 @@ export default function CreateInterviewModal({ onClose, onCreated }: Props) {
   const [stimulusDuration, setStimulusDuration] = useState(5)
   const [usabilityMode, setUsabilityMode] = useState<'prototype' | 'service'>('prototype')
   const [tasks, setTasks] = useState<TaskItem[]>([{ text: '' }, { text: '' }])
+  // 詰まった参加者への声かけまでの分数。空欄なら声かけしない
+  const [hintDelayMin, setHintDelayMin] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -74,6 +76,16 @@ export default function CreateInterviewModal({ onClose, onCreated }: Props) {
     if (sessionType === 'impression' && !stimulusUrl.trim()) {
       setError('印象テストには画像URLが必要です'); return
     }
+    // 範囲外のまま送るとサーバー側の英語エラーになり、入力内容が保存されない
+    if (sessionType === 'usability' && hintDelayMin.trim()) {
+      const m = Number(hintDelayMin)
+      // 整数のみ。フォーム外の保存ボタン（設計ページ）ではブラウザ標準の step 検証が
+      // 効かないため、3画面で受理される値が食い違わないよう JS 側でも弾く
+      if (!Number.isInteger(m) || m < 1 || m > 30) {
+        setError('声かけまでの時間は1〜30分で入力してください（空欄にすると声かけしません）')
+        return
+      }
+    }
     setLoading(true)
     try {
       const res = await fetch('/api/interviews', {
@@ -87,7 +99,11 @@ export default function CreateInterviewModal({ onClose, onCreated }: Props) {
           stimulusUrl:      (sessionType === 'impression' || sessionType === 'usability') ? (stimulusUrl || undefined) : undefined,
           stimulusDuration: sessionType === 'impression' ? stimulusDuration : undefined,
           tasks:            sessionType === 'usability'
-            ? tasks.filter((t) => t.text.trim()).map((t, i) => ({ text: t.text, order: i + 1 }))
+            ? tasks.filter((t) => t.text.trim()).map((t, i) => ({ text: t.text, order: i + 1, hint: t.hint?.trim() || null }))
+            : undefined,
+          // 上の保存前ガードで整数1〜30に確定しているので、そのまま秒に直す
+          hintDelaySec:     sessionType === 'usability' && hintDelayMin.trim()
+            ? Number(hintDelayMin) * 60
             : undefined,
           questions: sessionType === 'interview'
             ? (autoGenerate ? [] : questions.filter((q) => q.text.trim()).map((q) => ({ text: q.text, type: q.type })))
@@ -124,7 +140,9 @@ export default function CreateInterviewModal({ onClose, onCreated }: Props) {
 
   function updateTask(i: number, text: string) {
     const next = [...tasks]
-    next[i] = { text }
+    // 既存のフィールド（ヒント）を保つ。`{ text }` に置き換えると、
+    // ヒントを書いたあとにタスク文言を直しただけでヒントが消える
+    next[i] = { ...next[i], text }
     setTasks(next)
   }
 
@@ -265,21 +283,37 @@ export default function CreateInterviewModal({ onClose, onCreated }: Props) {
               <label className="block text-xs font-medium text-gray-700 mb-2">タスクリスト</label>
               <div className="space-y-1.5">
                 {tasks.map((t, i) => (
-                  <div key={i} className="flex gap-2 items-center">
-                    <span className="text-gray-400 text-xs w-5 text-right">{i + 1}.</span>
-                    <input
-                      value={t.text}
-                      onChange={(e) => updateTask(i, e.target.value)}
-                      placeholder={`タスク ${i + 1}（例：ログインしてみてください）`}
-                      className={inputClass}
-                    />
-                    {tasks.length > 1 && (
-                      <button type="button" onClick={() => setTasks(tasks.filter((_, j) => j !== i))}
-                        aria-label={`タスク${i + 1}を削除`}
-                        className="text-gray-300 hover:text-red-600 transition-colors p-1">
-                        <X className="w-3.5 h-3.5" strokeWidth={2} />
-                      </button>
-                    )}
+                  <div key={i} className="space-y-1">
+                    <div className="flex gap-2 items-center">
+                      <span className="text-gray-400 text-xs w-5 text-right">{i + 1}.</span>
+                      <input
+                        value={t.text}
+                        onChange={(e) => updateTask(i, e.target.value)}
+                        maxLength={2000}
+                        placeholder={`タスク ${i + 1}（例：ログインしてみてください）`}
+                        className={inputClass}
+                      />
+                      {tasks.length > 1 && (
+                        <button type="button" onClick={() => setTasks(tasks.filter((_, j) => j !== i))}
+                          aria-label={`タスク${i + 1}を削除`}
+                          className="text-gray-300 hover:text-red-600 transition-colors p-1">
+                          <X className="w-3.5 h-3.5" strokeWidth={2} />
+                        </button>
+                      )}
+                    </div>
+                    {/* 詰まったときに見せるヒント。タスク文言のすぐ下に置いて対応関係を明確にする */}
+                    <div className="flex gap-2 items-center">
+                      <span className="w-5 flex-shrink-0" aria-hidden="true" />
+                      <input
+                        value={t.hint ?? ''}
+                        onChange={(e) => setTasks(tasks.map((x, j) => (j === i ? { ...x, hint: e.target.value } : x)))}
+                        maxLength={2000}
+                        placeholder="詰まったときのヒント（任意）"
+                        aria-label={`タスク ${i + 1} のヒント`}
+                        className="flex-1 border border-dashed border-gray-300 focus:border-gray-900 focus:border-solid rounded-md px-2.5 py-1.5 text-xs text-gray-700 placeholder-gray-400 focus:outline-none"
+                      />
+                      {tasks.length > 1 && <span className="w-[26px] flex-shrink-0" aria-hidden="true" />}
+                    </div>
                   </div>
                 ))}
               </div>
@@ -288,6 +322,32 @@ export default function CreateInterviewModal({ onClose, onCreated }: Props) {
                 <Plus className="w-3 h-3" strokeWidth={2} />
                 タスクを追加
               </button>
+
+              <div className="mt-3 bg-gray-50 border border-gray-200 rounded-md p-3">
+                <label htmlFor="create-hint-delay" className="block text-xs font-medium text-gray-900 mb-1">
+                  詰まった参加者への声かけ
+                </label>
+                <p className="text-xs text-gray-600 leading-relaxed mb-2">
+                  指定した時間タスクが進まないと、「うまくいかないときは次に進めます」という案内を出します。
+                  上のヒントを書いておくと、そこから見られます。
+                  <br />
+                  <span className="text-gray-500">空欄にすると声かけは出ません。あとから編集画面で変更できます。</span>
+                </p>
+                <div className="flex items-center gap-2">
+                  <input
+                    id="create-hint-delay"
+                    type="number"
+                    min={1}
+                    max={30}
+                    step={1}
+                    value={hintDelayMin}
+                    onChange={(e) => setHintDelayMin(e.target.value)}
+                    placeholder="3"
+                    className="w-20 border border-gray-300 focus:border-gray-900 rounded-md px-2.5 py-1.5 text-sm focus:outline-none"
+                  />
+                  <span className="text-xs text-gray-600">分後に声かけする（1〜30分）</span>
+                </div>
+              </div>
             </div>
           )}
 

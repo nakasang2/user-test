@@ -91,7 +91,9 @@ export default function EditInterviewModal({
     // （タイトル・タスク・質問など）も一緒に保存されず消えてしまう。ここで止める。
     if (isUsability && hintDelayMin.trim()) {
       const m = Number(hintDelayMin)
-      if (!Number.isFinite(m) || m < 1 || m > 30) {
+      // 整数のみ。フォーム外の保存ボタン（設計ページ）ではブラウザ標準の step 検証が
+      // 効かないため、3画面で受理される値が食い違わないよう JS 側でも弾く
+      if (!Number.isInteger(m) || m < 1 || m > 30) {
         setError('声かけまでの時間は1〜30分で入力してください（空欄にすると声かけしません）')
         return
       }
@@ -124,10 +126,12 @@ export default function EditInterviewModal({
                   .filter((t) => t.text.trim())
                   .map((t) => ({ id: t.id, text: t.text.trim(), hint: t.hint?.trim() || null })),
                 seqEnabled,
-                // 空欄・0以下は「声かけしない」として null で送る
+                // 空欄は「声かけしない」として null で送る。
+                // 判定は上の保存前ガードと同じ条件にする（片方だけ緩いと、
+                // ガードを触ったときに範囲外の値が通る余地が残る）
                 hintDelaySec: (() => {
                   const m = Number(hintDelayMin)
-                  return hintDelayMin.trim() && Number.isFinite(m) && m > 0 ? Math.round(m * 60) : null
+                  return hintDelayMin.trim() && Number.isInteger(m) && m >= 1 && m <= 30 ? m * 60 : null
                 })(),
               }
             : {}),
@@ -229,6 +233,7 @@ export default function EditInterviewModal({
                   type="number"
                   min={1}
                   max={30}
+                  step={1}
                   value={hintDelayMin}
                   onChange={(e) => setHintDelayMin(e.target.value)}
                   placeholder="3"
@@ -401,6 +406,7 @@ function RowEditor({
             <input
               value={row.text}
               onChange={(e) => setRows(rows.map((r, j) => (j === i ? { ...r, text: e.target.value } : r)))}
+              maxLength={2000}
               placeholder={placeholder}
               aria-label={`${label} ${i + 1}`}
               className="flex-1 border border-gray-300 focus:border-gray-900 rounded-md px-2.5 py-1.5 text-sm focus:outline-none"
@@ -433,6 +439,7 @@ function RowEditor({
               <input
                 value={row.hint ?? ''}
                 onChange={(e) => setRows(rows.map((r, j) => (j === i ? { ...r, hint: e.target.value } : r)))}
+                maxLength={2000}
                 placeholder="詰まったときのヒント（任意）例: 画面右上のメニューから探せます"
                 aria-label={`タスク ${i + 1} のヒント`}
                 className="flex-1 border border-dashed border-gray-300 focus:border-gray-900 focus:border-solid rounded-md px-2.5 py-1.5 text-xs text-gray-700 placeholder-gray-400 focus:outline-none"
