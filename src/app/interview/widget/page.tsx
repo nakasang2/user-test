@@ -6,7 +6,9 @@ import { Monitor, Check, X, AlertTriangle, CheckCircle2, Globe, Volume2 } from '
 import SeqScale from '@/components/SeqScale'
 import StuckHelp from '@/components/StuckHelp'
 import TaskRecovery, { TaskRecoveryActions } from '@/components/TaskRecovery'
+import ThinkAloudNudge from '@/components/ThinkAloudNudge'
 import { blockedAfter, needsRecovery } from '@/lib/task-flow'
+import { useSilenceNudge } from '@/hooks/useSilenceNudge'
 
 interface Task {
   text: string
@@ -60,6 +62,12 @@ function WidgetContent() {
   const [recoveryAtIdx, setRecoveryAtIdx]       = useState<number | null>(
     searchParams.get('recovery') === '1' ? initialIdx : null,
   )
+  // 思考発話の促し。沈黙検知で出し、しばらくして自動で消す（状態ではなく合図なので残さない）
+  const [thinkAloudNudge, setThinkAloudNudge]   = useState(false)
+  // 沈黙検知用のマイクストリーム（ref だと effect を張り直せないので state で持つ）
+  const [micStream, setMicStream]              = useState<MediaStream | null>(null)
+  // メイン画面が読み上げ中か（tts_state で届く）。読み上げ中は沈黙検知を止める
+  const [ttsSpeaking, setTtsSpeaking]          = useState(false)
   // ヒントを見たタスク番号（0始まり）。結果送信時に添えて集計で自力達成と分ける
   const usedHintIdxRef                          = useRef<Set<number>>(new Set())
 
@@ -89,6 +97,8 @@ function WidgetContent() {
           // 戻ったときだけ小窓が立て直し画面を復活させ、押してもメインが受け取らない
           // （無反応のうえ小窓とメインで現在タスクがズレる）。
           setRecoveryAtIdx((cur) => (cur === next ? cur : null))
+        } else if (type === 'tts_state') {
+          setTtsSpeaking(e.data.speaking === true)
         } else if (type === 'prereq_recovery' && typeof e.data.index === 'number') {
           // メイン画面側で前提タスクの断念が記録された（フォールバック操作時）。
           // 小窓でも同じ立て直し画面を出し、操作の起点が割れないようにする
@@ -125,6 +135,8 @@ function WidgetContent() {
           webcamVideoRef.current.srcObject = stream
         }
         setCameraError(false)
+        // 沈黙検知のフックは ref の更新では張り直せないので state にも持つ
+        setMicStream(stream)
       })
       .catch(() => { setCameraError(true) })
   }
@@ -427,6 +439,28 @@ function WidgetContent() {
   // 前提タスクの立て直し待ち。この間は達成/できなかったの操作を出さない
   const recoveryPending = recoveryAtIdx === currentTaskIndex && needsRecovery(tasks, currentTaskIndex)
 
+  // 思考発話の促し。黙って操作している間だけ出す。
+  // 他の案内（詰まったときの声かけ・立て直し手順・SEQ）が出ているときは促さない
+  // ＝画面に2枚重ねない。読んでほしいものが増えるほど、どれも読まれなくなる。
+  // ※フック規則のため、早期 return より前に置くこと。
+  useSilenceNudge({
+    stream: micStream,
+    // 読み上げ中は促さない（メインから tts_state で届く）。マイクの echoCancellation で
+    // 読み上げ音声はマイク信号から除去されるため、入れないと読み上げ中も沈黙として数え、
+    // 促しが読み上げを途中で打ち切ってしまう。false に戻った時点で計測を張り直す
+    // ＝「読み上げが終わってから」20秒を数え始める。
+    active: widgetPhase === 'task' && readyForTask && !ttsSpeaking
+      && !stuckOnTask && !recoveryPending && !awaitingSeq,
+    resetKey: currentTaskIndex,
+    onNudge: () => {
+      setThinkAloudNudge(true)
+      // 声はメイン画面側で鳴らす（TTS の持ち主がそちら）
+      channelRef.current?.postMessage({ type: 'speak_nudge' })
+      // 合図なので自動で引っ込める。押して消させると操作を1つ増やすことになる
+      setTimeout(() => setThinkAloudNudge(false), 9000)
+    },
+  })
+
   // ヒントを開いたら、その場でメイン側へ伝える。
   // 小窓の ref だけに持つと、小窓を閉じて開き直したときに記録が消え、
   // 条件付き成功が自力成功として集計されてしまう（数字が良い方向に狂う）。
@@ -529,6 +563,8 @@ function WidgetContent() {
                 </div>
                 <p className="text-sm text-gray-900 leading-relaxed">{currentTask.text}</p>
               </div>
+              {/* 思考発話の促し（沈黙が続いたときだけ・自動で消える） */}
+              {thinkAloudNudge && <ThinkAloudNudge compact />}
               {/* 前提タスクの立て直し案内。手順が長くても操作ボタンが窓の外へ
                   押し出されないよう、ボタンは下の sticky 領域に置く */}
               {recoveryPending && (
