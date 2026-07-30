@@ -27,6 +27,8 @@ import {
 import SeqScale from '@/components/SeqScale'
 import StuckHelp from '@/components/StuckHelp'
 import TaskRecovery, { TaskRecoveryActions } from '@/components/TaskRecovery'
+import ThinkAloudNudge from '@/components/ThinkAloudNudge'
+import { useSilenceNudge } from '@/hooks/useSilenceNudge'
 import { elapsedSec, nowMs, cacheBustToken } from '@/lib/elapsed'
 import { blockedAfter, needsRecovery } from '@/lib/task-flow'
 
@@ -123,6 +125,8 @@ export default function InterviewRoom({
   // 実感情検出フック
   const { status: emotionStatus, lastEmotion, faceStatus, startDetection, stopDetection, getSnapshots } = useEmotionDetection(5000)
   const [cameraReady, setCameraReady] = useState(false)
+  // 沈黙検知（思考発話の促し）用。ref だと effect を張り直せないので state で持つ
+  const [micStream, setMicStream] = useState<MediaStream | null>(null)
   // 途中離脱でも残るよう、感情スナップショットを検出のたびに逐次サーバー保存する（失敗は無視）。
   // 最終的には submitResults→/process が全件で上書きする。全件は useEmotionDetection 側の
   // getSnapshots() が保持しているので、ここで履歴を持つ必要はない
@@ -314,6 +318,8 @@ export default function InterviewRoom({
       const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true })
       streamRef.current = stream
       setCameraError(false)
+      // 沈黙検知のフックは ref の更新では張り直せないので state にも持つ
+      setMicStream(stream)
       if (videoRef.current) {
         videoRef.current.srcObject = stream
         // ビデオが再生可能になったら感情検出を開始できる状態にする
@@ -346,6 +352,15 @@ export default function InterviewRoom({
     const version = ++speakVersionRef.current
 
     setIsSpeaking(true)
+    // 小窓にも「いま読み上げている」を伝える。小窓は沈黙検知を持っているが、
+    // マイクの echoCancellation で自分の読み上げ音声は除去されるため、
+    // 伝えないと読み上げ中も沈黙として数えて促しを割り込ませてしまう
+    //（促しの speak が読み上げをキャンセルし、タスクの後半が聞けなくなる）。
+    widgetChannelRef.current?.postMessage({ type: 'tts_state', speaking: true })
+    const endSpeaking = () => {
+      setIsSpeaking(false)
+      widgetChannelRef.current?.postMessage({ type: 'tts_state', speaking: false })
+    }
 
     // 文字起こしログへ即時追加（音声再生前に表示）
     if (opts?.log !== false) {
@@ -376,25 +391,31 @@ export default function InterviewRoom({
           URL.revokeObjectURL(url)
           currentAudioRef.current = null
           if (version !== speakVersionRef.current) return
-          setIsSpeaking(false)
+          endSpeaking()
           onEnd?.()
         }
         audio.onerror = () => {
           URL.revokeObjectURL(url)
           currentAudioRef.current = null
           if (version !== speakVersionRef.current) return
-          setIsSpeaking(false)
+          endSpeaking()
           onEnd?.()
         }
         audio.play().catch(() => {
-          setIsSpeaking(false)
+          // 後続の speak に上書きされた場合はここへ来ても何もしない。
+          // speak() は先頭で pause() するので、割り込まれた古い再生は
+          // AbortError で reject する。照合せずに endSpeaking() すると、
+          // 新しい読み上げの最中に「読み上げ終了」を送ってしまい、
+          // 沈黙検知が復活して促しがその読み上げを打ち切る（偽の失敗通知も出る）。
+          if (version !== speakVersionRef.current) return
+          endSpeaking()
           showNotice(failNotice)
-          if (version === speakVersionRef.current) onEnd?.()
+          onEnd?.()
         })
       })
       .catch(() => {
         if (version !== speakVersionRef.current) return
-        setIsSpeaking(false)
+        endSpeaking()
         track('interview_tts_failed', { sessionId })
         showNotice(failNotice)
         onEnd?.() // TTS 失敗時もインタビューは続行
@@ -406,10 +427,17 @@ export default function InterviewRoom({
   // 参加者は別タブでサービスを操作しているので、読むたびに小窓へ視線を戻すことになり、
   // その動作自体がテストのノイズになる。テキスト表示は残したまま音声を足す
   // （音声だけにすると記憶に頼らせることになる）。
+  // 最初の読み上げにだけ思考発話のお願いを添える（毎回言うと聞き流される）
+  const thinkAloudAskedRef = useRef(false)
   const speakTask = useCallback((idx: number) => {
     const t = tasks?.[idx]
     if (!t) return
-    speak(`タスク${idx + 1}。${t.text}`, undefined, {
+    let prefix = ''
+    if (!thinkAloudAskedRef.current) {
+      thinkAloudAskedRef.current = true
+      prefix = '操作しながら、考えていることを声に出してください。それでは、'
+    }
+    speak(`${prefix}タスク${idx + 1}。${t.text}`, undefined, {
       // 文字起こしには残さない（結果記録側にタスク文言があるため二重になる）
       log: false,
       failNotice: '音声を再生できませんでした。画面のタスク文をご覧ください。',
@@ -419,6 +447,17 @@ export default function InterviewRoom({
   // 読み上げ済みの提示回。speak（＝showNotice）の識別子が変わって effect が
   // 再実行されても、同じ提示を二度読まないようにする
   const spokenTickRef = useRef(0)
+
+  // ── 思考発話（think-aloud）の促し ───────────────────────
+  // 黙って操作が続いたら「いま何を考えていますか？」と声をかける。
+  // 声かけは記録に残す（促されて話したのか、自発的に話したのかで発言の重みが違う）。
+  const speakNudge = useCallback(() => {
+    speak('いま何を考えていますか？ 思っていることを、そのまま声に出してみてください。', undefined, {
+      failNotice: '音声を再生できませんでした。画面の案内をご覧ください。',
+    })
+  }, [speak])
+  // 促しの表示（メイン画面で操作している場合）。合図なので自動で引っ込める
+  const [thinkAloudNudge, setThinkAloudNudge] = useState(false)
 
   // タスクが表示された時点（着手できる時点）と、タスクが切り替わるたびに1回読む。
   // taskStartTick は markFirstTaskStart と gotoTask の両方で増えるので、
@@ -431,6 +470,32 @@ export default function InterviewRoom({
     spokenTickRef.current = taskStartTick
     speakTask(currentTaskIndexRef.current)
   }, [taskStartTick, phase, interviewType, speakTask])
+
+  // 沈黙検知はメイン画面で操作している場合だけ動かす（prototype モードと、
+  // 小窓を開けなかったフォールバック）。小窓が生きているときは小窓側が担当する
+  // ＝両方で動かすと同じ沈黙に二重で声をかけることになる。
+  useSilenceNudge({
+    stream: micStream,
+    active:
+      phase === 'task' &&
+      interviewType === 'usability' &&
+      (usabilityMode !== 'service' || widgetBlocked) &&
+      taskStartTick > 0 &&                        // 着手前（準備中）は促さない
+      // 読み上げ中は促さない。マイクの echoCancellation で自分の読み上げ音声は
+      // 除去されるため、そのままだと読み上げ中も沈黙として数え、20秒目の促しが
+      // 読み上げをキャンセルしてタスクの後半が聞けなくなる。
+      // false に戻った時点で検知を張り直すので、計測は「読み上げが終わってから」始まる。
+      !isSpeaking &&
+      !stuckOnTask &&
+      !awaitingSeq &&
+      recoveryAtIdx !== currentTaskIndex,         // 立て直しの案内中は促さない
+    resetKey: currentTaskIndex,
+    onNudge: () => {
+      setThinkAloudNudge(true)
+      speakNudge()
+      setTimeout(() => setThinkAloudNudge(false), 9000)
+    },
+  })
 
   // ── カメラ初期化 ─────────────────────────────────────
   useEffect(() => {
@@ -1012,6 +1077,10 @@ export default function InterviewRoom({
         else if (e.data.type === 'speak_task' && phaseRef.current === 'task') {
           speakTask(currentTaskIndexRef.current)
         }
+        // 小窓が沈黙を検知した。声はこちらで鳴らす（同じ理由でタスク中のみ）
+        else if (e.data.type === 'speak_nudge' && phaseRef.current === 'task') {
+          speakNudge()
+        }
         // 小窓でヒントを開いた。小窓を閉じて開き直しても記録が消えないよう、メイン側で保持する
         else if (e.data.type === 'hint_used' && typeof e.data.index === 'number') {
           usedHintOrdersRef.current.add(e.data.index + 1)
@@ -1092,6 +1161,10 @@ export default function InterviewRoom({
     currentAudioRef.current?.pause()
     currentAudioRef.current = null
     setIsSpeaking(false)
+    // 小窓へも読み上げ終了を伝える。ここへ来るのは事後インタビュー（小窓は
+    // 閉じている）だけなので今は無害だが、送らないままだと将来インタビュー中に
+    // 小窓を使う変更で ttsSpeaking が true のまま固まり、沈黙検知が復活しない
+    widgetChannelRef.current?.postMessage({ type: 'tts_state', speaking: false })
     setLiveText('')
     moveToNextPlannedQuestion()
   }
@@ -1536,7 +1609,7 @@ export default function InterviewRoom({
                       {usabilityMode === 'prototype' ? (
                         <>
                           <li className="flex gap-2.5"><span className="text-gray-400 flex-shrink-0 font-medium">2.</span>画面にプロトタイプが表示されます。タスクに沿って操作してください</li>
-                          <li className="flex gap-2.5"><span className="text-gray-400 flex-shrink-0 font-medium">3.</span>気づいたこと・感じたことを声に出しながら操作してください（シンクアラウド）</li>
+                          <li className="flex gap-2.5"><span className="text-gray-400 flex-shrink-0 font-medium">3.</span>気づいたこと・感じたことを声に出しながら操作してください（シンクアラウド）。静かなときはこちらから「何を考えていますか？」とお声がけします</li>
                           <li className="flex gap-2.5"><span className="text-gray-400 flex-shrink-0 font-medium">4.</span>操作が終わったら「達成して質問へ」（できなければ「できなかった」）を押してください。その後、簡単な質問があります</li>
                         </>
                       ) : (
@@ -1550,7 +1623,7 @@ export default function InterviewRoom({
                           <li className="flex gap-2.5"><span className="text-gray-400 flex-shrink-0 font-medium">4.</span>
                             <span>小窓の <span className="inline-flex items-center gap-1 text-red-600 font-medium"><Monitor className="w-3 h-3 inline" strokeWidth={2} />画面録画を開始する</span> を<strong className="text-gray-900">必ず押し</strong>、ダイアログで<strong className="text-gray-900">「画面全体」</strong>を選んで共有してから操作を始めてください</span>
                           </li>
-                          <li className="flex gap-2.5"><span className="text-gray-400 flex-shrink-0 font-medium">5.</span>タスクに沿ってサービスを操作しながら、気づいたこと・感じたことを声に出してください（シンクアラウド）</li>
+                          <li className="flex gap-2.5"><span className="text-gray-400 flex-shrink-0 font-medium">5.</span>タスクに沿ってサービスを操作しながら、気づいたこと・感じたことを声に出してください（シンクアラウド）。静かなときはこちらから「何を考えていますか？」とお声がけします</li>
                           <li className="flex gap-2.5"><span className="text-gray-400 flex-shrink-0 font-medium">6.</span>操作が終わったら小窓の「達成して質問へ」（できなければ「できなかった」）を押してください</li>
                         </>
                       )}
@@ -1650,6 +1723,12 @@ export default function InterviewRoom({
                       もう一度聞く
                     </button>
                   </div>
+                )}
+
+                {/* 思考発話の促し（沈黙検知・自動で消える）。小窓が生きているときは
+                    小窓側に出るので、ここでは出さない（同じ案内を2箇所に出さない） */}
+                {thinkAloudNudge && !(usabilityMode === 'service' && !widgetBlocked) && (
+                  <ThinkAloudNudge />
                 )}
 
                 {/* タスク文言と同じ条件で出す。service モードで小窓が生きているときは
