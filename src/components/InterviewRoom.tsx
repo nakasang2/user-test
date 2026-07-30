@@ -22,6 +22,7 @@ import {
   AlertCircle,
   AlertTriangle,
   Copy,
+  Volume2,
 } from 'lucide-react'
 import SeqScale from '@/components/SeqScale'
 import StuckHelp from '@/components/StuckHelp'
@@ -136,6 +137,10 @@ export default function InterviewRoom({
   }, [lastEmotion, sessionId, participantToken])
 
   const [phase, setPhase] = useState<Phase>('guide') // Feature 6: 初期フェーズを guide に
+  // BroadcastChannel のハンドラは startInterview 時のクロージャを保持するため、
+  // そこから現在のフェーズを見るには ref が要る（state だけだと陳腐化する）
+  const phaseRef = useRef<Phase>('guide')
+  useEffect(() => { phaseRef.current = phase }, [phase])
   const [displayedQuestion, setDisplayedQuestion] = useState('')
   const [isFollowUp, setIsFollowUp] = useState(false)
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0)
@@ -264,6 +269,7 @@ export default function InterviewRoom({
     const timer = setTimeout(() => setStuckOnTask(true), hintDelaySec * 1000)
     return () => clearTimeout(timer)
   }, [hintDelaySec, taskStartTick, phase])
+
   const [stimulusCountdown, setStimulusCountdown] = useState(0)
   const [stimulusError, setStimulusError] = useState(false)
   const stimulusStartedRef = useRef(false)   // カウント開始の二重起動防止
@@ -319,8 +325,18 @@ export default function InterviewRoom({
   }, [])
 
   // ── TTS（OpenAI tts-1）────────────────────────────────
-  const speak = useCallback((text: string, onEnd?: () => void) => {
+  const speak = useCallback((
+    text: string,
+    onEnd?: () => void,
+    // log: 文字起こしに Interviewer の発言として残すか（既定は残す）。
+    //   タスクの読み上げは残さない — タスク文言は結果記録側に既にあり、
+    //   Interviewer の発言として二重に入れると、AI の回答抽出がタスク文を
+    //   質問として扱いうる。
+    // failNotice: 再生に失敗したときの案内（読み上げ対象によって文言を変える）
+    opts?: { log?: boolean; failNotice?: string },
+  ) => {
     if (typeof window === 'undefined') return
+    const failNotice = opts?.failNotice ?? '音声の再生に失敗しました。画面の質問テキストをご覧ください。'
 
     // 再生中の音声をキャンセル
     if (currentAudioRef.current) {
@@ -332,13 +348,15 @@ export default function InterviewRoom({
     setIsSpeaking(true)
 
     // 文字起こしログへ即時追加（音声再生前に表示）
-    const entry: TranscriptEntry = {
-      speaker: 'Interviewer',
-      text,
-      start: elapsedSec(startTimeRef.current),
+    if (opts?.log !== false) {
+      const entry: TranscriptEntry = {
+        speaker: 'Interviewer',
+        text,
+        start: elapsedSec(startTimeRef.current),
+      }
+      transcriptRef.current = [...transcriptRef.current, entry]
+      setTranscript([...transcriptRef.current])
     }
-    transcriptRef.current = [...transcriptRef.current, entry]
-    setTranscript([...transcriptRef.current])
 
     fetch('/api/tts', {
       method: 'POST',
@@ -370,7 +388,7 @@ export default function InterviewRoom({
         }
         audio.play().catch(() => {
           setIsSpeaking(false)
-          showNotice('音声の再生に失敗しました。画面の質問テキストをご覧ください。')
+          showNotice(failNotice)
           if (version === speakVersionRef.current) onEnd?.()
         })
       })
@@ -378,10 +396,41 @@ export default function InterviewRoom({
         if (version !== speakVersionRef.current) return
         setIsSpeaking(false)
         track('interview_tts_failed', { sessionId })
-        showNotice('音声の再生に失敗しました。画面の質問テキストをご覧ください。')
+        showNotice(failNotice)
         onEnd?.() // TTS 失敗時もインタビューは続行
       })
   }, [showNotice, sessionId])
+
+  // ── タスクの読み上げ ────────────────────────────────
+  // 事後インタビューの質問は読み上げるのに、タスクだけ無音だった。service モードの
+  // 参加者は別タブでサービスを操作しているので、読むたびに小窓へ視線を戻すことになり、
+  // その動作自体がテストのノイズになる。テキスト表示は残したまま音声を足す
+  // （音声だけにすると記憶に頼らせることになる）。
+  const speakTask = useCallback((idx: number) => {
+    const t = tasks?.[idx]
+    if (!t) return
+    speak(`タスク${idx + 1}。${t.text}`, undefined, {
+      // 文字起こしには残さない（結果記録側にタスク文言があるため二重になる）
+      log: false,
+      failNotice: '音声を再生できませんでした。画面のタスク文をご覧ください。',
+    })
+  }, [tasks, speak])
+
+  // 読み上げ済みの提示回。speak（＝showNotice）の識別子が変わって effect が
+  // 再実行されても、同じ提示を二度読まないようにする
+  const spokenTickRef = useRef(0)
+
+  // タスクが表示された時点（着手できる時点）と、タスクが切り替わるたびに1回読む。
+  // taskStartTick は markFirstTaskStart と gotoTask の両方で増えるので、
+  // 「今のタスクが提示された瞬間」の合図としてそのまま使える。
+  useEffect(() => {
+    if (interviewType !== 'usability') return
+    if (taskStartTick === 0) return   // まだ提示されていない
+    if (phase !== 'task') return      // タスク中以外では読まない
+    if (spokenTickRef.current === taskStartTick) return
+    spokenTickRef.current = taskStartTick
+    speakTask(currentTaskIndexRef.current)
+  }, [taskStartTick, phase, interviewType, speakTask])
 
   // ── カメラ初期化 ─────────────────────────────────────
   useEffect(() => {
@@ -956,6 +1005,13 @@ export default function InterviewRoom({
         // 前提タスクの立て直し: 小窓での選択をメイン側の記録に反映する
         else if (e.data.type === 'prereq_recovered') proceedAfterRecovery()
         else if (e.data.type === 'prereq_failed') skipBlockedTasks()
+        // 小窓の「もう一度聞く」。音声はこちら（speak の持ち主）で鳴らす。
+        // タスク中以外では鳴らさない: speak() は再生中の音声をキャンセルするため、
+        // 事後インタビューの質問を途中で切ると、その onEnd（回答の聞き取り開始）が
+        // 失われて進行が止まる
+        else if (e.data.type === 'speak_task' && phaseRef.current === 'task') {
+          speakTask(currentTaskIndexRef.current)
+        }
         // 小窓でヒントを開いた。小窓を閉じて開き直しても記録が消えないよう、メイン側で保持する
         else if (e.data.type === 'hint_used' && typeof e.data.index === 'number') {
           usedHintOrdersRef.current.add(e.data.index + 1)
@@ -1584,6 +1640,15 @@ export default function InterviewRoom({
                     <p className="text-sm text-gray-900 font-medium leading-relaxed">
                       {tasks[currentTaskIndex]?.text}
                     </p>
+                    {/* 読み上げの聞き直し。自動再生が止められた場合の再試行にもなる */}
+                    <button
+                      type="button"
+                      onClick={() => speakTask(currentTaskIndex)}
+                      className="mt-1.5 inline-flex items-center gap-1 text-[11px] text-gray-500 hover:text-gray-900 transition-colors"
+                    >
+                      <Volume2 className="w-3.5 h-3.5" strokeWidth={2} />
+                      もう一度聞く
+                    </button>
                   </div>
                 )}
 

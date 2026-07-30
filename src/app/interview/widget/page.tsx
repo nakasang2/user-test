@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useRef, useMemo, Suspense } from 'react'
 import { useSearchParams } from 'next/navigation'
-import { Monitor, Check, X, AlertTriangle, CheckCircle2, Globe } from 'lucide-react'
+import { Monitor, Check, X, AlertTriangle, CheckCircle2, Globe, Volume2 } from 'lucide-react'
 import SeqScale from '@/components/SeqScale'
 import StuckHelp from '@/components/StuckHelp'
 import TaskRecovery, { TaskRecoveryActions } from '@/components/TaskRecovery'
@@ -514,7 +514,19 @@ function WidgetContent() {
           currentTask ? (
             <div className="space-y-2">
               <div className="bg-gray-50 border border-gray-200 rounded-lg p-3">
-                <p className="text-[10px] text-gray-500 mb-1.5 uppercase tracking-wide font-medium">現在のタスク</p>
+                <div className="flex items-start justify-between gap-2 mb-1.5">
+                  <p className="text-[10px] text-gray-500 uppercase tracking-wide font-medium">現在のタスク</p>
+                  {/* 読み上げの聞き直し。音声はメイン画面側で鳴らす（TTS の持ち主がそちらなので、
+                      小窓を開き直しても再生が二重にならない）。自動再生が止められた場合の再試行にもなる */}
+                  <button
+                    type="button"
+                    onClick={() => channelRef.current?.postMessage({ type: 'speak_task' })}
+                    className="inline-flex items-center gap-1 text-[10px] text-gray-500 hover:text-gray-900 transition-colors flex-shrink-0"
+                  >
+                    <Volume2 className="w-3 h-3" strokeWidth={2} />
+                    もう一度聞く
+                  </button>
+                </div>
                 <p className="text-sm text-gray-900 leading-relaxed">{currentTask.text}</p>
               </div>
               {/* 前提タスクの立て直し案内。手順が長くても操作ボタンが窓の外へ
