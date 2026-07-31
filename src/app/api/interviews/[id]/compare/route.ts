@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { generateCommonInsights } from '@/lib/ai'
-import { requireAuth, handleApiError } from '@/lib/api-auth'
+import { requireAuth, getRole, handleApiError } from '@/lib/api-auth'
 
 export async function GET(req: NextRequest, props: { params: Promise<{ id: string }> }) {
   try {
-  const { orgId } = await requireAuth()
+  const { userId, orgId } = await requireAuth()
   const { id } = await props.params
 
   // 秘密フィールド（participantToken/shareToken/recordingUrl）と PII（participant.email）を
@@ -50,6 +50,9 @@ export async function GET(req: NextRequest, props: { params: Promise<{ id: strin
 
   if (!interview) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
+  // viewerRole は削除など破壊的な操作の出し分けにだけ使う（認可は各 API 側で行う）
+  const viewerRole = await getRole(userId, orgId)
+
   // クライアントへ返す interview は機密を含まない最小フィールドのみ
   const safeInterview = {
     id: interview.id,
@@ -64,7 +67,7 @@ export async function GET(req: NextRequest, props: { params: Promise<{ id: strin
   }
 
   if (interview.sessions.length === 0) {
-    return NextResponse.json({ interview: safeInterview, sessions: [], commonInsights: null })
+    return NextResponse.json({ interview: safeInterview, sessions: [], commonInsights: null, viewerRole })
   }
 
   // 感情の平均を計算（感情データがあるセッションのみ）
@@ -121,7 +124,7 @@ export async function GET(req: NextRequest, props: { params: Promise<{ id: strin
     }
   }
 
-  return NextResponse.json({ interview: safeInterview, sessions: sessionsWithStats, commonInsights })
+  return NextResponse.json({ interview: safeInterview, sessions: sessionsWithStats, commonInsights, viewerRole })
   } catch (err) {
     return handleApiError(err)
   }

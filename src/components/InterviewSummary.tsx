@@ -28,12 +28,20 @@ export default function InterviewSummary({
   commonInsights,
   onBackfill,
   backfilling,
+  segmented = false,
 }: {
-  /** パイロットを除いた本番セッション */
+  /** パイロットを除いた本番セッション（セグメント絞り込み後） */
   sessions: SessionLike[]
   commonInsights: string | null
   onBackfill: () => void
   backfilling: boolean
+  /**
+   * セグメントで絞り込み中か。
+   * 数字は絞り込みに追随するが、AI 総括は調査全体で生成したものなので追随しない。
+   * 黙って並べると「このセグメントの総括」と読まれるため、明示する。
+   * 文字起こしからの抽出も調査全体に効く処理なので、絞り込み中は導線を出さない。
+   */
+  segmented?: boolean
 }) {
   const [expanded, setExpanded] = useState(false)
   // 総括が3行に収まっているときは「続きを見る」を出さない（押しても何も起きないため）。
@@ -77,10 +85,13 @@ export default function InterviewSummary({
         <h2 className="text-sm font-semibold text-gray-900 mb-1">結果サマリー</h2>
         <p className="text-sm text-gray-600 leading-relaxed">
           {sessions.length === 0
-            ? 'まだセッションがありません。招待リンクを参加者に送ると、ここに調査全体の結果が出ます。'
+            ? segmented
+              // 絞り込みで 0 人になった場合。「セッションが無い」と読ませない
+              ? 'この条件に当てはまる参加者がいないため、表示できる結果がありません。セグメントの絞り込みを変えてみてください。'
+              : 'まだセッションがありません。招待リンクを参加者に送ると、ここに調査全体の結果が出ます。'
             : 'このテストにはまだ集計できる測定結果がありません。実施中に記録されたタスクの成否や評価スコアが集まると、ここに全体の成功率とスコアが出ます。'}
         </p>
-        {sessions.length > 0 && (
+        {sessions.length > 0 && !segmented && (
           <div className="mt-4">
             <p className="text-xs text-gray-500 mb-2">
               測定結果を保存する仕組みより前に実施したセッションは、文字起こしから回答を復元できます。
@@ -101,7 +112,14 @@ export default function InterviewSummary({
 
   return (
     <div className="bg-white border border-gray-200 rounded-xl p-6">
-      <h2 className="text-sm font-semibold text-gray-900 mb-4">結果サマリー</h2>
+      <h2 className="text-sm font-semibold text-gray-900 mb-4">
+        結果サマリー
+        {segmented && (
+          <span className="ml-2 text-[11px] font-normal text-gray-500">
+            絞り込んだ {sessions.length} 人の数字
+          </span>
+        )}
+      </h2>
 
       {/* 見出し指標 */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-5">
@@ -187,6 +205,12 @@ export default function InterviewSummary({
           <h3 className="flex items-center gap-1.5 text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">
             <Sparkles className="w-3.5 h-3.5" strokeWidth={2} />
             AI の総括
+            {/* 総括は調査全体で生成したもの。絞り込みに追随しないことを明示する */}
+            {segmented && (
+              <span className="normal-case tracking-normal font-normal text-gray-400">
+                （調査全体・絞り込み前）
+              </span>
+            )}
           </h3>
           <div
             ref={insightRef}

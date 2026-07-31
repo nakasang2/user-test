@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { del } from '@vercel/blob'
-import { requireAuth, requireParticipantToken, handleApiError } from '@/lib/api-auth'
+import { requireAuth, requireRole, getRole, requireParticipantToken, handleApiError } from '@/lib/api-auth'
 
 export async function GET(_req: NextRequest, props: { params: Promise<{ id: string }> }) {
   try {
-    const { orgId } = await requireAuth()
+    const { userId, orgId } = await requireAuth()
     const { id } = await props.params
     const session = await prisma.session.findFirst({
       where: { id, interview: { organizationId: orgId } },
@@ -24,7 +24,9 @@ export async function GET(_req: NextRequest, props: { params: Promise<{ id: stri
     // 共有リンクが有効かどうかは boolean フラグでのみ伝える。
     const { participantToken: _pt, shareToken, ...rest } = session
     void _pt
-    return NextResponse.json({ ...rest, shareEnabled: !!shareToken })
+    // viewerRole は削除ボタンなど破壊的な操作の出し分けにだけ使う（認可は各 API 側で行う）
+    const viewerRole = await getRole(userId, orgId)
+    return NextResponse.json({ ...rest, shareEnabled: !!shareToken, viewerRole })
   } catch (err) {
     return handleApiError(err)
   }
@@ -78,7 +80,8 @@ export async function PATCH(req: NextRequest, props: { params: Promise<{ id: str
 
 export async function DELETE(_req: NextRequest, props: { params: Promise<{ id: string }> }) {
   try {
-    const { orgId } = await requireAuth()
+    // 録画・文字起こしごと消える取り返しのつかない操作なので、閲覧者には許可しない
+    const { orgId } = await requireRole('editor')
     const { id } = await props.params
 
     const session = await prisma.session.findFirst({

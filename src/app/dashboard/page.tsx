@@ -4,6 +4,7 @@ import { useState, useEffect, useMemo } from 'react'
 import Link from 'next/link'
 import { track } from '@/lib/analytics'
 import CreateInterviewModal from '@/components/CreateInterviewModal'
+import StatusBadge from '@/components/StatusBadge'
 import {
   Search,
   X,
@@ -137,6 +138,17 @@ export default function Dashboard() {
 
   const doneCount = realSessions.filter((s) => s.status === 'done').length
 
+  // 直近のセッション。/api/sessions は既に取得しているのに件数にしか使っておらず、
+  // 「新しく完了した分」に気づく導線が無かった（通知も無いので、ここが起点になる）。
+  const recentSessions = useMemo(
+    () =>
+      realSessions
+        .slice()
+        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+        .slice(0, 5),
+    [realSessions]
+  )
+
   return (
     <div className="min-h-screen bg-white text-gray-900">
       <nav className="border-b border-gray-200 px-6 py-3 flex items-center justify-between">
@@ -200,6 +212,33 @@ export default function Dashboard() {
           <StatCard value={realSessions.length} label="総セッション数" />
           <StatCard value={doneCount} label="分析完了" />
         </div>
+
+        {/* 直近のセッション。テストを1つずつ開かなくても新着に気づけるようにする */}
+        {!loading && recentSessions.length > 0 && (
+          <div className="mb-8 bg-white border border-gray-200 rounded-lg overflow-hidden">
+            <div className="px-4 py-2.5 border-b border-gray-200">
+              <h2 className="text-xs font-medium text-gray-500 uppercase tracking-wide">最近のセッション</h2>
+            </div>
+            <div className="divide-y divide-gray-100">
+              {recentSessions.map((s) => (
+                <Link
+                  key={s.id}
+                  href={`/dashboard/sessions/${s.id}`}
+                  className="flex items-center gap-3 px-4 py-2.5 hover:bg-gray-50 transition-colors"
+                >
+                  <span className="text-sm text-gray-900 w-32 flex-shrink-0 truncate">
+                    {s.participant?.name ?? 'Anonymous'}
+                  </span>
+                  <StatusBadge status={s.status} />
+                  <span className="text-xs text-gray-500 flex-1 truncate">{s.interview.title}</span>
+                  <span className="text-xs text-gray-400 flex-shrink-0">
+                    {new Date(s.createdAt).toLocaleDateString('ja-JP')}
+                  </span>
+                </Link>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* ツールバー（テスト名で検索＋並び替え） */}
         <div className="flex flex-wrap items-center gap-2 mb-4">

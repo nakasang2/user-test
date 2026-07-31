@@ -42,6 +42,21 @@ export async function requireRole(minRole: Role): Promise<TokenPayload & { role:
 }
 
 /**
+ * 組織内のロールを取得する。権限不足でも例外にしない。
+ *
+ * 破壊的な操作のボタンを画面に出すかどうかの判定に使う。
+ * 押しても必ず 403 になるボタンを見せると、権限が無いことに気づけないため。
+ * 認可そのものは requireRole が担当する（この値を信用して分岐しない）。
+ */
+export async function getRole(userId: string, orgId: string): Promise<Role> {
+  const member = await prisma.member.findUnique({
+    where: { userId_organizationId: { userId, organizationId: orgId } },
+    select: { role: true },
+  })
+  return (member?.role as Role | undefined) ?? 'viewer'
+}
+
+/**
  * 被験者フロー（未認証）専用の限定スコープ認可。
  * セッション作成時に発行した participantToken と一致する場合のみ、
  * 当該セッションへの結果送信・status 更新を許可する。
