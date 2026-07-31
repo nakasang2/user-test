@@ -31,11 +31,18 @@ export default function InterviewMetrics({
   sessions,
   interviewId,
   onChanged,
+  allowExclude = true,
 }: {
   sessions: SessionLike[]
   interviewId: string
   /** 集計対象の変更後に呼ぶ。親がデータを取り直す */
   onChanged: () => void
+  /**
+   * 「集計から外す」を押せるか。
+   * 除外は調査全体（全セッション）に効くので、セグメント絞り込み中は押せなくする。
+   * 見えている一部を外したつもりで全員分を外してしまうため。
+   */
+  allowExclude?: boolean
 }) {
   const [busy, setBusy] = useState<string | null>(null)
 
@@ -79,7 +86,15 @@ export default function InterviewMetrics({
       {taskRows.length > 0 && (
         <div className="bg-white border border-gray-200 rounded-xl p-5">
           <div className="flex items-baseline justify-between mb-4">
-            <h2 className="text-sm font-semibold text-gray-900">タスク成功率</h2>
+            <h2 className="text-sm font-semibold text-gray-900">
+              タスク成功率
+              {/* ボタンが黙って消えると壊れて見えるので、消えている理由を書く */}
+              {!allowExclude && (
+                <span className="ml-2 text-[11px] font-normal text-gray-400">
+                  絞り込み中は集計対象を変更できません
+                </span>
+              )}
+            </h2>
             {/* overall が null になるのは taskRows が空のときだけで、その場合この枠自体を描画しない。
                 それでも 0 除算で NaN を出さないよう分岐しておく */}
             {overall && (
@@ -169,10 +184,12 @@ export default function InterviewMetrics({
                           </span>
                         )}
                       </span>
-                      <ExcludeButton
-                        busy={busy === t.key}
-                        onClick={() => setExcluded('task', t.key, t.text, true)}
-                      />
+                      {allowExclude && (
+                        <ExcludeButton
+                          busy={busy === t.key}
+                          onClick={() => setExcluded('task', t.key, t.text, true)}
+                        />
+                      )}
                     </p>
                   </div>
                   <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
@@ -207,10 +224,12 @@ export default function InterviewMetrics({
                       </p>
                       <p className="text-[11px] text-gray-500">n = {s.values.length}</p>
                     </div>
-                    <ExcludeButton
-                      busy={busy === s.key}
-                      onClick={() => setExcluded('answer', s.key, s.text, true)}
-                    />
+                    {allowExclude && (
+                      <ExcludeButton
+                        busy={busy === s.key}
+                        onClick={() => setExcluded('answer', s.key, s.text, true)}
+                      />
+                    )}
                   </div>
                 </div>
               )
@@ -237,6 +256,7 @@ export default function InterviewMetrics({
                     : `未実施 ${t.notAttempted}件`
                 }
                 busy={busy === t.key}
+                canRestore={allowExclude}
                 onRestore={() => setExcluded('task', t.key, t.text, false)}
               />
             ))}
@@ -250,6 +270,7 @@ export default function InterviewMetrics({
                     : `平均 ${(s.values.reduce((a, b) => a + b, 0) / s.values.length).toFixed(1)}・n=${s.values.length}`
                 }
                 busy={busy === s.key}
+                canRestore={allowExclude}
                 onRestore={() => setExcluded('answer', s.key, s.text, false)}
               />
             ))}
@@ -284,11 +305,14 @@ function ExcludedRow({
   text,
   detail,
   busy,
+  canRestore,
   onRestore,
 }: {
   text: string
   detail: string
   busy: boolean
+  /** セグメント絞り込み中は false。戻す操作も調査全体に効くため */
+  canRestore: boolean
   onRestore: () => void
 }) {
   return (
@@ -296,6 +320,7 @@ function ExcludedRow({
       <p className="text-sm text-gray-600 leading-snug min-w-0 truncate">{text}</p>
       <div className="flex-shrink-0 flex items-center gap-3">
         <span className="text-xs text-gray-500 tabular-nums">{detail}</span>
+        {canRestore && (
         <button
           onClick={onRestore}
           disabled={busy}
@@ -304,6 +329,7 @@ function ExcludedRow({
           <Undo2 className="w-3 h-3" strokeWidth={2} />
           {busy ? '…' : '集計に戻す'}
         </button>
+        )}
       </div>
     </div>
   )

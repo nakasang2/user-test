@@ -3,7 +3,8 @@
 import { useState, useEffect, use, useMemo } from 'react'
 import Link from 'next/link'
 import { RadarChart, Radar, PolarGrid, PolarAngleAxis, ResponsiveContainer, Tooltip } from 'recharts'
-import { Search, X, Pencil, Download, FlaskConical, RefreshCw } from 'lucide-react'
+import { Search, X, Pencil, Download, FlaskConical, RefreshCw, Trash2, SlidersHorizontal } from 'lucide-react'
+import { hasPermission } from '@/lib/permissions'
 import EditInterviewModal from '@/components/EditInterviewModal'
 import FloatingAgentChat from '@/components/FloatingAgentChat'
 import StatusBadge from '@/components/StatusBadge'
@@ -56,6 +57,22 @@ interface CompareData {
   }
   sessions: SessionStat[]
   commonInsights: string | null
+  /** 閲覧者自身のロール。破壊的な操作を出すかどうかの判定にだけ使う */
+  viewerRole?: string
+}
+
+/**
+ * 事前質問（スクリーナー）の回答による絞り込み判定。
+ * 空文字の値は「すべて」なので条件から外す。
+ */
+function matchesAttrs(
+  s: { screenerAnswers?: { label: string; value: string }[] },
+  filter: Record<string, string>
+): boolean {
+  return Object.entries(filter).every(
+    ([label, value]) =>
+      !value || (s.screenerAnswers ?? []).some((a) => a.label === label && a.value === value)
+  )
 }
 
 const EMOTION_LABELS: Record<string, string> = {
@@ -80,6 +97,31 @@ export default function InterviewComparePage(props: { params: Promise<{ id: stri
   const [backfilling, setBackfilling] = useState(false)
   const [reanalyzing, setReanalyzing] = useState(false)
   const [reanalyzeMsg, setReanalyzeMsg] = useState('')
+  // 削除は配下の全セッションを巻き込むので、confirm ではなくテスト名の入力を要求する
+  const [dangerOpen, setDangerOpen] = useState(false)
+  const [confirmTitle, setConfirmTitle] = useState('')
+  const [deletingInterview, setDeletingInterview] = useState(false)
+
+  async function deleteInterview() {
+    setDeletingInterview(true)
+    try {
+      const res = await fetch(`/api/interviews/${id}`, { method: 'DELETE' })
+      if (!res.ok) {
+        const d = await res.json().catch(() => null)
+        alert(
+          res.status === 403
+            ? 'このテストを削除する権限がありません（管理者以上が必要です）。'
+            : (d?.error ?? '削除に失敗しました')
+        )
+        return
+      }
+      window.location.href = '/dashboard'
+    } catch {
+      alert('削除に失敗しました')
+    } finally {
+      setDeletingInterview(false)
+    }
+  }
 
   // 全セッションをまとめて再分析する。
   // AI へのプロンプトを変えた後（要約の日本語化など）に既存セッションを追随させる用途。
@@ -170,11 +212,14 @@ export default function InterviewComparePage(props: { params: Promise<{ id: stri
   }
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
   const [sortKey, setSortKey] = useState<SortKey>('date-desc')
+  // 事前質問の回答（属性）によるセグメント絞り込み。ラベル → 選んだ値。空文字は「すべて」
+  const [attrFilter, setAttrFilter] = useState<Record<string, string>>({})
 
   const visibleSessions = useMemo(() => {
     const STATUS_ORDER: Record<string, number> = { active: 0, pending: 1, done: 2, completed: 3 }
     return (data?.sessions ?? [])
       .filter((s) => (statusFilter === 'all' ? true : s.status === statusFilter))
+      .filter((s) => matchesAttrs(s, attrFilter))
       .filter((s) => (search.trim() ? s.participantName.toLowerCase().includes(search.trim().toLowerCase()) : true))
       .slice()
       .sort((a, b) => {
@@ -183,8 +228,9 @@ export default function InterviewComparePage(props: { params: Promise<{ id: stri
         const da = new Date(a.createdAt).getTime(), db = new Date(b.createdAt).getTime()
         return sortKey === 'date-asc' ? da - db : db - da
       })
-  }, [data, statusFilter, search, sortKey])
-  const isFiltering = statusFilter !== 'all' || search.trim() !== ''
+  }, [data, statusFilter, search, sortKey, attrFilter])
+  const isFiltering =
+    statusFilter !== 'all' || search.trim() !== '' || Object.values(attrFilter).some((v) => v)
 
   // 集計対象の変更後にデータを取り直すためのカウンタ。
   // 画面全体をリロードすると AI インサイトの再取得やスクロール位置の喪失が起きるので、
@@ -225,13 +271,39 @@ export default function InterviewComparePage(props: { params: Promise<{ id: stri
     )
   }
 
-  const { interview, sessions, commonInsights } = data
+  const { interview, sessions, commonInsights, viewerRole } = data
   // パイロット（リサーチャーの試行）は本番の結果ではないので、集計・分析からは除外する。
   // 一覧には残してバッジで区別し、消したくなったら削除できるようにする。
   const realSessions = sessions.filter((s) => !s.isPilot)
   const pilotCount = sessions.length - realSessions.length
+  const doneAll = realSessions.filter((s) => s.status === 'done').length
+
+  // ── セグメント（事前質問の回答による絞り込み） ──
+  // 「初心者だけのタスク成功率」を見るのがユーザビリティテストの一次分析なので、
+  // 絞り込みは一覧だけでなく、下の集計・比較・レーダーすべてに効かせる。
+  // 選べる値は実際に回答があったものだけを出す（0人の選択肢を並べても選ぶ意味がない）。
+  const attributeDefs = (() => {
+    const m = new Map<string, { order: number; values: Set<string> }>()
+    for (const s of realSessions) {
+      for (const a of s.screenerAnswers ?? []) {
+        const cur = m.get(a.label) ?? { order: a.order, values: new Set<string>() }
+        cur.order = Math.min(cur.order, a.order)
+        cur.values.add(a.value)
+        m.set(a.label, cur)
+      }
+    }
+    return [...m.entries()]
+      .sort(([, x], [, y]) => x.order - y.order)
+      .map(([label, v]) => ({ label, values: [...v.values].sort((a, b) => a.localeCompare(b, 'ja')) }))
+  })()
+
+  const isSegmented = Object.values(attrFilter).some((v) => v)
+  const segmentedSessions = isSegmented
+    ? realSessions.filter((s) => matchesAttrs(s, attrFilter))
+    : realSessions
+
   // 分析系（インサイト・テーマ・比較・レーダー）は分析済み(done)のみで算出
-  const doneSessions = realSessions.filter((s) => s.status === 'done')
+  const doneSessions = segmentedSessions.filter((s) => s.status === 'done')
 
   // レーダーチャート用データ（参加者ごとの感情平均）
   const radarData = ['happy', 'neutral', 'sad', 'surprised'].map((emotion) => ({
@@ -257,7 +329,7 @@ export default function InterviewComparePage(props: { params: Promise<{ id: stri
 
   // ハイライトのタグ頻度（人が付けた記録なので、AI 分析未完了のセッションも対象にする）
   const highlightTagCount: Record<string, number> = {}
-  realSessions.forEach((s) => {
+  segmentedSessions.forEach((s) => {
     s.highlightTags?.forEach((t) => {
       const key = t.trim()
       if (key) highlightTagCount[key] = (highlightTagCount[key] ?? 0) + 1
@@ -284,7 +356,7 @@ export default function InterviewComparePage(props: { params: Promise<{ id: stri
           <div>
             <h1 className="text-2xl font-semibold mb-1 tracking-tight text-gray-900">{interview.title}</h1>
             <p className="text-gray-500 text-sm">
-              セッション {realSessions.length} 件（分析済み {doneSessions.length} 件） · 質問 {interview.questions.length} 問
+              セッション {realSessions.length} 件（分析済み {doneAll} 件） · 質問 {interview.questions.length} 問
               {pilotCount > 0 && <span className="text-gray-400"> · パイロット {pilotCount} 件（集計対象外）</span>}
             </p>
           </div>
@@ -325,26 +397,85 @@ export default function InterviewComparePage(props: { params: Promise<{ id: stri
           </div>
         </div>
 
+        {/* セグメント絞り込み。ここから下の集計・比較・レーダーすべてに効く */}
+        {attributeDefs.length > 0 && (
+          <div className="bg-white border border-gray-200 rounded-xl px-4 py-3">
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+              <span className="text-xs font-medium text-gray-500 uppercase tracking-wide flex items-center gap-1.5 flex-shrink-0">
+                <SlidersHorizontal className="w-3.5 h-3.5" strokeWidth={2} />
+                セグメント
+              </span>
+              {attributeDefs.map((a) => (
+                <label key={a.label} className="flex items-center gap-1.5 text-xs text-gray-600">
+                  {a.label}
+                  <select
+                    value={attrFilter[a.label] ?? ''}
+                    onChange={(e) => setAttrFilter((prev) => ({ ...prev, [a.label]: e.target.value }))}
+                    className="bg-white border border-gray-300 focus:border-gray-900 text-gray-800 text-xs rounded-md px-2 py-1 focus:outline-none transition-colors"
+                  >
+                    <option value="">すべて</option>
+                    {a.values.map((v) => <option key={v} value={v}>{v}</option>)}
+                  </select>
+                </label>
+              ))}
+              <div className="ml-auto flex items-center gap-2 flex-shrink-0">
+                <span className="text-xs text-gray-500 tabular-nums">
+                  {isSegmented
+                    ? `${segmentedSessions.length} / ${realSessions.length} 人を表示中`
+                    : `${realSessions.length} 人`}
+                </span>
+                {isSegmented && (
+                  <button
+                    onClick={() => setAttrFilter({})}
+                    className="text-xs text-gray-500 hover:text-gray-900 underline underline-offset-2"
+                  >
+                    解除
+                  </button>
+                )}
+              </div>
+            </div>
+            {/* 0人のときは下の集計が軒並み空になる。「セッションがありません」と
+                読めてしまうので、絞り込みの結果であることをここで明示する */}
+            {isSegmented && segmentedSessions.length === 0 && (
+              <p className="mt-2 text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded px-2 py-1.5">
+                この条件に当てはまる参加者はいません。下の集計が空なのは、調査にデータが無いからではなく絞り込みの結果です。
+              </p>
+            )}
+            {/* 少人数のセグメントは割合の振れ幅が大きい。数字を鵜呑みにしないよう添える */}
+            {isSegmented && segmentedSessions.length > 0 && segmentedSessions.length < 5 && (
+              <p className="mt-2 text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded px-2 py-1.5">
+                該当は {segmentedSessions.length} 人です。人数が少ないと割合は大きく振れるので、傾向の目安として見てください。
+              </p>
+            )}
+          </div>
+        )}
+
         {/* 調査全体の結論。参加者一覧より先に「この調査がどうだったか」を出す */}
         <InterviewSummary
-          sessions={realSessions}
+          sessions={segmentedSessions}
           commonInsights={commonInsights}
           onBackfill={backfillAnswers}
           backfilling={backfilling}
+          /* AI 総括は調査全体で生成したもので、絞り込みには追随しない。
+             抽出も調査全体に効く処理なので、絞り込み中は導線を出さない */
+          segmented={isSegmented}
         />
 
         {/* 定量集計のタスク別内訳。AI 分析の完了を待たずに出せるので done で絞らない */}
         <InterviewMetrics
-          sessions={realSessions}
+          sessions={segmentedSessions}
           interviewId={interview.id}
           onChanged={() => setReloadKey((k) => k + 1)}
+          /* 集計対象の変更は調査全体に効く。絞り込み中に押せると、
+             見えている一部を外したつもりで全体を外してしまう */
+          allowExclude={!isSegmented}
         />
 
         {/* 回答の比較（質問 × 参加者）。深掘りは元の質問にまとめて紐づくので列は崩れない */}
         <AnswerMatrix
-          sessions={realSessions}
+          sessions={segmentedSessions}
           questions={interview.questions}
-          onBackfill={backfillAnswers}
+          onBackfill={isSegmented ? undefined : backfillAnswers}
           backfilling={backfilling}
         />
 
@@ -406,6 +537,20 @@ export default function InterviewComparePage(props: { params: Promise<{ id: stri
                       title="リサーチャーの試行。集計・分析には含まれません"
                     >
                       パイロット
+                    </span>
+                  )}
+                  {/* 属性を出しておかないと、絞り込んだ結果が誰なのか一覧で確認できない */}
+                  {(s.screenerAnswers?.length ?? 0) > 0 && (
+                    <span className="hidden lg:flex items-center gap-1 flex-shrink-0">
+                      {s.screenerAnswers!.slice(0, 2).map((a) => (
+                        <span
+                          key={a.order}
+                          title={`${a.label}: ${a.value}`}
+                          className="text-[10px] text-gray-600 bg-gray-100 border border-gray-200 rounded px-1.5 py-0.5 whitespace-nowrap max-w-28 truncate"
+                        >
+                          {a.value}
+                        </span>
+                      ))}
                     </span>
                   )}
                   <span className="hidden md:block text-xs text-gray-500 flex-1 truncate">{s.summary ?? '—'}</span>
@@ -561,6 +706,61 @@ export default function InterviewComparePage(props: { params: Promise<{ id: stri
               </div>
             )}
           </>
+        )}
+
+        {/* テストの削除。配下の全セッションを巻き込むため、管理者にだけ出し、
+            テスト名の入力を要求する（confirm のワンクリックでは重すぎる操作） */}
+        {hasPermission(viewerRole ?? 'viewer', 'admin') && (
+          <div className="border-t border-gray-200 pt-6">
+            <h2 className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-3">危険な操作</h2>
+            <div className="bg-white border border-red-200 rounded-lg px-4 py-3">
+              {!dangerOpen ? (
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <p className="text-xs text-gray-600 leading-relaxed min-w-0">
+                    このテストを削除します。{sessions.length} 件のセッション（録画・文字起こし・回答・ハイライト）も
+                    まとめて消え、元に戻せません。
+                  </p>
+                  <button
+                    onClick={() => { setDangerOpen(true); setConfirmTitle('') }}
+                    className="flex-shrink-0 inline-flex items-center gap-1.5 border border-red-300 hover:border-red-500 hover:bg-red-50 text-red-700 px-3 py-1.5 rounded-md text-xs font-medium transition-colors"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" strokeWidth={2} />
+                    このテストを削除
+                  </button>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <p className="text-xs text-gray-700 leading-relaxed">
+                    確認のため、テスト名「<span className="font-medium text-gray-900">{interview.title}</span>」を
+                    入力してください。{sessions.length} 件のセッションが一緒に削除されます。
+                  </p>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <input
+                      value={confirmTitle}
+                      onChange={(e) => setConfirmTitle(e.target.value)}
+                      aria-label="確認のためテスト名を入力"
+                      placeholder={interview.title}
+                      className="flex-1 min-w-48 bg-white border border-gray-300 focus:border-red-500 focus:ring-1 focus:ring-red-500 rounded-md px-3 py-1.5 text-sm text-gray-900 placeholder-gray-400 focus:outline-none transition-colors"
+                    />
+                    <button
+                      onClick={() => { setDangerOpen(false); setConfirmTitle('') }}
+                      className="border border-gray-300 hover:border-gray-400 text-gray-700 px-3 py-1.5 rounded-md text-xs transition-colors"
+                    >
+                      キャンセル
+                    </button>
+                    <button
+                      onClick={deleteInterview}
+                      disabled={deletingInterview || confirmTitle.trim() !== interview.title.trim()}
+                      className="inline-flex items-center gap-1.5 bg-red-600 hover:bg-red-700 disabled:opacity-40 disabled:hover:bg-red-600 text-white px-3 py-1.5 rounded-md text-xs font-medium transition-colors"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" strokeWidth={2} />
+                      {deletingInterview ? '削除中…' : '完全に削除する'}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
         )}
       </div>
 

@@ -30,6 +30,15 @@ const createSchema = z.object({
   // 詰まった参加者への声かけまでの秒数。null / 未指定なら声かけしない。
   // 編集 API（[id]/route.ts）と同じ範囲にする
   hintDelaySec:     z.number().int().min(10).max(1800).nullable().optional(),
+  // 事前質問（スクリーニング／属性）。編集 API（[id]/route.ts）と同じ制約に揃える。
+  // 作成時に設定できないと、作ってから編集画面を開き直す二度手間になる
+  screeners:        z.array(z.object({
+    label:      z.string().min(1).max(500),
+    // 選択肢ゼロだと被験者が回答できず、必須なら誰も参加できなくなるため最低1つ必須
+    options:    z.array(z.string().min(1).max(200)).min(1, '選択肢を1つ以上入力してください').max(20),
+    disqualify: z.array(z.string().max(200)).max(20).default([]),
+    required:   z.boolean().default(true),
+  })).max(20).optional(),
 })
 
 export async function GET() {
@@ -59,7 +68,7 @@ export async function POST(req: NextRequest) {
     if (!parsed.success) {
       return NextResponse.json({ error: parsed.error.issues[0]?.message }, { status: 400 })
     }
-    const { title, description, questions, autoGenerate, topic, type, usabilityMode, stimulusUrl, stimulusDuration, tasks, seqEnabled, hintDelaySec } = parsed.data
+    const { title, description, questions, autoGenerate, topic, type, usabilityMode, stimulusUrl, stimulusDuration, tasks, seqEnabled, hintDelaySec, screeners } = parsed.data
 
     type QuestionInput = { text: string; type?: string } | string
     let questionList: QuestionInput[] = questions ?? []
@@ -95,10 +104,21 @@ export async function POST(req: NextRequest) {
             isPrerequisite: t.isPrerequisite === true,
           })),
         },
+        screeners: {
+          create: (screeners ?? []).map((x, index) => ({
+            label: x.label,
+            options: x.options,
+            // 編集 API と同じく、選択肢に無い値は参加不可条件として採用しない
+            disqualify: x.disqualify.filter((d) => x.options.includes(d)),
+            required: x.required,
+            order: index + 1,
+          })),
+        },
       },
       include: {
         questions: { orderBy: { order: 'asc' } },
         tasks: { orderBy: { order: 'asc' } },
+        screeners: { orderBy: { order: 'asc' } },
       },
     })
 

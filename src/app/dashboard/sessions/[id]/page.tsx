@@ -8,9 +8,10 @@ import FloatingAgentChat from '@/components/FloatingAgentChat'
 import StatusBadge from '@/components/StatusBadge'
 import SessionMetrics, { type TaskResultData, type AnswerData } from '@/components/SessionMetrics'
 import HighlightPanel, { type HighlightData } from '@/components/HighlightPanel'
-import { Video, Download, X, Folder } from 'lucide-react'
+import { Video, Download, X, Folder, Copy, Check, Trash2 } from 'lucide-react'
 import { track } from '@/lib/analytics'
 import { outcomeLabel } from '@/lib/task-flow'
+import { canEdit } from '@/lib/permissions'
 
 interface Segment {
   id: string
@@ -60,6 +61,8 @@ interface Session {
   consentedAt?: string | null
   screenerAnswers?: { label: string; value: string; order: number }[]
   isPilot?: boolean
+  /** 閲覧者自身のロール。破壊的な操作を出すかどうかの判定にだけ使う */
+  viewerRole?: string
 }
 
 export default function SessionDetail(props: { params: Promise<{ id: string }> }) {
@@ -76,6 +79,74 @@ export default function SessionDetail(props: { params: Promise<{ id: string }> }
   const fileInputRef = useRef<HTMLInputElement>(null)
   const localVideoUrlRef = useRef<string | null>(null)
   const [highlights, setHighlights] = useState<HighlightData[]>([])
+  const [copiedUrl, setCopiedUrl] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+
+  // ── 参加者用URL ──
+  // リサーチャーがこの画面から欲しいのは「参加者に渡すリンク」であって、
+  // 自分がテストを始めることではない。主ボタンはコピーにする。
+  async function copyParticipantUrl() {
+    if (!session) return
+    const url = `${window.location.origin}/interview/${session.dailyRoomName}`
+    try {
+      await navigator.clipboard.writeText(url)
+      setCopiedUrl(true)
+      setTimeout(() => setCopiedUrl(false), 2000)
+    } catch {
+      // クリップボードが使えない環境（非HTTPS等）のフォールバック
+      window.prompt('以下のリンクをコピーしてください', url)
+    }
+  }
+
+  /**
+   * 参加者用のテスト画面をリサーチャー自身が開く。
+   *
+   * ここから開始すると status が active に戻り、タスク結果は (sessionId, order) の
+   * upsert で、録画は URL 差し替えで上書きされる。元には戻せない。
+   * 押し間違いで実施済みの記録が消えるので、何が起きるかを伝えてから遷移する。
+   */
+  function openParticipantRoom() {
+    if (!session) return
+    const hasData =
+      !!session.transcript || (session.taskResults?.length ?? 0) > 0 || !!session.recordingUrl
+    const warning = hasData
+      ? 'このセッションには既に記録（録画・文字起こし・タスク結果）があります。\nここから開始すると上書きされ、元に戻せません。'
+      : 'あなたがここで開始すると、このセッションは実施済みとして記録され、参加者の分としては使えなくなります。'
+    const ok = confirm(
+      `これは参加者用のテスト画面です。\n\n${warning}\n\n` +
+        '参加者にリンクを渡すだけなら「参加者用URLをコピー」を使ってください。\n\nそれでも開きますか？'
+    )
+    if (!ok) return
+    window.location.href = `/interview/${session.dailyRoomName}`
+  }
+
+  async function deleteSession() {
+    if (!session) return
+    const name = session.participant?.name ?? 'Anonymous'
+    const ok = confirm(
+      `「${name}」のセッションを削除します。\n` +
+        '録画・文字起こし・タスク結果・回答・ハイライトがすべて消え、元に戻せません。\n\n削除しますか？'
+    )
+    if (!ok) return
+    setDeleting(true)
+    try {
+      const res = await fetch(`/api/sessions/${id}`, { method: 'DELETE' })
+      if (!res.ok) {
+        const d = await res.json().catch(() => null)
+        alert(
+          res.status === 403
+            ? 'セッションを削除する権限がありません（編集者以上が必要です）。'
+            : (d?.error ?? '削除に失敗しました')
+        )
+        return
+      }
+      window.location.href = `/dashboard/interviews/${session.interview.id}`
+    } catch {
+      alert('削除に失敗しました')
+    } finally {
+      setDeleting(false)
+    }
+  }
 
   // ── ハイライト（定性分析のコーディング） ──
   async function addHighlight(seg: { id: string; text: string; startTime: number }) {
@@ -355,8 +426,6 @@ export default function SessionDetail(props: { params: Promise<{ id: string }> }
     )
   }
 
-  const roomLink = `/interview/${session.dailyRoomName}`
-
   // 録画は非公開 Blob。署名付き URL を取得できた場合のみ再生・ダウンロード可能とする
   const serverVideoUrl = signedVideoUrl
   const videoSrc = localVideoUrl ?? serverVideoUrl ?? null
@@ -433,12 +502,25 @@ export default function SessionDetail(props: { params: Promise<{ id: string }> }
             </button>
           )}
           {actionButton}
-          <Link
-            href={roomLink}
-            className="bg-gray-900 hover:bg-gray-800 text-white px-4 py-2 rounded-md text-sm font-medium transition-colors"
+          {/* 参加者画面を開く導線は、記録を上書きしうるので副次的な扱いにする。
+              主ボタンは「参加者に渡すリンクのコピー」 */}
+          <button
+            onClick={openParticipantRoom}
+            title="参加者と同じテスト画面を開きます。開始すると、このセッションの記録が上書きされます"
+            className="text-xs text-gray-500 hover:text-gray-900 underline underline-offset-2 transition-colors px-1"
           >
-            インタビュールームを開く
-          </Link>
+            参加者画面を開く
+          </button>
+          <button
+            onClick={copyParticipantUrl}
+            className="inline-flex items-center gap-1.5 bg-gray-900 hover:bg-gray-800 text-white px-4 py-2 rounded-md text-sm font-medium transition-colors"
+          >
+            {copiedUrl ? (
+              <><Check className="w-3.5 h-3.5" strokeWidth={2.5} /> コピー済み</>
+            ) : (
+              <><Copy className="w-3.5 h-3.5" strokeWidth={2} /> 参加者用URLをコピー</>
+            )}
+          </button>
         </div>
       </nav>
 
@@ -454,20 +536,12 @@ export default function SessionDetail(props: { params: Promise<{ id: string }> }
         </div>
 
         {/* インタビュー未完了の案内 */}
+        {/* コピーの導線は右上に一本化する。2か所に置くと、どちらを押すべきか迷う */}
         {(session.status === 'pending' || session.status === 'active') && (
-          <div className="mb-6 p-4 bg-amber-50 border border-amber-200 rounded-lg flex items-center justify-between">
-            <p className="text-amber-700 text-sm">
-              インタビューがまだ完了していません。被験者に上のボタンの URL を共有してください。
+          <div className="mb-6 p-4 bg-amber-50 border border-amber-200 rounded-lg">
+            <p className="text-amber-800 text-sm">
+              このセッションはまだ完了していません。右上の「参加者用URLをコピー」から、参加者にリンクを送ってください。
             </p>
-            <button
-              onClick={async () => {
-                await navigator.clipboard.writeText(`${window.location.origin}${roomLink}`)
-                alert('インタビュー URL をコピーしました')
-              }}
-              className="ml-4 flex-shrink-0 bg-amber-700 hover:bg-amber-800 text-white px-3 py-1.5 rounded-md text-xs font-medium transition-colors"
-            >
-              URL をコピー
-            </button>
           </div>
         )}
 
@@ -511,6 +585,7 @@ export default function SessionDetail(props: { params: Promise<{ id: string }> }
             <SessionMetrics
               taskResults={session.taskResults ?? []}
               answers={session.answers ?? []}
+              onSeek={videoSrc ? seekVideo : undefined}
             />
           </div>
         )}
@@ -635,6 +710,26 @@ export default function SessionDetail(props: { params: Promise<{ id: string }> }
             </div>
 
         </div>
+
+        {/* 削除。誤爆すると戻せないので、本文をすべて読み終えた最下部に置く */}
+        {canEdit(session.viewerRole ?? 'viewer') && (
+          <div className="mt-12 border-t border-gray-200 pt-6">
+            <SectionLabel>危険な操作</SectionLabel>
+            <div className="flex flex-wrap items-center justify-between gap-3 bg-white border border-red-200 rounded-lg px-4 py-3">
+              <p className="text-xs text-gray-600 leading-relaxed min-w-0">
+                このセッションを削除します。録画・文字起こし・タスク結果・回答・ハイライトがすべて消え、元に戻せません。
+              </p>
+              <button
+                onClick={deleteSession}
+                disabled={deleting}
+                className="flex-shrink-0 inline-flex items-center gap-1.5 border border-red-300 hover:border-red-500 hover:bg-red-50 disabled:opacity-50 text-red-700 px-3 py-1.5 rounded-md text-xs font-medium transition-colors"
+              >
+                <Trash2 className="w-3.5 h-3.5" strokeWidth={2} />
+                {deleting ? '削除中…' : 'セッションを削除'}
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* フローティング AI チャット */}

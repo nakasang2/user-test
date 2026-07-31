@@ -1,6 +1,6 @@
 'use client'
 
-import { CheckCircle2, XCircle, MinusCircle, Clock, Star } from 'lucide-react'
+import { CheckCircle2, XCircle, MinusCircle, Clock, Star, Play } from 'lucide-react'
 
 export interface TaskResultData {
   taskId?: string | null
@@ -8,6 +8,13 @@ export interface TaskResultData {
   text: string
   /** completed | gave_up | not_attempted（未実施＝前提を満たせず着手できなかった） */
   outcome: string
+  /**
+   * セッション開始（＝録画の先頭）からの経過秒。
+   * InterviewRoom が開始ボタン押下時に時間の原点を揃えているので、
+   * 文字起こし・感情グラフ・録画の再生位置とそのまま突き合わせられる。
+   */
+  startedAt?: number | null
+  endedAt?: number | null
   durationSec?: number | null
   seq?: number | null
   /** 集計対象外にした日時。null なら集計に含める */
@@ -40,6 +47,12 @@ export function formatDuration(sec: number): string {
   return `${Math.floor(s / 60)}分${String(s % 60).padStart(2, '0')}秒`
 }
 
+/** 秒を録画の再生位置表記（0:42）に。動画プレーヤーの表示と揃える */
+function formatClock(sec: number): string {
+  const s = Math.max(0, Math.round(sec))
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
+}
+
 /**
  * セッション単位の定量結果（タスク成功率・所要時間・評価スコア）。
  * 文字起こしと違い、ここは構造化データなので数値として集計できる。
@@ -47,9 +60,16 @@ export function formatDuration(sec: number): string {
 export default function SessionMetrics({
   taskResults: allTaskResults,
   answers: allAnswers,
+  onSeek,
 }: {
   taskResults: TaskResultData[]
   answers: AnswerData[]
+  /**
+   * 録画をそのタスクの開始位置へ送る。録画が無いときは未指定。
+   * 「タスク3で断念した人の様子を見る」が分析で最も回数の多い操作なので、
+   * 結果の行から直接飛べるようにする。
+   */
+  onSeek?: (sec: number) => void
 }) {
   // 集計対象外にした行（削除したタスクの結果など）は除く。
   // ここを絞らないと、同じ数字が調査全体のページと食い違う。
@@ -114,6 +134,9 @@ export default function SessionMetrics({
             {taskResults.map((t) => {
               const ok = t.outcome === 'completed'
               const skipped = t.outcome === 'not_attempted'
+              // 未実施のタスクには見るべき映像が無い（着手していない）ので飛ばせない
+              const seekTo = !skipped && typeof t.startedAt === 'number' ? t.startedAt : null
+              const canSeek = onSeek != null && seekTo != null
               return (
                 <li key={t.order} className="flex items-start gap-2.5 px-3 py-2.5 bg-white">
                   {skipped
@@ -122,7 +145,19 @@ export default function SessionMetrics({
                     ? <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0 mt-0.5" strokeWidth={2} />
                     : <XCircle className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5" strokeWidth={2} />}
                   <div className="min-w-0 flex-1">
-                    <p className="text-xs text-gray-500">タスク {t.order}</p>
+                    <p className="text-xs text-gray-500">
+                      タスク {t.order}
+                      {canSeek && (
+                        <button
+                          onClick={() => onSeek!(seekTo!)}
+                          title={`録画の ${formatClock(seekTo!)} から再生する`}
+                          className="ml-2 inline-flex items-center gap-1 align-middle border border-gray-300 hover:border-gray-900 text-gray-600 hover:text-gray-900 rounded px-1.5 py-0.5 text-[11px] tabular-nums transition-colors"
+                        >
+                          <Play className="w-2.5 h-2.5 fill-current" strokeWidth={0} />
+                          {formatClock(seekTo!)}
+                        </button>
+                      )}
+                    </p>
                     <p className={`text-sm leading-snug break-words ${skipped ? 'text-gray-500' : 'text-gray-900'}`}>{t.text}</p>
                   </div>
                   <div className="flex-shrink-0 text-right">
