@@ -16,6 +16,12 @@ import {
   Monitor,
   PartyPopper,
 } from 'lucide-react'
+import ScreenerEditor, {
+  findScreenerWithoutOptions,
+  toScreenerPayload,
+  type ScreenerRow,
+} from '@/components/ScreenerEditor'
+import SeqToggle from '@/components/SeqToggle'
 
 type Role = 'user' | 'assistant'
 type InterviewType = 'interview' | 'impression' | 'usability'
@@ -63,6 +69,10 @@ export default function DesignPage() {
   const [hintDelayMin, setHintDelayMin]         = useState('')
   const [taskBulkMode, setTaskBulkMode]         = useState(false)
   const [taskBulkText, setTaskBulkText]         = useState('')
+  // SEQ は既定 OFF。ここで出さないと、保存後に編集画面を開かない限り取得できない
+  const [seqEnabled, setSeqEnabled]             = useState(false)
+  // 事前質問（属性）。結果ページのセグメント絞り込みの軸になる
+  const [screeners, setScreeners]               = useState<ScreenerRow[]>([])
 
   const bottomRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
@@ -112,7 +122,7 @@ export default function DesignPage() {
         setPlot(data.interview)
         setMessages((prev) => [
           ...prev,
-          { role: 'assistant', content: 'プロットを生成しました。右側で確認・編集してください。準備ができたら「インタビューとして保存」を押してください。' },
+          { role: 'assistant', content: 'プロットを生成しました。内容を確認・編集して、準備ができたら「インタビューとして保存」を押してください。' },
         ])
       }
     } catch {
@@ -140,6 +150,11 @@ export default function DesignPage() {
 
   async function saveInterview() {
     if (!plot) return
+    const badScreener = findScreenerWithoutOptions(screeners)
+    if (badScreener) {
+      alert(`事前質問「${badScreener}」に選択肢を入力してください`)
+      return
+    }
     // 範囲外のまま送るとサーバー側の英語エラーになり、設計した内容が保存されない
     if (sessionType === 'usability' && hintDelayMin.trim()) {
       const m = Number(hintDelayMin)
@@ -184,6 +199,8 @@ export default function DesignPage() {
           hintDelaySec:     sessionType === 'usability' && hintDelayMin.trim()
             ? Number(hintDelayMin) * 60
             : undefined,
+          seqEnabled:       sessionType === 'usability' ? seqEnabled : undefined,
+          screeners:        toScreenerPayload(screeners),
         }),
       })
       const data = await res.json()
@@ -235,10 +252,12 @@ export default function DesignPage() {
         <span className="text-gray-900 text-sm">質問設計</span>
       </nav>
 
-      <div className="flex flex-1 overflow-hidden">
+      {/* 狭い画面では縦積みにする。右ペインを隠すと、プロットも保存ボタンも消えて
+          設計を完了できなくなるため（lg 未満で hidden にしていた） */}
+      <div className="flex flex-1 flex-col lg:flex-row overflow-y-auto lg:overflow-hidden">
 
         {/* 左：チャット */}
-        <div className="flex flex-col w-full lg:w-1/2 border-r border-gray-200">
+        <div className="flex flex-col w-full lg:w-1/2 min-h-[60vh] lg:min-h-0 border-b lg:border-b-0 lg:border-r border-gray-200">
           <div className="flex-1 overflow-y-auto px-5 py-5 space-y-4">
             {messages.map((m, i) => (
               <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
@@ -302,7 +321,7 @@ export default function DesignPage() {
         </div>
 
         {/* 右：プレビュー */}
-        <div className="hidden lg:flex flex-col w-1/2 overflow-y-auto bg-gray-50">
+        <div className="flex flex-col w-full lg:w-1/2 lg:overflow-y-auto bg-gray-50">
           {!plot ? (
             <div className="flex-1 flex flex-col items-center justify-center text-center px-8 gap-4">
               <div className="w-12 h-12 rounded-full bg-white border border-gray-200 flex items-center justify-center">
@@ -634,6 +653,14 @@ export default function DesignPage() {
                   質問を追加
                 </button>
               </div>
+
+              {/* ユーザビリティテストの SEQ。作成モーダル・編集モーダルと同じ文言 */}
+              {sessionType === 'usability' && (
+                <SeqToggle checked={seqEnabled} onChange={setSeqEnabled} />
+              )}
+
+              {/* 事前質問（属性）。保存後に編集画面を開き直さずに済ませる */}
+              <ScreenerEditor rows={screeners} setRows={setScreeners} />
 
               {/* 保存ボタン */}
               <button

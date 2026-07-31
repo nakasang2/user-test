@@ -13,6 +13,12 @@ import {
   Sparkles,
   AlertCircle,
 } from 'lucide-react'
+import ScreenerEditor, {
+  findScreenerWithoutOptions,
+  toScreenerPayload,
+  type ScreenerRow,
+} from './ScreenerEditor'
+import SeqToggle from './SeqToggle'
 
 type InterviewType = 'interview' | 'impression' | 'usability'
 
@@ -58,6 +64,10 @@ export default function CreateInterviewModal({ onClose, onCreated }: Props) {
   const [tasks, setTasks] = useState<TaskItem[]>([{ text: '' }, { text: '' }])
   // 詰まった参加者への声かけまでの分数。空欄なら声かけしない
   const [hintDelayMin, setHintDelayMin] = useState('')
+  // SEQ は既定 OFF。作成時に出さないと、編集画面を開かない限り一生取得できない
+  const [seqEnabled, setSeqEnabled] = useState(false)
+  // 事前質問（属性）。結果ページのセグメント絞り込みの軸になる
+  const [screeners, setScreeners] = useState<ScreenerRow[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -76,6 +86,8 @@ export default function CreateInterviewModal({ onClose, onCreated }: Props) {
     if (sessionType === 'impression' && !stimulusUrl.trim()) {
       setError('印象テストには画像URLが必要です'); return
     }
+    const badScreener = findScreenerWithoutOptions(screeners)
+    if (badScreener) { setError(`事前質問「${badScreener}」に選択肢を入力してください`); return }
     // 範囲外のまま送るとサーバー側の英語エラーになり、入力内容が保存されない
     if (sessionType === 'usability' && hintDelayMin.trim()) {
       const m = Number(hintDelayMin)
@@ -108,6 +120,8 @@ export default function CreateInterviewModal({ onClose, onCreated }: Props) {
           hintDelaySec:     sessionType === 'usability' && hintDelayMin.trim()
             ? Number(hintDelayMin) * 60
             : undefined,
+          seqEnabled:       sessionType === 'usability' ? seqEnabled : undefined,
+          screeners:        toScreenerPayload(screeners),
           questions: sessionType === 'interview'
             ? (autoGenerate ? [] : questions.filter((q) => q.text.trim()).map((q) => ({ text: q.text, type: q.type })))
             : questions.filter((q) => q.text.trim()).map((q) => ({ text: q.text, type: q.type })),
@@ -374,6 +388,10 @@ export default function CreateInterviewModal({ onClose, onCreated }: Props) {
                   <span className="text-xs text-gray-600">分後に声かけする（1〜30分）</span>
                 </div>
               </div>
+
+              <div className="mt-3">
+                <SeqToggle checked={seqEnabled} onChange={setSeqEnabled} />
+              </div>
             </div>
           )}
 
@@ -472,6 +490,9 @@ export default function CreateInterviewModal({ onClose, onCreated }: Props) {
               </button>
             </div>
           )}
+
+          {/* 事前質問（属性）。編集画面を開き直さなくても、ここで設定できるようにする */}
+          <ScreenerEditor rows={screeners} setRows={setScreeners} />
 
           {error && (
             <div className="flex items-start gap-2 text-sm text-red-700 bg-red-50 border border-red-200 rounded-md px-3 py-2">
