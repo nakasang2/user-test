@@ -2,10 +2,12 @@
 
 > Claude向け運用ルール: セッション開始時にこのファイルを読んでから作業に入る。作業の節目・中断時・ship後に更新する。終わった項目は「完了ログ」へ移し、完了ログは直近5件だけ残す。
 
-- **最終更新**: 2026-07-31（PR #36 まで本番反映済み。作業ブランチは `feat/prerequisite-tasks`＝main に追随済み。**`qa/release-readiness` はリモートが過去の squash マージで分岐しており push 不可なので、今後は使わない**）
+- **最終更新**: 2026-08-03（PR #37 で質問ごとの画像機能を出荷後、本番でアップロード失敗が発覚し追加修正中。作業ブランチは `feat/prerequisite-tasks`＝main に追随済み。**`qa/release-readiness` はリモートが過去の squash マージで分岐しており push 不可なので、今後は使わない**）
 
 ## 進行中
-- なし（参加前チェックは PR #36、UXレビュー B→A→C は PR #35 で本番反映済み。**画面の表示確認だけ残り**＝下記「次にやること」）
+- **質問画像アップロードの修正**: 本番の Blob ストアが private 設定で public な blob を作れず失敗していた。質問画像専用に public な Blob ストア `user-test-public-images` を新規作成し、`PUBLIC_IMAGES_READ_WRITE_TOKEN` で接続済み（Vercel 側の環境変数は production/preview/development すべてに設定済み）。コード側の配線（`/api/uploads/question-image` がこのトークンを明示的に使う）まで完了・未コミット。方針は DECISIONS.md「2026-08-03 質問画像アップロードが失敗する問題（本番）」参照
+  - 検証状況: tsc / eslint / npm test 通過。本番の READ_WRITE トークンを使い、新ストアへの `put(access:'public')` がサーバー側で成功することは確認済み。**実際のブラウザからのアップロード操作は未検証**（ログインできないため）
+- 参加前チェック（PR #36）・UXレビュー B→A→C（PR #35）・質問ごとの画像本体（PR #37）は本番反映済み。**画面の表示確認だけ残り**＝下記「次にやること」
 
 ## 出荷の進め方（2026-07-29 に変更）
 - **マージまで Claude が行う**。「push it」で 検証 → push → PR 作成 → `gh pr merge --merge` → 本番反映の確認 まで。ユーザーの GitHub 操作は不要（**`--squash` は使わない**。作業ブランチが main の祖先でなくなり次の push が拒否される。DECISIONS.md の絶対ルール参照）

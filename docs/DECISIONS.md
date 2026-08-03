@@ -36,6 +36,18 @@
   - Safari / Firefox の参加者は 100% 参加できない。従来の「テキスト入力で続ける」フォールバック（`textOnlyMode`）は残すが、新規の参加動線は必ずこのチェックを通るので実質使われない
   - `/api/tts` が落ちているときは確認音（ビープ）に切り替えて通す。サーバー側の一時的な不調で参加そのものを止めないため
 
+## 2026-08-03 質問画像アップロードが失敗する問題（本番）
+- 事象: 「画像を追加」（ファイル直アップロード）を押すと、ブラウザのコンソールに `vercel.com/api/blob` への CORS エラーが出て失敗する。「URLで指定」は無関係なので影響なし
+- 原因調査: `@vercel/blob` のクライアント直アップロードは、ブラウザから直接 `https://vercel.com/api/blob` へ PUT するのが正規の仕様（CORS エラーではなく、Vercel 側のエラーレスポンスに CORS ヘッダが無いため誤表示されていた）。本番の `BLOB_READ_WRITE_TOKEN` を使いサーバー側から直接 `put(..., {access:'public'})` を検証したところ、**`Cannot use public access on a private store`** と判明。既存の Blob ストア（録画用）が **private 設定で作成されており、後から public に変更する手段が無い**（CLI にも update コマンドが無く、Vercel の仕様として作成時固定）
+- 決定（ユーザーが確定）: **質問画像専用に public な Blob ストアを新規作成する**。録画用の既定ストア（private）はそのまま使い続け、画像だけ別ストアに分離する
+  - `vercel blob create-store user-test-public-images --access public` で作成
+  - `vercel integration resource connect user-test-public-images user-test --prefix PUBLIC_IMAGES_` で接続（`BLOB_READ_WRITE_TOKEN` と名前が衝突するため `--prefix` で `PUBLIC_IMAGES_READ_WRITE_TOKEN` という別名にした）
+  - `/api/uploads/question-image` の `handleUpload()` に `token: process.env.PUBLIC_IMAGES_READ_WRITE_TOKEN` を明示（既定の `BLOB_READ_WRITE_TOKEN` を渡すと同じエラーになる）
+  - `src/lib/env.ts` に任意項目として追加。未設定でもアプリ全体は落ちず、質問画像アップロードだけ無効化されて警告が出る
+- 却下: 既存の private ストアのまま署名付き URL のプロキシ経由で配信する案 — 新規リソース作成を避けられるが実装が増える。ユーザーが「同じ Vercel Blob のまま公開用ストアを追加」を選択したため見送り
+- 却下: Supabase Storage の新規導入 — このリポジトリでは録画も含め Supabase は一度も使われておらず（DB は Neon 系）、新しい認証情報一式が要る。ユーザーは「今動画が上がっているのと同じ場所」と誤認していたため、事実確認の上で撤回
+- 補足: `.env.example` に `PUBLIC_IMAGES_READ_WRITE_TOKEN` の行を追記できていない（Claude の権限設定で編集不可。`.env.example` の `DAILY_API_KEY` 削除の件と同じ制約）
+
 ## 2026-07-31 印象テスト: 質問ごとの画像
 - 背景: 印象テストは「調査に1枚＋表示秒数」のみで、質問側には画像を持たせられなかった。ユーザーから「各設問に画像を紐づけたい」と要望
 - 決定（ユーザーが3点とも確定）:
