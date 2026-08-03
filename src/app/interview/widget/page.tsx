@@ -211,37 +211,13 @@ function WidgetContent() {
       canvas.height = H
       const ctx = canvas.getContext('2d')!
 
-      // ウェブカメラ PiP 幅（右下に配置）。高さは実映像のアスペクト比から毎フレーム算出し、
-      // 縦横比の潰れ（16:9 を 4:3 枠に押し込む等）を防ぐ。
-      const pipW = Math.round(W * 0.22)
-
-      const webcamVid = webcamVideoRef.current
-
-      // 合成描画ループ
+      // ウェブカメラ PiP の合成はしない。「画面全体」共有では、常に最前面の小窓自体が
+      // カメラ映像を映したまま画面キャプチャに写り込む。ここでさらに合成すると、
+      // 同じ顔が小窓とワイプの2箇所に写る（実際に起きた不具合。DECISIONS 参照）。
+      // 描画ループは画面のみだが、キャンバス経由にすることで解像度上限（1920×1080）と
+      // 一定フレームレートを保つ（高DPI画面でファイルが肥大化するのを防ぐ）。
       function draw() {
         ctx.drawImage(screenVid, 0, 0, W, H)
-
-        if (webcamVid && webcamVid.readyState >= 2 && webcamVid.videoWidth) {
-          // 実際のカメラのアスペクト比で高さを決める（潰れ防止）
-          const ratio = webcamVid.videoHeight / webcamVid.videoWidth || 0.75
-          const pipH = Math.round(pipW * ratio)
-          const pipX = W - pipW - 16
-          const pipY = H - pipH - 16
-          // クリップしてから左右反転（鏡映し）で描画
-          ctx.save()
-          ctx.beginPath()
-          ctx.rect(pipX, pipY, pipW, pipH)
-          ctx.clip()
-          ctx.translate(pipX + pipW, pipY)
-          ctx.scale(-1, 1)
-          ctx.drawImage(webcamVid, 0, 0, pipW, pipH)
-          ctx.restore()
-          // 白枠
-          ctx.strokeStyle = 'rgba(255,255,255,0.85)'
-          ctx.lineWidth = 2
-          ctx.strokeRect(pipX, pipY, pipW, pipH)
-        }
-
         animFrameRef.current = requestAnimationFrame(draw)
       }
       draw()
