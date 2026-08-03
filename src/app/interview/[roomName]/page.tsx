@@ -29,6 +29,10 @@ export default async function InterviewPage(props: { params: Promise<{ roomName:
         id: q.id,
         text: q.text,
         type: (('type' in q ? q.type : undefined) ?? 'open') as 'open' | 'rating' | 'nps',
+        // 印象テストで質問ごとに提示する画像。ここで渡し忘れると、設定しても参加者側に出ない
+        imageUrl: q.imageUrl,
+        imageMode: q.imageMode,
+        imageDuration: q.imageDuration,
       }))}
       interviewTitle={session.interview.title}
       participantName={session.participant?.name}

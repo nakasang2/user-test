@@ -22,11 +22,20 @@ import ScreenerEditor, {
   type ScreenerRow,
 } from '@/components/ScreenerEditor'
 import SeqToggle from '@/components/SeqToggle'
+import QuestionImageField from '@/components/QuestionImageField'
+import { toQuestionImagePayload, validateQuestionImage } from '@/lib/question-image'
 
 type Role = 'user' | 'assistant'
 type InterviewType = 'interview' | 'impression' | 'usability'
 interface Message { role: Role; content: string }
-interface Question { text: string; type: string }
+interface Question {
+  text: string
+  type: string
+  // 印象テストで質問ごとに提示する画像
+  imageUrl?: string | null
+  imageMode?: string | null
+  imageDuration?: number | null
+}
 /** AI が生成する質問は自由回答固定なので、保存前にここで形式を選べるようにする */
 const Q_TYPES: { value: string; label: string }[] = [
   { value: 'open',   label: '自由回答' },
@@ -155,6 +164,12 @@ export default function DesignPage() {
       alert(`事前質問「${badScreener}」に選択肢を入力してください`)
       return
     }
+    if (sessionType === 'impression') {
+      for (let i = 0; i < plot.questions.length; i++) {
+        const bad = validateQuestionImage(plot.questions[i], `質問${i + 1}`)
+        if (bad) { alert(bad); return }
+      }
+    }
     // 範囲外のまま送るとサーバー側の英語エラーになり、設計した内容が保存されない
     if (sessionType === 'usability' && hintDelayMin.trim()) {
       const m = Number(hintDelayMin)
@@ -173,7 +188,11 @@ export default function DesignPage() {
         body: JSON.stringify({
           title:            plot.title,
           description:      plot.description,
-          questions:        plot.questions,
+          questions:        plot.questions.map((q) => ({
+            text: q.text,
+            type: q.type,
+            ...(sessionType === 'impression' ? toQuestionImagePayload(q) : {}),
+          })),
           type:             sessionType,
           usabilityMode:    sessionType === 'usability' ? usabilityMode : undefined,
           stimulusUrl:      (sessionType === 'impression' || sessionType === 'usability') ? (stimulusUrl || undefined) : undefined,
@@ -638,6 +657,17 @@ export default function DesignPage() {
                         >
                           {Q_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
                         </select>
+                        {sessionType === 'impression' && (
+                          <QuestionImageField
+                            value={q}
+                            onChange={(patch) => {
+                              if (!plot) return
+                              const updated = [...plot.questions]
+                              updated[i] = { ...updated[i], ...patch }
+                              setPlot({ ...plot, questions: updated })
+                            }}
+                          />
+                        )}
                       </div>
                       <button
                         onClick={() => removeQuestion(i)}

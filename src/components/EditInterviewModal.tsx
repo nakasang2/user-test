@@ -8,6 +8,8 @@ import ScreenerEditor, {
   type ScreenerRow,
 } from './ScreenerEditor'
 import SeqToggle from './SeqToggle'
+import QuestionImageField from './QuestionImageField'
+import { toQuestionImagePayload, validateQuestionImage } from '@/lib/question-image'
 
 type QType = 'open' | 'rating' | 'nps'
 
@@ -18,12 +20,22 @@ export interface EditableInterview {
   type: string
   seqEnabled?: boolean
   hintDelaySec?: number | null
-  questions: { id: string; text: string; order: number; type: string }[]
+  questions: { id: string; text: string; order: number; type: string; imageUrl?: string | null; imageMode?: string | null; imageDuration?: number | null }[]
   tasks?: { id: string; text: string; order: number; hint?: string | null; isPrerequisite?: boolean | null }[]
   screeners?: { id: string; label: string; options: string[]; disqualify: string[]; required: boolean; order: number }[]
 }
 
-interface Row { id?: string; text: string; type: QType; hint?: string; isPrerequisite?: boolean }
+interface Row {
+  id?: string
+  text: string
+  type: QType
+  hint?: string
+  isPrerequisite?: boolean
+  // 印象テストで質問ごとに提示する画像
+  imageUrl?: string | null
+  imageMode?: string | null
+  imageDuration?: number | null
+}
 
 const Q_TYPES: { value: QType; label: string }[] = [
   { value: 'open',   label: '自由回答' },
@@ -49,7 +61,15 @@ export default function EditInterviewModal({
   const [title, setTitle] = useState(interview.title)
   const [description, setDescription] = useState(interview.description ?? '')
   const [questions, setQuestions] = useState<Row[]>(
-    interview.questions.map((q) => ({ id: q.id, text: q.text, type: (q.type as QType) ?? 'open' }))
+    // 画像の3列を落とすと、保存のたびに設定が静かに消える（isPrerequisite で起きた事故と同じ）
+    interview.questions.map((q) => ({
+      id: q.id,
+      text: q.text,
+      type: (q.type as QType) ?? 'open',
+      imageUrl: q.imageUrl ?? null,
+      imageMode: q.imageMode ?? null,
+      imageDuration: q.imageDuration ?? null,
+    }))
   )
   const [tasks, setTasks] = useState<Row[]>(
     (interview.tasks ?? []).map((t) => ({
@@ -77,6 +97,7 @@ export default function EditInterviewModal({
   const [error, setError] = useState<string | null>(null)
 
   const isUsability = interview.type === 'usability'
+  const isImpression = interview.type === 'impression'
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
@@ -88,6 +109,12 @@ export default function EditInterviewModal({
     if (!title.trim()) { setError('タイトルを入力してください'); return }
     const badScreener = findScreenerWithoutOptions(screeners)
     if (badScreener) { setError(`事前質問「${badScreener}」に選択肢を入力してください`); return }
+    if (isImpression) {
+      for (let i = 0; i < questions.length; i++) {
+        const bad = validateQuestionImage(questions[i], `質問${i + 1}`)
+        if (bad) { setError(bad); return }
+      }
+    }
     // 範囲外のまま送るとサーバー側の英語エラーになり、同じ画面で直した他の項目
     // （タイトル・タスク・質問など）も一緒に保存されず消えてしまう。ここで止める。
     if (isUsability && hintDelayMin.trim()) {
@@ -110,7 +137,10 @@ export default function EditInterviewModal({
           description: description.trim(),
           questions: questions
             .filter((q) => q.text.trim())
-            .map((q) => ({ id: q.id, text: q.text.trim(), type: q.type })),
+            .map((q) => ({
+              id: q.id, text: q.text.trim(), type: q.type,
+              ...(isImpression ? toQuestionImagePayload(q) : {}),
+            })),
           // 選択肢が無い設問は落とす（被験者が回答できず参加不能になるため）
           screeners: toScreenerPayload(screeners),
           ...(isUsability
@@ -243,6 +273,7 @@ export default function EditInterviewModal({
             setRows={setQuestions}
             placeholder="例: 使ってみて迷った点はありますか"
             withType
+            withImage={isImpression}
           />
 
           {/* 事前質問（スクリーニング／属性）。作成・AI設計ページと共通のエディタ */}
@@ -277,7 +308,7 @@ export default function EditInterviewModal({
 
 /** 質問／タスクの共通エディタ（追加・削除・並べ替え） */
 function RowEditor({
-  label, rows, setRows, placeholder, withType, withHint = false,
+  label, rows, setRows, placeholder, withType, withHint = false, withImage = false,
 }: {
   label: string
   rows: Row[]
@@ -286,6 +317,8 @@ function RowEditor({
   withType: boolean
   /** タスク用: 詰まったときに見せるヒントも入力する */
   withHint?: boolean
+  /** 印象テストの質問用: 質問ごとに提示する画像も設定する */
+  withImage?: boolean
 }) {
   const move = (from: number, to: number) => {
     if (to < 0 || to >= rows.length) return
@@ -342,6 +375,18 @@ function RowEditor({
               <Trash2 className="w-3.5 h-3.5" strokeWidth={2} />
             </button>
           </div>
+          {withImage && (
+            <div className="flex items-start gap-1.5 mt-1">
+              <span className="w-4 flex-shrink-0" aria-hidden="true" />
+              <div className="flex-1 min-w-0">
+                <QuestionImageField
+                  value={row}
+                  onChange={(patch) => setRows(rows.map((r, j) => (j === i ? { ...r, ...patch } : r)))}
+                />
+              </div>
+              <span className="w-[52px] flex-shrink-0" aria-hidden="true" />
+            </div>
+          )}
           {withHint && (
             <>
               <div className="flex items-start gap-1.5 mt-1">

@@ -37,6 +37,7 @@ type AnswerInput = {
   valueText?: string | null
   followUpCount?: number | null
   answeredAt?: number | null
+  imageUrl?: string | null
 }
 
 // not_attempted = 前のタスク（前提タスク）を達成できず、着手する機会が無かった。
@@ -105,6 +106,12 @@ export async function POST(req: NextRequest, props: { params: Promise<{ id: stri
         questionId: typeof a.questionId === 'string' ? a.questionId : null,
         order: num(a.order) ?? 0,
         text: str(a.text, 2000),
+        // 回答時に提示していた画像。質問文と同じくスナップショットで持つ。
+        // 控えないと、あとで画像を差し替えたときに過去の回答が別の画像に紐づいて見える。
+        // http(s) 以外は保存しない（後からリサーチャーの画面で <img> に流すため）
+        imageUrl: typeof a.imageUrl === 'string' && /^https?:\/\//i.test(a.imageUrl)
+          ? a.imageUrl.slice(0, 2000)
+          : null,
         type: a.type,
         valueNum: num(a.valueNum),
         valueText: typeof a.valueText === 'string' ? a.valueText.slice(0, 4000) : null,

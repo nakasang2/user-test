@@ -3,6 +3,7 @@ import { z } from 'zod'
 import { prisma } from '@/lib/db'
 import { generateInterviewQuestions } from '@/lib/ai'
 import { requireAuth, handleApiError } from '@/lib/api-auth'
+import { toQuestionImagePayload } from '@/lib/question-image'
 
 const createSchema = z.object({
   title:            z.string().min(1, 'タイトルを入力してください').max(200),
@@ -11,7 +12,14 @@ const createSchema = z.object({
   topic:            z.string().max(500).optional(),
   questions:        z.array(z.union([
     z.string(),
-    z.object({ text: z.string(), type: z.string().optional() }),
+    z.object({
+      text: z.string(),
+      type: z.string().optional(),
+      // 印象テストで質問ごとに提示する画像。編集 API と同じ制約に揃える
+      imageUrl: z.string().url().max(2000).nullable().optional(),
+      imageMode: z.enum(['persistent', 'timed']).nullable().optional(),
+      imageDuration: z.number().int().min(1).max(60).nullable().optional(),
+    }),
   ])).optional(),
   type:             z.enum(['interview', 'impression', 'usability']).default('interview'),
   usabilityMode:    z.enum(['prototype', 'service']).optional(),
@@ -70,7 +78,9 @@ export async function POST(req: NextRequest) {
     }
     const { title, description, questions, autoGenerate, topic, type, usabilityMode, stimulusUrl, stimulusDuration, tasks, seqEnabled, hintDelaySec, screeners } = parsed.data
 
-    type QuestionInput = { text: string; type?: string } | string
+    type QuestionInput =
+      | { text: string; type?: string; imageUrl?: string | null; imageMode?: string | null; imageDuration?: number | null }
+      | string
     let questionList: QuestionInput[] = questions ?? []
 
     if (autoGenerate && topic) {
@@ -94,6 +104,8 @@ export async function POST(req: NextRequest) {
             text: typeof q === 'string' ? q : q.text,
             type: typeof q === 'string' ? 'open' : (q.type ?? 'open'),
             order: index + 1,
+            // 画像が無ければ見せ方も秒数も残さない（使われない値を保存しない）
+            ...toQuestionImagePayload(typeof q === 'string' ? {} : q),
           })),
         },
         tasks: {

@@ -18,6 +18,8 @@ interface QuestionCol {
   text: string
   order: number
   type: string
+  /** 印象テストで、この質問に紐づけて提示していた画像 */
+  imageUrl?: string | null
 }
 
 /** 質問の型に応じた最大値（スコア表示に使う） */
@@ -274,6 +276,15 @@ export default function AnswerMatrix({
                       <span className="text-[10px] text-gray-400 ml-6">
                         {q.type === 'nps' ? '0〜10' : '1〜5'}
                       </span>
+                    )}
+                    {/* どの画像についての回答かが分からないと、列同士を比べられない */}
+                    {q.imageUrl && (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={q.imageUrl}
+                        alt=""
+                        className="ml-6 mt-1 w-16 h-12 object-cover rounded border border-gray-200 bg-white"
+                      />
                     )}
                   </button>
                 </th>

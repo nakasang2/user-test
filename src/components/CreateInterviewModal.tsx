@@ -19,12 +19,18 @@ import ScreenerEditor, {
   type ScreenerRow,
 } from './ScreenerEditor'
 import SeqToggle from './SeqToggle'
+import QuestionImageField from './QuestionImageField'
+import { toQuestionImagePayload, validateQuestionImage } from '@/lib/question-image'
 
 type InterviewType = 'interview' | 'impression' | 'usability'
 
 interface QuestionItem {
   text: string
   type: 'open' | 'rating' | 'nps'
+  // 印象テストで、この質問に紐づけて提示する画像
+  imageUrl?: string | null
+  imageMode?: string | null
+  imageDuration?: number | null
 }
 
 interface TaskItem { text: string; hint?: string; isPrerequisite?: boolean }
@@ -83,11 +89,23 @@ export default function CreateInterviewModal({ onClose, onCreated }: Props) {
     setError(null)
     // 入力検証（送信前）
     if (!title.trim()) { setError('タイトルを入力してください'); return }
-    if (sessionType === 'impression' && !stimulusUrl.trim()) {
-      setError('印象テストには画像URLが必要です'); return
+    // 質問ごとに画像を付けられるようになったので、全体の刺激画像は必須にしない。
+    // ただし画像がどこにも無い印象テストは成立しないので、どちらか一方は求める。
+    if (sessionType === 'impression'
+      && !stimulusUrl.trim()
+      && !questions.some((q) => q.imageUrl?.trim())) {
+      setError('印象テストには画像が必要です。最初に見せる画像URLか、質問ごとの画像を設定してください')
+      return
     }
     const badScreener = findScreenerWithoutOptions(screeners)
     if (badScreener) { setError(`事前質問「${badScreener}」に選択肢を入力してください`); return }
+    // 画像の指定ミスは参加者側で「出ない」形で現れ、そのセッションは撮り直せない
+    if (sessionType === 'impression') {
+      for (let i = 0; i < questions.length; i++) {
+        const bad = validateQuestionImage(questions[i], `質問${i + 1}`)
+        if (bad) { setError(bad); return }
+      }
+    }
     // 範囲外のまま送るとサーバー側の英語エラーになり、入力内容が保存されない
     if (sessionType === 'usability' && hintDelayMin.trim()) {
       const m = Number(hintDelayMin)
@@ -124,7 +142,11 @@ export default function CreateInterviewModal({ onClose, onCreated }: Props) {
           screeners:        toScreenerPayload(screeners),
           questions: sessionType === 'interview'
             ? (autoGenerate ? [] : questions.filter((q) => q.text.trim()).map((q) => ({ text: q.text, type: q.type })))
-            : questions.filter((q) => q.text.trim()).map((q) => ({ text: q.text, type: q.type })),
+            : questions.filter((q) => q.text.trim()).map((q) => ({
+                text: q.text,
+                type: q.type,
+                ...(sessionType === 'impression' ? toQuestionImagePayload(q) : {}),
+              })),
           autoGenerate: sessionType === 'interview' ? autoGenerate : false,
           topic:        (sessionType === 'interview' && autoGenerate) ? topic : undefined,
         }),
@@ -252,17 +274,20 @@ export default function CreateInterviewModal({ onClose, onCreated }: Props) {
           {sessionType === 'impression' && (
             <>
               <div>
-                <label htmlFor="ci-stimulus" className="block text-xs font-medium text-gray-700 mb-1.5">画像URL <span className="text-red-500">*</span></label>
+                <label htmlFor="ci-stimulus" className="block text-xs font-medium text-gray-700 mb-1.5">
+                  最初に見せる画像URL <span className="text-gray-400 font-normal">（任意）</span>
+                </label>
                 <input
                   id="ci-stimulus"
                   type="url"
-                  required
                   value={stimulusUrl}
                   onChange={(e) => setStimulusUrl(e.target.value)}
                   placeholder="https://example.com/image.png"
                   className={inputClass}
                 />
-                <p className="text-xs text-gray-500 mt-1">公開されている画像のURLを貼り付けてください</p>
+                <p className="text-xs text-gray-500 mt-1">
+                  質問が始まる前に一度だけ見せる画像です。質問ごとの画像だけを使う場合は空欄で構いません。
+                </p>
               </div>
               <div>
                 <label htmlFor="ci-duration" className="block text-xs font-medium text-gray-700 mb-1.5">表示秒数（デフォルト: 5秒）</label>
@@ -460,25 +485,44 @@ export default function CreateInterviewModal({ onClose, onCreated }: Props) {
           {sessionType !== 'interview' && (
             <div>
               <div className="flex items-center justify-between mb-2">
-                <label className="text-xs font-medium text-gray-700">事後質問 <span className="text-gray-400 font-normal">（任意）</span></label>
-                <span className="text-xs text-gray-400">テスト後に聞く質問</span>
+                <label className="text-xs font-medium text-gray-700">
+                  {sessionType === 'impression' ? '質問' : <>事後質問 <span className="text-gray-400 font-normal">（任意）</span></>}
+                </label>
+                <span className="text-xs text-gray-400">
+                  {sessionType === 'impression' ? '質問ごとに画像を紐づけられます' : 'テスト後に聞く質問'}
+                </span>
               </div>
               <div className="space-y-1.5">
                 {questions.map((q, i) => (
-                  <div key={i} className="flex gap-2 items-start">
-                    <span className="text-gray-400 text-xs pt-2 w-5 flex-shrink-0 text-right">{i + 1}.</span>
-                    <input
-                      value={q.text}
-                      onChange={(e) => updateQuestion(i, { text: e.target.value })}
-                      placeholder="例：全体的な印象を教えてください"
-                      className={inputClass}
-                    />
-                    {questions.length > 1 && (
-                      <button type="button" onClick={() => setQuestions(questions.filter((_, j) => j !== i))}
-                        aria-label={`質問${i + 1}を削除`}
-                        className="text-gray-300 hover:text-red-600 transition-colors p-1 mt-1">
-                        <X className="w-3.5 h-3.5" strokeWidth={2} />
-                      </button>
+                  <div key={i} className="space-y-1">
+                    <div className="flex gap-2 items-start">
+                      <span className="text-gray-400 text-xs pt-2 w-5 flex-shrink-0 text-right">{i + 1}.</span>
+                      <input
+                        value={q.text}
+                        onChange={(e) => updateQuestion(i, { text: e.target.value })}
+                        placeholder="例：全体的な印象を教えてください"
+                        className={inputClass}
+                      />
+                      {questions.length > 1 && (
+                        <button type="button" onClick={() => setQuestions(questions.filter((_, j) => j !== i))}
+                          aria-label={`質問${i + 1}を削除`}
+                          className="text-gray-300 hover:text-red-600 transition-colors p-1 mt-1">
+                          <X className="w-3.5 h-3.5" strokeWidth={2} />
+                        </button>
+                      )}
+                    </div>
+                    {/* 印象テストのみ。質問文のすぐ下に置いて対応関係を明確にする */}
+                    {sessionType === 'impression' && (
+                      <div className="flex gap-2 items-start">
+                        <span className="w-5 flex-shrink-0" aria-hidden="true" />
+                        <div className="flex-1 min-w-0">
+                          <QuestionImageField
+                            value={q}
+                            onChange={(patch) => updateQuestion(i, patch)}
+                          />
+                        </div>
+                        {questions.length > 1 && <span className="w-[26px] flex-shrink-0" aria-hidden="true" />}
+                      </div>
                     )}
                   </div>
                 ))}
