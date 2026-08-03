@@ -19,17 +19,29 @@ export const runtime = 'nodejs'
  *
  * 保存先の確定は「調査を保存したとき」なので、ここでは DB に何も書かない。
  * アップロードしたまま保存せずに離脱すると Blob が残るが、画像は小さいので許容する。
+ *
+ * ストア: 録画用の既定ストア（BLOB_READ_WRITE_TOKEN）は private 設定で作成されており、
+ * private ストアでは public な blob を一切作れない（store 単位の固定設定で、
+ * 個々のアップロードで上書きできない）。そのため質問画像専用に public な
+ * Blob ストアを別途作成し、PUBLIC_IMAGES_READ_WRITE_TOKEN で接続している。
+ * 既定の BLOB_READ_WRITE_TOKEN を渡すと「Cannot use public access on a private store」
+ * で失敗するので、必ずこちらのトークンを明示する。
  */
 export async function POST(request: NextRequest) {
   try {
     if (!(await rateLimit(`question-image:${getClientIp(request)}`, 60, 60))) {
       return NextResponse.json({ error: 'Too many requests' }, { status: 429 })
     }
+    if (!process.env.PUBLIC_IMAGES_READ_WRITE_TOKEN) {
+      console.error('[question-image upload] PUBLIC_IMAGES_READ_WRITE_TOKEN is not set')
+      return NextResponse.json({ error: '画像アップロード用のストレージが設定されていません' }, { status: 500 })
+    }
     const body = (await request.json()) as HandleUploadBody
 
     const json = await handleUpload({
       body,
       request,
+      token: process.env.PUBLIC_IMAGES_READ_WRITE_TOKEN,
       onBeforeGenerateToken: async () => {
         // トークン発行のリクエストはブラウザから Cookie 付きで来るのでここで認可できる
         await requireRole('editor')

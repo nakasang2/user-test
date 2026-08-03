@@ -9,6 +9,9 @@ const schema = z.object({
   JWT_SECRET: z.string().min(32, 'JWT_SECRET must be at least 32 characters'),
   OPENAI_API_KEY: z.string().optional(),
   BLOB_READ_WRITE_TOKEN: z.string().optional(),
+  // 質問画像専用の公開Blobストア用トークン。既定ストアは private 設定で
+  // public な blob を作れないため分離している（詳細: api/uploads/question-image/route.ts）
+  PUBLIC_IMAGES_READ_WRITE_TOKEN: z.string().optional(),
   UPSTASH_REDIS_REST_URL: z.string().optional(),
   UPSTASH_REDIS_REST_TOKEN: z.string().optional(),
   NEXT_PUBLIC_APP_URL: z.string().optional(),
@@ -37,6 +40,7 @@ export function validateEnv(): void {
   const missing: string[] = []
   if (!process.env.OPENAI_API_KEY) missing.push('OPENAI_API_KEY（AI 分析・要約・TTS・Whisper が無効）')
   if (!process.env.BLOB_READ_WRITE_TOKEN) missing.push('BLOB_READ_WRITE_TOKEN（録画の保存・配信が無効）')
+  if (!process.env.PUBLIC_IMAGES_READ_WRITE_TOKEN) missing.push('PUBLIC_IMAGES_READ_WRITE_TOKEN（質問画像のアップロードが無効）')
   if (!process.env.UPSTASH_REDIS_REST_URL || !process.env.UPSTASH_REDIS_REST_TOKEN) {
     missing.push('UPSTASH_REDIS_REST_URL/TOKEN（レート制限がインメモリ＝サーバーレスでは不完全）')
   }
