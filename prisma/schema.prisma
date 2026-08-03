@@ -119,6 +119,14 @@ model Question {
   text        String
   order       Int
   type        String    @default("open") // open | rating | nps
+  // 印象テストで、この質問に紐づけて提示する画像。null なら画像なし（従来どおり）。
+  // Interview.stimulusUrl（最初に1回見せる全体の刺激）とは別物で、併用できる。
+  imageUrl    String?
+  // 見せ方: persistent = 質問に答えている間ずっと表示 / timed = 先に imageDuration 秒だけ見せて隠す。
+  // null は persistent 扱い（画像を足しただけの質問が黙って消えないように）。
+  imageMode   String?
+  // timed のときに見せる秒数。null なら既定 5 秒
+  imageDuration Int?
   interviewId String
   interview   Interview @relation(fields: [interviewId], references: [id], onDelete: Cascade)
   answers     Answer[]
@@ -249,6 +257,9 @@ model Answer {
   question   Question? @relation(fields: [questionId], references: [id], onDelete: SetNull)
   order      Int
   text       String    // 質問文のスナップショット
+  // 回答時に提示していた画像のスナップショット。質問文と同じ理由で控える。
+  // あとで画像を差し替えると、これが無いと過去の回答が別の画像に紐づいて見える。
+  imageUrl   String?
   type       String    // open | rating | nps
   valueNum   Float?    // rating(1-5) / nps(0-10) の数値
   valueText  String?   // 自由回答（深掘りのやり取りを含めた回答全体）

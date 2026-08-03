@@ -33,7 +33,7 @@ export async function POST(req: NextRequest, props: { params: Promise<{ id: stri
     const interview = await prisma.interview.findFirst({
       where: { id, organizationId: orgId },
       select: {
-        questions: { orderBy: { order: 'asc' }, select: { id: true, text: true, order: true, type: true } },
+        questions: { orderBy: { order: 'asc' }, select: { id: true, text: true, order: true, type: true, imageUrl: true } },
         sessions: {
           // パイロットと、既に回答があるセッションは対象外。
           // 実施中（pending/active）も除外する。実施中は被験者側が本物の回答を
@@ -99,6 +99,7 @@ export async function POST(req: NextRequest, props: { params: Promise<{ id: stri
           questionId: string
           order: number
           text: string
+          imageUrl?: string | null
           type: string
           valueNum?: number
           valueText?: string
@@ -122,6 +123,9 @@ export async function POST(req: NextRequest, props: { params: Promise<{ id: stri
               questionId: q.id,
               order: q.order,
               text: q.text,
+              // 実施時に提示していた画像は分からないので、現在の設定を控える。
+              // 文言のスナップショットと同じ扱い（無いよりは手がかりになる）
+              imageUrl: q.imageUrl,
               type,
               valueNum: n,
             }]
@@ -132,6 +136,7 @@ export async function POST(req: NextRequest, props: { params: Promise<{ id: stri
             questionId: q.id,
             order: q.order,
             text: q.text,
+            imageUrl: q.imageUrl,
             type,
             valueText: v.answer,
             followUpCount: v.followUpCount,

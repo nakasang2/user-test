@@ -25,7 +25,12 @@ export async function GET(req: NextRequest, props: { params: Promise<{ id: strin
       // isPrerequisite を落とすと、編集モーダルが false で初期化して保存し、
       // 「次のタスクの前提」の設定が編集のたびに静かに消える
       tasks: { orderBy: { order: 'asc' }, select: { id: true, text: true, order: true, hint: true, isPrerequisite: true } },
-      questions: { orderBy: { order: 'asc' }, select: { id: true, text: true, order: true, type: true } },
+      // 画像の3列を落とすと、編集モーダルが空で初期化して保存し、設定が静かに消える
+      // （isPrerequisite で実際に起きた。LESSONS「データ設計」参照）
+      questions: {
+        orderBy: { order: 'asc' },
+        select: { id: true, text: true, order: true, type: true, imageUrl: true, imageMode: true, imageDuration: true },
+      },
       // 一覧表示のため全ステータスのセッションを返す（分析・レーダーは done のみで算出）
       sessions: {
         orderBy: { createdAt: 'desc' },
@@ -39,7 +44,8 @@ export async function GET(req: NextRequest, props: { params: Promise<{ id: strin
           emotions: { select: { happy: true, neutral: true, sad: true, surprised: true } },
           // 定量集計（タスク成功率・スコア平均）用
           taskResults: { orderBy: { order: 'asc' }, select: { taskId: true, order: true, text: true, outcome: true, durationSec: true, seq: true, excludedAt: true, usedHint: true, assistedStart: true } },
-          answers: { orderBy: { order: 'asc' }, select: { questionId: true, order: true, text: true, type: true, valueNum: true, valueText: true, followUpCount: true, sentiment: true, excludedAt: true } },
+          // imageUrl を落とすと、回答比較テーブルのサムネイルが出なくなる
+          answers: { orderBy: { order: 'asc' }, select: { questionId: true, order: true, text: true, imageUrl: true, type: true, valueNum: true, valueText: true, followUpCount: true, sentiment: true, excludedAt: true } },
           // 人が付けたタグの横断集計（アフィニティ分析）用
           highlights: { select: { tags: true } },
           screenerAnswers: { orderBy: { order: 'asc' }, select: { label: true, value: true, order: true } },

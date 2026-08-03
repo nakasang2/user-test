@@ -3,6 +3,7 @@ import { z } from 'zod'
 import { prisma } from '@/lib/db'
 import { del } from '@vercel/blob'
 import { requireAuth, requireRole, handleApiError } from '@/lib/api-auth'
+import { toQuestionImagePayload } from '@/lib/question-image'
 
 export async function GET(req: NextRequest, props: { params: Promise<{ id: string }> }) {
   try {
@@ -45,6 +46,10 @@ const patchSchema = z.object({
     id:   z.string().optional(),
     text: z.string().min(1).max(2000),
     type: z.enum(['open', 'rating', 'nps']).default('open'),
+    // 印象テストで質問ごとに提示する画像。作成 API（route.ts）と同じ制約に揃える
+    imageUrl: z.string().url().max(2000).nullable().optional(),
+    imageMode: z.enum(['persistent', 'timed']).nullable().optional(),
+    imageDuration: z.number().int().min(1).max(60).nullable().optional(),
   })).optional(),
   tasks: z.array(z.object({
     id:   z.string().optional(),
@@ -112,10 +117,13 @@ export async function PATCH(req: NextRequest, props: { params: Promise<{ id: str
       ops.push(prisma.question.deleteMany({ where: { interviewId: id, NOT: { id: { in: keep.length ? keep : ['__none__'] } } } }))
       questions.forEach((q, index) => {
         const order = index + 1
+        // 画像は毎回明示的に書く。update で省くと「外したのに残る」、
+        // create で省くと「付けたのに保存されない」になる
+        const image = toQuestionImagePayload(q)
         if (q.id && ownQuestionIds.has(q.id)) {
-          ops.push(prisma.question.update({ where: { id: q.id }, data: { text: q.text, type: q.type, order } }))
+          ops.push(prisma.question.update({ where: { id: q.id }, data: { text: q.text, type: q.type, order, ...image } }))
         } else {
-          ops.push(prisma.question.create({ data: { interviewId: id, text: q.text, type: q.type, order } }))
+          ops.push(prisma.question.create({ data: { interviewId: id, text: q.text, type: q.type, order, ...image } }))
         }
       })
     }

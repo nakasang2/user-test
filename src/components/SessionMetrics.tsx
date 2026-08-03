@@ -29,6 +29,8 @@ export interface AnswerData {
   questionId?: string | null
   order: number
   text: string
+  /** 回答時に提示していた画像のスナップショット（印象テスト） */
+  imageUrl?: string | null
   type: string             // open | rating | nps
   valueNum?: number | null
   valueText?: string | null

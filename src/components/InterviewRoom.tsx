@@ -31,11 +31,17 @@ import ThinkAloudNudge from '@/components/ThinkAloudNudge'
 import { useSilenceNudge } from '@/hooks/useSilenceNudge'
 import { elapsedSec, nowMs, cacheBustToken } from '@/lib/elapsed'
 import { blockedAfter, needsRecovery } from '@/lib/task-flow'
+import { imageDurationOrDefault } from '@/lib/question-image'
 
 interface Question {
   id?: string
   text: string
   type: 'open' | 'rating' | 'nps'
+  /** 印象テストで、この質問に紐づけて提示する画像 */
+  imageUrl?: string | null
+  /** persistent = 回答中ずっと表示 / timed = 先に数秒だけ見せて隠す */
+  imageMode?: string | null
+  imageDuration?: number | null
 }
 
 interface Props {
@@ -80,6 +86,8 @@ interface AnswerEntry {
   valueText?: string | null
   followUpCount?: number
   answeredAt: number
+  /** 回答時に提示していた画像。あとで差し替えられても何を見て答えたか残す */
+  imageUrl?: string | null
 }
 
 interface TranscriptEntry {
@@ -280,6 +288,17 @@ export default function InterviewRoom({
   const stimulusProceededRef = useRef(false)  // 質問遷移の二重実行防止
   const stimulusIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const stimulusTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // ── 質問ごとの画像（印象テスト）──────────────────────
+  // 「先に数秒だけ見せる」設定のときだけ使う。見せ終わってから質問を読み上げる。
+  const [qImageShowing, setQImageShowing] = useState(false)
+  const [qImageCountdown, setQImageCountdown] = useState(0)
+  const qImageIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const qImageTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // 読み上げへ進む処理の二重実行防止（タイマー・読み込み失敗・スキップから共用）
+  const qImageDoneRef = useRef(true)
+  // 「見せ終わったら読み上げる」処理。タイマー・onError・スキップの3経路から同じものを呼ぶ
+  const qImageFinishRef = useRef<(() => void) | null>(null)
   const screenMediaRecorderRef = useRef<MediaRecorder | null>(null)
   const screenRecordedChunksRef = useRef<Blob[]>([])
   const screenDrawRafRef = useRef<number>(0)        // 合成描画ループの RAF
@@ -530,6 +549,9 @@ export default function InterviewRoom({
       cancelAnimationFrame(screenDrawRafRef.current)
       if (stimulusIntervalRef.current) clearInterval(stimulusIntervalRef.current)
       if (stimulusTimeoutRef.current) clearTimeout(stimulusTimeoutRef.current)
+      // 質問ごとの画像のタイマー（アンマウント後に setState して警告を出さない）
+      if (qImageIntervalRef.current) clearInterval(qImageIntervalRef.current)
+      if (qImageTimeoutRef.current) clearTimeout(qImageTimeoutRef.current)
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -719,6 +741,8 @@ export default function InterviewRoom({
           type: q.type,
           valueNum: value,
           answeredAt: entry.start,
+          // 自由回答と同じく、提示していた画像を控える
+          imageUrl: q.imageUrl ?? null,
         },
       ]
       saveResults()
@@ -800,9 +824,102 @@ export default function InterviewRoom({
         valueText: said,
         followUpCount,
         answeredAt: elapsedSec(startTimeRef.current),
+        // 回答時に提示していた画像を控える。あとで差し替えられても、
+        // その人が何を見て答えたのかが分かるようにする
+        imageUrl: q.imageUrl ?? null,
       },
     ]
     saveResults()
+  }
+
+  /**
+   * 「先に数秒だけ見せる」画像を出し、見せ終わったら onDone（読み上げ）へ進む。
+   *
+   * カウントは**画像の読み込みが終わってから**始める（全体の刺激と同じ考え方）。
+   * 読み込みに失敗したら待たせず先へ進める。画像が出ないまま無音で固まるより、
+   * 質問だけでも進んだほうが参加者にとってましなため。
+   */
+  function showTimedQuestionImage(onDone: () => void) {
+    // 前の質問のタイマーを必ず片付けてから始める。
+    // clearInterval しただけで ref を null に戻さないと、次の timed 質問で
+    // 「もう動いている」と誤判定してカウントが始まらず、参加者が固まる。
+    clearQuestionImageTimers()
+    qImageDoneRef.current = false
+    setQImageShowing(true)
+    setQImageCountdown(0)
+
+    const finish = () => {
+      if (qImageDoneRef.current) return
+      qImageDoneRef.current = true
+      clearQuestionImageTimers()
+      setQImageShowing(false)
+      setQImageCountdown(0)
+      onDone()
+    }
+    qImageFinishRef.current = finish
+  }
+
+  function clearQuestionImageTimers() {
+    if (qImageIntervalRef.current) {
+      clearInterval(qImageIntervalRef.current)
+      qImageIntervalRef.current = null
+    }
+    if (qImageTimeoutRef.current) {
+      clearTimeout(qImageTimeoutRef.current)
+      qImageTimeoutRef.current = null
+    }
+  }
+
+  /** 画像の読み込み完了後にカウントを始める（読み込み前に数え始めると見せる時間が短くなる） */
+  function beginQuestionImageCountdown(seconds: number) {
+    // 二重起動の防止。onLoad は再レンダーや再読み込みで複数回発火しうる
+    if (qImageDoneRef.current || qImageIntervalRef.current) return
+    setQImageCountdown(seconds)
+    qImageIntervalRef.current = setInterval(() => {
+      setQImageCountdown((prev) => {
+        if (prev <= 1) {
+          if (qImageIntervalRef.current) {
+            clearInterval(qImageIntervalRef.current)
+            qImageIntervalRef.current = null
+          }
+          return 0
+        }
+        return prev - 1
+      })
+    }, 1000)
+    qImageTimeoutRef.current = setTimeout(() => qImageFinishRef.current?.(), seconds * 1000)
+  }
+
+  /**
+   * 予定していた質問 index を開始する。
+   *
+   * 最初の質問（印象テストの刺激のあと／通常の開始時）と2問目以降で同じ処理が要る。
+   * 2か所に書くと、片方だけ直して挙動がずれる（LESSONS「同じ状態を2か所に持たない」）。
+   */
+  function beginPlannedQuestion(index: number) {
+    const q = questions[index]
+    currentQuestionIndexRef.current = index
+    setCurrentQuestionIndex(index)
+    setIsFollowUp(false)
+    setDisplayedQuestion(q.text)
+    conversationBufferRef.current = `AI: ${q.text}`
+
+    const ask = () => {
+      speak(q.text, () => {
+        if (q.type === 'open') {
+          listenForAnswer(decideNext)
+        }
+        // rating / nps は UI で回答 → listenForAnswer は起動しない
+      })
+    }
+
+    // 「先に数秒だけ見せる」設定の画像は、見せ終わってから読み上げる。
+    // 読み上げと同時に出すと、画像を見ている間に質問が終わってしまう。
+    if (q.imageUrl && q.imageMode === 'timed') {
+      showTimedQuestionImage(ask)
+      return
+    }
+    ask()
   }
 
   function moveToNextPlannedQuestion() {
@@ -811,20 +928,7 @@ export default function InterviewRoom({
     followUpCountRef.current = 0
     conversationBufferRef.current = ''
     if (next >= questions.length) { endInterview(); return }
-
-    currentQuestionIndexRef.current = next
-    setCurrentQuestionIndex(next)
-    setIsFollowUp(false)
-    const q = questions[next]
-    setDisplayedQuestion(q.text)
-    conversationBufferRef.current = `AI: ${q.text}`
-
-    speak(q.text, () => {
-      if (q.type === 'open') {
-        listenForAnswer(decideNext)
-      }
-      // rating / nps は UI で回答 → listenForAnswer は起動しない
-    })
+    beginPlannedQuestion(next)
   }
 
   // ── 録画開始ヘルパー ──────────────────────────────────
@@ -1037,15 +1141,7 @@ export default function InterviewRoom({
     const intro = `お疲れ様でした。続いて、操作を通じて感じたことをいくつかお聞きします。`
     speak(intro, () => {
       setPhase('interview')
-      currentQuestionIndexRef.current = 0
-      setCurrentQuestionIndex(0)
-      setIsFollowUp(false)
-      const q = questions[0]
-      setDisplayedQuestion(q.text)
-      conversationBufferRef.current = `AI: ${q.text}`
-      speak(q.text, () => {
-        if (q.type === 'open') listenForAnswer(decideNext)
-      })
+      beginPlannedQuestion(0)
     })
   }
 
@@ -1148,15 +1244,7 @@ export default function InterviewRoom({
     speak(intro, () => {
       if (questions.length === 0) { endInterview(); return }  // 質問ゼロでもクラッシュさせない
       setPhase('interview')
-      currentQuestionIndexRef.current = 0
-      setCurrentQuestionIndex(0)
-      setIsFollowUp(false)
-      const q = questions[0]
-      setDisplayedQuestion(q.text)
-      conversationBufferRef.current = `AI: ${q.text}`
-      speak(q.text, () => {
-        if (q.type === 'open') listenForAnswer(decideNext)
-      })
+      beginPlannedQuestion(0)
     })
   }
 
@@ -1184,15 +1272,7 @@ export default function InterviewRoom({
     if (stimulusTimeoutRef.current) clearTimeout(stimulusTimeoutRef.current)
     if (questions.length === 0) { endInterview(); return }  // 質問ゼロでもクラッシュさせない
     setPhase('interview')
-    currentQuestionIndexRef.current = 0
-    setCurrentQuestionIndex(0)
-    setIsFollowUp(false)
-    const q = questions[0]
-    setDisplayedQuestion(q.text)
-    conversationBufferRef.current = `AI: ${q.text}`
-    speak(q.text, () => {
-      if (q.type === 'open') listenForAnswer(decideNext)
-    })
+    beginPlannedQuestion(0)
   }
 
   // 画像の読み込み完了後にカウントダウンを開始する（二重起動防止）
@@ -1403,6 +1483,25 @@ export default function InterviewRoom({
   const progress = ((currentQuestionIndex + 1) / questions.length) * 100
   const currentQ = questions[currentQuestionIndex]
 
+  // ── 質問に紐づけた画像（印象テスト）の表示判定 ──
+  // persistent: その質問に答えている間ずっと出す
+  // timed:      showTimedQuestionImage が出している間だけ（読み上げ前）
+  // 深掘り中（isFollowUp）も元の質問の画像を出したままにする。
+  // 深掘りは同じ画像についての追加質問なので、消すと何の話か分からなくなる。
+  const questionImageVisible =
+    interviewType === 'impression' &&
+    !!currentQ?.imageUrl &&
+    (currentQ.imageMode === 'timed'
+      ? qImageShowing
+      : phase === 'interview' || phase === 'thinking')
+
+  // 画像を出している間はカメラを小窓に退避させる（ユーザビリティ時と同じ扱い）。
+  // 全画面のままだと画像が自分の顔に隠れる。
+  const cameraIsPip =
+    questionImageVisible ||
+    (interviewType === 'usability' &&
+      (phase === 'task' || phase === 'interview' || phase === 'thinking' || phase === 'intro' || phase === 'waiting'))
+
   // 前提タスクを断念した直後の立て直し待ち。この間は達成/できなかったの操作を出さず、
   // 「次のタスクの開始地点まで到達できたか」だけを聞く。
   const recoveryPending = recoveryAtIdx === currentTaskIndex && needsRecovery(tasks ?? [], currentTaskIndex)
@@ -1508,7 +1607,7 @@ export default function InterviewRoom({
             className={
               cameraError
                 ? 'hidden'
-                : interviewType === 'usability' && (phase === 'task' || phase === 'interview' || phase === 'thinking' || phase === 'intro' || phase === 'waiting')
+                : cameraIsPip
                   ? 'absolute bottom-4 right-4 w-44 h-28 object-cover scale-x-[-1] rounded-lg border border-white/20 z-20 shadow-xl'
                   : 'absolute inset-0 w-full h-full object-cover scale-x-[-1]'
             }
@@ -1534,7 +1633,6 @@ export default function InterviewRoom({
               見切れ・未検出のときだけ出す。 */}
           {!cameraError && (faceStatus === 'no_face' || faceStatus === 'cut_off') && (
             (() => {
-              const cameraIsPip = interviewType === 'usability' && (phase === 'task' || phase === 'interview' || phase === 'thinking' || phase === 'intro' || phase === 'waiting')
               const msg = faceStatus === 'no_face'
                 ? '顔が写っていません。カメラに顔が入るように調整してください'
                 : '顔が見切れています。中央に顔が来るように位置を調整してください'
@@ -1708,6 +1806,40 @@ export default function InterviewRoom({
                     質問に進む →
                   </button>
                 </>
+              )}
+            </div>
+          )}
+
+          {/* 印象テスト: 質問に紐づけた画像。
+              persistent は回答中ずっと、timed は読み上げ前の数秒だけ表示する。
+              カメラの上（z-10）に敷き、カメラは右下の小窓に退避する。 */}
+          {questionImageVisible && currentQ?.imageUrl && (
+            <div className="absolute inset-0 z-10 bg-gray-50 flex items-center justify-center">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={currentQ.imageUrl}
+                alt="この質問で提示している画像"
+                className="max-w-full max-h-full object-contain"
+                onLoad={() => {
+                  if (currentQ.imageMode === 'timed') {
+                    beginQuestionImageCountdown(imageDurationOrDefault(currentQ.imageDuration))
+                  }
+                }}
+                // 読み込めないときは待たせずに質問へ進める（無音で固まらせない）
+                onError={() => qImageFinishRef.current?.()}
+              />
+              {currentQ.imageMode === 'timed' && qImageCountdown > 0 && (
+                <div className="absolute bottom-6 right-6 w-12 h-12 rounded-full bg-gray-900 text-white flex items-center justify-center text-xl font-semibold shadow-lg">
+                  {qImageCountdown}
+                </div>
+              )}
+              {currentQ.imageMode === 'timed' && (
+                <button
+                  onClick={() => qImageFinishRef.current?.()}
+                  className="absolute bottom-6 left-6 text-xs text-gray-600 hover:text-gray-900 bg-white/90 border border-gray-300 hover:border-gray-400 px-3 py-1.5 rounded-md transition-colors"
+                >
+                  質問に進む →
+                </button>
               )}
             </div>
           )}
