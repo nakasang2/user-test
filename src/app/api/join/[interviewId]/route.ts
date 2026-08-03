@@ -30,6 +30,8 @@ export async function GET(
       where: { id: interviewId },
       select: {
         id: true, title: true, description: true, type: true,
+        // 参加前チェックで、小窓と画面録画の確認が要るかどうかの判定に使う
+        usabilityMode: true,
         screeners: {
           orderBy: { order: 'asc' },
           // disqualify（足切り条件）は被験者に見せない

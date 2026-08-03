@@ -13,6 +13,7 @@ import {
   ArrowRight,
   AlertCircle,
 } from 'lucide-react'
+import PreflightCheck from '@/components/PreflightCheck'
 
 interface Screener {
   id: string
@@ -27,6 +28,7 @@ interface InterviewInfo {
   title: string
   description: string | null
   type?: string
+  usabilityMode?: string | null
   screeners?: Screener[]
   estimate?: { min: number; max: number }
   _count?: { tasks: number }
@@ -45,6 +47,8 @@ export default function JoinPage(props: { params: Promise<{ interviewId: string 
   const [screenerValues, setScreenerValues] = useState<Record<string, string>>({})
   // 条件に合わず参加できない場合の表示
   const [disqualified, setDisqualified] = useState(false)
+  // 動作確認が終わるまで名前入力を出さない。参加できない人のセッションを作らないため
+  const [preflightDone, setPreflightDone] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -128,6 +132,28 @@ export default function JoinPage(props: { params: Promise<{ interviewId: string 
   }
 
   const isUsability = interview!.type === 'usability'
+
+  // 名前を入力する前に動作確認を通す。
+  // 途中で参加できないと分かった人のセッションが作られず、集計が汚れない。
+  if (!preflightDone) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center px-4 py-12">
+        <div className="w-full max-w-md">
+          <div className="text-center mb-6">
+            <h1 className="text-xl font-semibold text-gray-900 mb-1 tracking-tight">{interview!.title}</h1>
+            {interview!.description && (
+              <p className="text-gray-500 text-sm leading-relaxed">{interview!.description}</p>
+            )}
+          </div>
+          <PreflightCheck
+            type={interview!.type}
+            usabilityMode={interview!.usabilityMode}
+            onComplete={() => setPreflightDone(true)}
+          />
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="min-h-screen bg-gray-50 flex items-center justify-center px-4 py-12">
