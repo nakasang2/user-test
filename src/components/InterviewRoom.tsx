@@ -1407,7 +1407,10 @@ export default function InterviewRoom({
         screenVideoRef.current.srcObject = stream
       }
 
-      // 画面に顔(PiP)を重ね、マイク音声も載せて「画面＋顔＋音声」を1ファイルに合成する
+      // マイク音声も載せて「画面＋音声」を1ファイルに合成する。
+      // 顔(PiP)は合成しない — 「画面全体」共有では、cameraIsPip で右下に表示している
+      // 自分のカメラ映像自体が画面キャプチャに写り込む。ここでさらに合成すると、
+      // 同じ位置に同じ顔が二重に写る（小窓版で実際に起きた不具合と同じ構造。DECISIONS 参照）。
       const screenVid = document.createElement('video')
       screenVid.srcObject = stream
       screenVid.muted = true
@@ -1415,26 +1418,17 @@ export default function InterviewRoom({
         screenVid.onloadedmetadata = () => screenVid.play().then(resolve).catch(() => resolve())
       })
 
+      // キャンバス経由にすることで解像度上限（1920×1080）と一定フレームレートを保つ
+      // （高DPI画面でファイルが肥大化するのを防ぐ）
       const W = Math.min(screenVid.videoWidth || 1280, 1920)
       const H = Math.min(screenVid.videoHeight || 720, 1080)
       const canvas = document.createElement('canvas')
       canvas.width = W
       canvas.height = H
       const ctx = canvas.getContext('2d')!
-      const webcamVid = videoRef.current
 
       const draw = () => {
         ctx.drawImage(screenVid, 0, 0, W, H)
-        if (webcamVid && webcamVid.readyState >= 2 && webcamVid.videoWidth) {
-          const pipW = Math.round(W * 0.18)
-          const pipH = Math.round(pipW * (webcamVid.videoHeight / webcamVid.videoWidth))
-          const x = W - pipW - 16
-          const y = H - pipH - 16
-          ctx.drawImage(webcamVid, x, y, pipW, pipH)
-          ctx.strokeStyle = 'rgba(255,255,255,0.85)'
-          ctx.lineWidth = 2
-          ctx.strokeRect(x, y, pipW, pipH)
-        }
         screenDrawRafRef.current = requestAnimationFrame(draw)
       }
       draw()
