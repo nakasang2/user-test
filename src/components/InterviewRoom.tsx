@@ -778,6 +778,26 @@ export default function InterviewRoom({
     }
   }
 
+  /**
+   * 深掘りの判断ができなかったことを記録する。
+   *
+   * 参加者の進行は止めない（詰ませない）が、黙って次へ進むと研究者には
+   * 「AI が深掘り不要と判断した」のと区別が付かない。レート制限で面談中の
+   * 深掘りが全部飛んでいても followUpCount: 0 としか見えなくなるため、
+   * 文字起こしに残して後から気づけるようにする。
+   */
+  function noteFollowUpFailure(detail: string) {
+    console.warn('[UserVoice] 深掘り判断に失敗したため次の質問へ進みます', detail)
+    const text = `深掘りの判断に失敗したため次の質問へ進みました（${detail}）`
+    transcriptRef.current = [
+      ...transcriptRef.current,
+      { speaker: 'System', text, start: elapsedSec(startTimeRef.current) },
+    ]
+    setTranscript([...transcriptRef.current])
+    appendConversation(`\n[システム] ${text}`)
+    saveProgress()
+  }
+
   // ── AI 深掘り判断 ─────────────────────────────────────
   async function decideNext(participantAnswer: string) {
     if (!participantAnswer.trim()) {
@@ -824,8 +844,7 @@ export default function InterviewRoom({
       // 本文は {error} なので action が undefined になり、黙って次へ進んでしまう。
       // 進行自体は止めない（参加者を詰ませない）が、握りつぶさず記録に残す。
       if (!res.ok) {
-        console.warn('[UserVoice] 深掘り判断に失敗したため次の質問へ進みます', res.status)
-        appendConversation(`\n[システム] 深掘り判断に失敗（HTTP ${res.status}）のため次の質問へ`)
+        noteFollowUpFailure(`HTTP ${res.status}`)
         moveToNextPlannedQuestion()
         return
       }
@@ -845,6 +864,8 @@ export default function InterviewRoom({
       setAiThinking(false)
       setPhase('interview')
       showNotice('通信エラーのため、次の質問に進みます。')
+      // HTTP エラーと同じく、深掘りできなかったことを記録に残す
+      noteFollowUpFailure('通信エラー')
       moveToNextPlannedQuestion()
     }
   }

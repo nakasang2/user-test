@@ -282,5 +282,19 @@ console.log('\n=== 会話履歴の切り詰め（末尾＝直近を残す） ===
   eq('改行が無い長文でも落ちない', clampTextTail('あ'.repeat(100), 10).length > 0, true)
 }
 
+console.log('\n=== 深掘りを「しない」の伝わり方（API ガードと同じ判定） ===')
+{
+  // /api/interviewer は maxFollowUps が 0 以下なら AI を呼ばずに次へ進める。
+  // 厳密等価（=== 0）だと "0"・-1・false がすり抜けて「1回だけ深掘り」になっていた。
+  const skip = (v: unknown) => v !== null && v !== undefined && Number(v) <= 0
+
+  eq('0 は深掘りしない', skip(0), true)
+  eq('文字列の "0" も深掘りしない', skip('0'), true)
+  eq('負数も深掘りしない', skip(-1), true)
+  eq('false（Number(false)=0）も深掘りしない', skip(false), true)
+  eq('未指定は既定に任せる（ここでは弾かない）', [skip(null), skip(undefined)], [false, false])
+  eq('正の値は通常どおり', [skip(1), skip(2), skip('3')], [false, false, false])
+}
+
 console.log(`\n${pass} passed, ${fail} failed`)
 if (fail > 0) process.exit(1)
