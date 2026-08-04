@@ -26,12 +26,41 @@ export function clampText(value: unknown, max: number): string {
 }
 
 /**
+ * 会話ログのように「新しいほうが重要」なテキストを、末尾を残して切り詰める。
+ *
+ * clampText は先頭を残して末尾を捨てる。要約や文字起こし全文の要約用途ならそれでよいが、
+ * 進行中の会話履歴に使うと、面談が長くなったときに**いま話していること**が丸ごと消え、
+ * 冒頭だけがモデルに渡る。「さっき聞いたことをまた聞く」を防ぐための履歴なのに、
+ * 直近が消えては意味がない。
+ *
+ * 行の途中で切ると誰の発言か分からなくなるので、切れ目は改行に合わせる。
+ */
+export function clampTextTail(value: unknown, max: number): string {
+  const s = typeof value === 'string' ? value : ''
+  if (s.length <= max) return s
+  const tail = s.slice(s.length - max)
+  // 先頭が行の途中なら、その行は捨てて次の行から始める
+  const nl = tail.indexOf('\n')
+  const body = nl >= 0 && nl < 200 ? tail.slice(nl + 1) : tail
+  return '…[この前のやり取りは省略]\n' + body
+}
+
+/**
  * ユーザー由来テキストをデリミタで囲み、データとして提示する。
  * テキスト内に "untrusted_data" を含む山括弧トークンを広く除去し、
  * 断片注入による閉じタグ再構成（デリミタ偽装）を防ぐ。
  */
 export function wrapUntrusted(value: unknown, max: number): string {
   const cleaned = clampText(value, max).replace(/<[^>]*untrusted_data[^>]*>/gi, '')
+  return `<untrusted_data>\n${cleaned}\n</untrusted_data>`
+}
+
+/**
+ * wrapUntrusted の「末尾を残す」版。進行中の会話履歴のように、
+ * 溢れたときに捨てるべきなのが古いほうであるテキストに使う。
+ */
+export function wrapUntrustedTail(value: unknown, max: number): string {
+  const cleaned = clampTextTail(value, max).replace(/<[^>]*untrusted_data[^>]*>/gi, '')
   return `<untrusted_data>\n${cleaned}\n</untrusted_data>`
 }
 

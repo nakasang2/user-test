@@ -32,6 +32,7 @@ import { useSilenceNudge } from '@/hooks/useSilenceNudge'
 import { elapsedSec, nowMs, cacheBustToken } from '@/lib/elapsed'
 import { blockedAfter, needsRecovery } from '@/lib/task-flow'
 import { imageDurationOrDefault } from '@/lib/question-image'
+import { effectiveFollowUpDepth } from '@/lib/follow-up'
 
 interface Question {
   id?: string
@@ -42,6 +43,10 @@ interface Question {
   /** persistent = 回答中ずっと表示 / timed = 先に数秒だけ見せて隠す */
   imageMode?: string | null
   imageDuration?: number | null
+  /** この質問で AI が深掘りするか。未指定は true（従来どおり） */
+  followUpEnabled?: boolean
+  /** 深掘りの深さ（最大何回まで追い質問するか）。未指定は既定値 */
+  followUpDepth?: number | null
 }
 
 interface Props {
@@ -128,7 +133,23 @@ export default function InterviewRoom({
 
   const currentQuestionIndexRef = useRef(0)
   const followUpCountRef = useRef(0)
+  // 現在の設定質問1問分のバッファ。質問が変わるたびにリセットされる。
+  // 「この質問への回答」を切り出す（recordOpenAnswerIfAny）ために、この単位でなければならない。
   const conversationBufferRef = useRef('')
+  // 面談の最初からの会話履歴。質問をまたいでもリセットしない。
+  //
+  // AI に渡す文脈はこちらを使う。以前は上の1問分バッファを渡していたため、AI は
+  // 前の質問で何を聞き何を答えてもらったかを知らず、会話の断片だけを見て深掘りしていた。
+  // その結果「同じことを言い換えて何度も聞かれる」体験になっていた。
+  const fullConversationRef = useRef('')
+  // これまでに聞いた深掘り質問。言い換えの再質問を防ぐため AI に渡す
+  const askedFollowUpsRef = useRef<string[]>([])
+
+  /** 会話を両方のバッファに追記する（片方だけ追記して食い違うのを防ぐ） */
+  function appendConversation(line: string) {
+    conversationBufferRef.current += line
+    fullConversationRef.current += line
+  }
 
   // 実感情検出フック
   const { status: emotionStatus, lastEmotion, faceStatus, startDetection, stopDetection, getSnapshots } = useEmotionDetection(5000)
@@ -309,6 +330,7 @@ export default function InterviewRoom({
   const [widgetBlocked, setWidgetBlocked] = useState(false)
   const pipWindowRef = useRef<Window | null>(null)   // Document PiP または popup の window 参照
   const startedRef = useRef(false)  // startInterview の二重起動防止
+  const taskPhaseStartedRef = useRef(false)  // beginUsabilityTask の二重起動防止
   const endedRef = useRef(false)    // endInterview の二重実行防止（結果の二重送信を防ぐ）
 
   // 音声認識サポート確認（マウント時）
@@ -615,7 +637,7 @@ export default function InterviewRoom({
     }
     transcriptRef.current = [...transcriptRef.current, entry]
     setTranscript([...transcriptRef.current])
-    conversationBufferRef.current += `\n参加者: ${text}`
+    appendConversation(`\n参加者: ${text}`)
 
     setTextInput('')
     saveProgress()
@@ -693,7 +715,7 @@ export default function InterviewRoom({
         }
         transcriptRef.current = [...transcriptRef.current, entry]
         setTranscript([...transcriptRef.current])
-        conversationBufferRef.current += `\n参加者: ${finalText.trim()}`
+        appendConversation(`\n参加者: ${finalText.trim()}`)
         saveProgress()
         onAnswer(finalText.trim())
       }
@@ -726,7 +748,7 @@ export default function InterviewRoom({
     }
     transcriptRef.current = [...transcriptRef.current, entry]
     setTranscript([...transcriptRef.current])
-    conversationBufferRef.current += `\n参加者: ${answerText}`
+    appendConversation(`\n参加者: ${answerText}`)
     saveProgress()
 
     // 評価スコアは数値として構造化保存（平均・NPS 集計用）
@@ -762,6 +784,19 @@ export default function InterviewRoom({
       moveToNextPlannedQuestion()
       return
     }
+    const current = questions[currentQuestionIndexRef.current]
+    // この質問で許される深掘りの回数。0 なら AI に判断させる必要がない。
+    // 呼ばないことで待ち時間も AI の費用も発生しない。
+    const maxFollowUps = current ? effectiveFollowUpDepth(current) : 0
+    if (maxFollowUps <= 0) {
+      moveToNextPlannedQuestion()
+      return
+    }
+    // 上限に達していれば、AI に聞くまでもなく次へ進む
+    if (followUpCountRef.current >= maxFollowUps) {
+      moveToNextPlannedQuestion()
+      return
+    }
     setAiThinking(true)
     setPhase('thinking')
     try {
@@ -769,19 +804,37 @@ export default function InterviewRoom({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          plannedQuestion: questions[currentQuestionIndexRef.current].text,
+          plannedQuestion: current.text,
           participantAnswer,
           followUpCount: followUpCountRef.current,
-          conversationSoFar: conversationBufferRef.current,
+          // 面談の最初からの履歴を渡す（1問分だけ渡していたのが「文脈を拾わない」原因だった）
+          conversationSoFar: fullConversationRef.current,
           interviewTopic: interviewTitle,
+          // 言い換えの再質問と、あとで聞く予定の先取りを防ぐための材料
+          askedFollowUps: askedFollowUpsRef.current,
+          upcomingQuestions: questions
+            .slice(currentQuestionIndexRef.current + 1)
+            .map((q) => q.text),
+          maxFollowUps,
         }),
       })
-      const decision = await res.json()
       setAiThinking(false)
       setPhase('interview')
+      // HTTP エラー（レート制限 429 など）を「深掘り不要」と取り違えない。
+      // 本文は {error} なので action が undefined になり、黙って次へ進んでしまう。
+      // 進行自体は止めない（参加者を詰ませない）が、握りつぶさず記録に残す。
+      if (!res.ok) {
+        console.warn('[UserVoice] 深掘り判断に失敗したため次の質問へ進みます', res.status)
+        appendConversation(`\n[システム] 深掘り判断に失敗（HTTP ${res.status}）のため次の質問へ`)
+        moveToNextPlannedQuestion()
+        return
+      }
+      const decision = await res.json()
       if (decision.action === 'follow_up' && decision.question) {
         followUpCountRef.current += 1
-        conversationBufferRef.current += `\nAI: ${decision.question}`
+        // 聞いた深掘りを覚えておき、以降の判断に渡す（同じことを言い換えて聞かないため）
+        askedFollowUpsRef.current = [...askedFollowUpsRef.current, decision.question]
+        appendConversation(`\nAI: ${decision.question}`)
         setIsFollowUp(true)
         setDisplayedQuestion(decision.question)
         speak(decision.question, () => listenForAnswer(decideNext))
@@ -902,7 +955,10 @@ export default function InterviewRoom({
     setCurrentQuestionIndex(index)
     setIsFollowUp(false)
     setDisplayedQuestion(q.text)
+    // 1問分のバッファは差し替える（この質問への回答を切り出す単位）が、
+    // 面談全体の履歴には追記する（AI に渡す文脈を途切れさせない）
     conversationBufferRef.current = `AI: ${q.text}`
+    fullConversationRef.current += `${fullConversationRef.current ? '\n' : ''}AI: ${q.text}`
 
     const ask = () => {
       speak(q.text, () => {
@@ -926,6 +982,7 @@ export default function InterviewRoom({
     recordOpenAnswerIfAny() // バッファをリセットする前に確定させる
     const next = currentQuestionIndexRef.current + 1
     followUpCountRef.current = 0
+    // 1問分のバッファだけリセットする。fullConversationRef は面談全体の文脈として残す
     conversationBufferRef.current = ''
     if (next >= questions.length) { endInterview(); return }
     beginPlannedQuestion(next)
@@ -1051,7 +1108,7 @@ export default function InterviewRoom({
       }
       transcriptRef.current = [...transcriptRef.current, entry]
       setTranscript([...transcriptRef.current])
-      conversationBufferRef.current += `\n[タスク記録] ${text}`
+      appendConversation(`\n[タスク記録] ${text}`)
       saveProgress()
     }
     const total = tasks?.length ?? 0
@@ -1117,7 +1174,7 @@ export default function InterviewRoom({
       entries.forEach((e) => {
         const text = `タスク${e.order}「${e.text}」→ 未実施（前のタスクの前提を満たせなかった）`
         transcriptRef.current = [...transcriptRef.current, { speaker: 'System', text, start: now }]
-        conversationBufferRef.current += `\n[タスク記録] ${text}`
+        appendConversation(`\n[タスク記録] ${text}`)
       })
       setTranscript([...transcriptRef.current])
       saveProgress()
@@ -1158,8 +1215,41 @@ export default function InterviewRoom({
     startMediaRecorder()
     if (videoRef.current) startDetection(videoRef.current)
 
-    // service モード: ウィンドウ系は await より前に呼ぶ（ユーザージェスチャー文脈を維持）
-    if (interviewType === 'usability' && usabilityMode === 'service') {
+    await fetch(`/api/sessions/${sessionId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', 'x-participant-token': participantToken ?? '' },
+      body: JSON.stringify({ status: 'active' }),
+    })
+
+    // ユーザビリティ・印象テストは、ここで即座にタスク／画像へ進まず、
+    // 参加者が明示的に押す「開始する」ボタン待ちの画面（waiting）を挟む。
+    // 録画・カメラはこの待機中も継続する（ガイド画面の滞在と同様、タスク1の
+    // 所要時間には含めない＝markFirstTaskStart / beginStimulusIntro が実際の起点）。
+    if (interviewType === 'usability' || (interviewType === 'impression' && stimulusUrl)) {
+      setPhase('waiting')
+      return
+    }
+
+    // 通常インタビュー
+    setPhase('intro')
+    const intro = `こんにちは${participantName ? `、${participantName}さん` : ''}。本日はインタビューにご参加いただきありがとうございます。「${interviewTitle}」についてお聞きします。`
+    speak(intro, () => {
+      if (questions.length === 0) { endInterview(); return }  // 質問ゼロでもクラッシュさせない
+      setPhase('interview')
+      beginPlannedQuestion(0)
+    })
+  }
+
+  // ── ユーザビリティテスト: 「タスクを開始する」ボタン ──────────
+  // waiting フェーズで押された時点から実際のタスクを始める。
+  // service モードのウィジェット起動・prototype モードの画面共有ダイアログは、
+  // 従来ガイド画面のボタンで行っていたものをここに移した（トリガーが1テンポ遅れるだけで、
+  // 「ダイアログの操作時間はタスク1に含めない」という計測方針自体は変えない）。
+  function beginUsabilityTask() {
+    if (taskPhaseStartedRef.current) return  // 二重クリック防止
+    taskPhaseStartedRef.current = true
+
+    if (usabilityMode === 'service') {
       // BroadcastChannel を先にセットアップ
       const channel = new BroadcastChannel(`uservoice-widget-${sessionId}`)
       widgetChannelRef.current = channel
@@ -1199,52 +1289,40 @@ export default function InterviewRoom({
       // ① ウィジェット（PiP or ポップアップ）を「最初に」開く
       //    ⚠️ documentPictureInPicture.requestWindow() は transient user activation が必要。
       //       window.open() より後に呼ぶとトークンが消費されて PiP が失敗するため、必ず先に呼ぶ。
+      //       この関数自体がボタンの onClick から直接呼ばれている前提を崩さないこと。
       void openWidget()
       // ② サービスは自動 window.open しない：PiP がジェスチャーを消費した後の window.open は
       //    ポップアップブロックされ失敗の通知が出るだけ。代わりにタスク画面の
       //    「サービスを開く（新しいタブ）」実リンク（ブロッカー回避）から開いてもらう。
+    } else if (usabilityMode === 'prototype' && stimulusUrl) {
+      // 画面選択ダイアログの操作時間をタスク1に含めないよう、選択が終わってから計測開始
+      startScreenShare()
+        .catch(() => {/* 録画失敗は無視して続行 */})
+        .finally(() => markFirstTaskStart())
+    } else {
+      markFirstTaskStart()
     }
+    // service モードは小窓の task_ready（録画開始＋サイトを開いた時点）を待って計測開始する
+    setPhase('task')
+  }
 
-    await fetch(`/api/sessions/${sessionId}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json', 'x-participant-token': participantToken ?? '' },
-      body: JSON.stringify({ status: 'active' }),
-    })
-
-    // ユーザビリティテスト → タスクフェーズへ（TTS なし）
-    if (interviewType === 'usability') {
-      // prototype のみ: iframe 上の操作をバックグラウンドで画面録画
-      if (usabilityMode === 'prototype' && stimulusUrl) {
-        // 画面選択ダイアログの操作時間をタスク1に含めないよう、選択が終わってから計測開始
-        startScreenShare()
-          .catch(() => {/* 録画失敗は無視して続行 */})
-          .finally(() => markFirstTaskStart())
-      } else if (usabilityMode !== 'service') {
-        markFirstTaskStart()
-      }
-      // service モードは小窓の task_ready（録画開始＋サイトを開いた時点）を待って計測開始する
-      setPhase('task')
-      return
-    }
-
-    // 印象テストの場合: stimulus フェーズを挿入。
-    // カウントダウンは「画像の読み込み完了後」に開始する（beginStimulusCountdown）。
-    if (interviewType === 'impression' && stimulusUrl) {
+  // ── 印象テスト: 「開始する」ボタン ────────────────────────
+  // waiting フェーズで押された時点で、まず案内を読み上げる。画像はまだ見せない
+  // （読み上げ中に見えていると「見てから話し始める」の区切りが曖昧になるため）。
+  // 読み上げ終了後（失敗時も含む。speak は失敗時も onEnd を呼ぶ）に画像を表示する。
+  function beginStimulusIntro() {
+    const sec = stimulusDuration ?? 5
+    const intro = `これから画像を${sec}秒間お見せします。ご覧になったら、そのあと感想をお伺いします。`
+    speak(intro, () => {
       stimulusStartedRef.current = false
       stimulusProceededRef.current = false
       setStimulusError(false)
-      setStimulusCountdown(stimulusDuration ?? 5)
+      setStimulusCountdown(sec)
       setPhase('stimulus')
-      return
-    }
-
-    // 通常インタビュー
-    setPhase('intro')
-    const intro = `こんにちは${participantName ? `、${participantName}さん` : ''}。本日はインタビューにご参加いただきありがとうございます。「${interviewTitle}」についてお聞きします。`
-    speak(intro, () => {
-      if (questions.length === 0) { endInterview(); return }  // 質問ゼロでもクラッシュさせない
-      setPhase('interview')
-      beginPlannedQuestion(0)
+    }, {
+      // 文字起こしには残さない（タスク読み上げと同じ扱い。手続き案内であって参加者の発言ではない）
+      log: false,
+      failNotice: '音声を再生できませんでした。まもなく画像が表示されます。',
     })
   }
 
@@ -1700,21 +1778,21 @@ export default function InterviewRoom({
                 <h1 className="text-xl font-semibold tracking-tight mb-4 text-gray-900">{interviewTitle}</h1>
                 <div className="bg-gray-50 border border-gray-200 rounded-lg p-5 text-left mb-5 space-y-3">
                   <p className="text-xs text-gray-500 font-medium uppercase tracking-wide">
-                    {interviewType === 'usability' ? 'テストの流れ' : 'インタビューの流れ'}
+                    {interviewType === 'interview' ? 'インタビューの流れ' : 'テストの流れ'}
                   </p>
                   {interviewType === 'usability' ? (
                     <ul className="space-y-2 text-sm text-gray-700">
                       <li className="flex gap-2.5"><span className="text-gray-400 flex-shrink-0 font-medium">1.</span>カメラ・マイクを許可してください</li>
                       {usabilityMode === 'prototype' ? (
                         <>
-                          <li className="flex gap-2.5"><span className="text-gray-400 flex-shrink-0 font-medium">2.</span>画面にプロトタイプが表示されます。タスクに沿って操作してください</li>
+                          <li className="flex gap-2.5"><span className="text-gray-400 flex-shrink-0 font-medium">2.</span>準備ができたら「タスクを開始する」を押してください。画面共有ダイアログが出るので<strong className="text-gray-900">「画面全体」</strong>を選んで共有すると、プロトタイプとタスクが表示されます</li>
                           <li className="flex gap-2.5"><span className="text-gray-400 flex-shrink-0 font-medium">3.</span>気づいたこと・感じたことを声に出しながら操作してください（シンクアラウド）。静かなときはこちらから「何を考えていますか？」とお声がけします</li>
                           <li className="flex gap-2.5"><span className="text-gray-400 flex-shrink-0 font-medium">4.</span>操作が終わったら「達成して質問へ」（できなければ「できなかった」）を押してください。その後、簡単な質問があります</li>
                         </>
                       ) : (
                         <>
                           <li className="flex gap-2.5"><span className="text-gray-400 flex-shrink-0 font-medium">2.</span>
-                            <span>「開始する」を押すと<span className="text-gray-900 font-medium">タスク用の小窓</span>が表示されます（どのタブを操作していても<span className="text-gray-900 font-medium">常に最前面</span>）</span>
+                            <span>準備ができたら「タスクを開始する」を押すと<span className="text-gray-900 font-medium">タスク用の小窓</span>が表示されます（どのタブを操作していても<span className="text-gray-900 font-medium">常に最前面</span>）</span>
                           </li>
                           <li className="flex gap-2.5"><span className="text-gray-400 flex-shrink-0 font-medium">3.</span>
                             <span>画面の<span className="inline-flex items-center gap-1 text-gray-900 font-medium"><Globe className="w-3 h-3 inline" strokeWidth={2} />サービスを開く（新しいタブ）</span>を押して、テスト対象のサービスを開いてください</span>
@@ -1726,6 +1804,13 @@ export default function InterviewRoom({
                           <li className="flex gap-2.5"><span className="text-gray-400 flex-shrink-0 font-medium">6.</span>操作が終わったら小窓の「達成して質問へ」（できなければ「できなかった」）を押してください</li>
                         </>
                       )}
+                    </ul>
+                  ) : interviewType === 'impression' ? (
+                    <ul className="space-y-2 text-sm text-gray-700">
+                      <li className="flex gap-2.5"><span className="text-gray-400 flex-shrink-0 font-medium">1.</span>カメラ・マイクを許可してください</li>
+                      <li className="flex gap-2.5"><span className="text-gray-400 flex-shrink-0 font-medium">2.</span>準備ができたら「開始する」を押してください。案内の音声が流れたあと、画像が表示されます</li>
+                      <li className="flex gap-2.5"><span className="text-gray-400 flex-shrink-0 font-medium">3.</span>画像は{stimulusDuration ?? 5}秒間表示されます</li>
+                      <li className="flex gap-2.5"><span className="text-gray-400 flex-shrink-0 font-medium">4.</span>そのあと、いくつか質問にお答えください</li>
                     </ul>
                   ) : (
                     <ul className="space-y-2 text-sm text-gray-700">
@@ -1751,7 +1836,9 @@ export default function InterviewRoom({
                   disabled={!cameraReady || emotionStatus === 'loading'}
                   className="inline-flex items-center gap-1.5 bg-gray-900 hover:bg-gray-800 text-white disabled:opacity-50 disabled:cursor-wait px-6 py-2.5 rounded-md font-medium text-sm transition-colors"
                 >
-                  {!cameraReady || emotionStatus === 'loading' ? '準備中...' : (<>インタビューを開始する<ArrowRight className="w-4 h-4" strokeWidth={2} /></>)}
+                  {!cameraReady || emotionStatus === 'loading'
+                    ? '準備中...'
+                    : (<>{interviewType === 'interview' ? 'インタビューを開始する' : '次へ'}<ArrowRight className="w-4 h-4" strokeWidth={2} /></>)}
                 </button>
                 {(!cameraReady || emotionStatus === 'loading') && (
                   <p className="text-xs text-gray-500 mt-2 animate-pulse">カメラと解析モデルを初期化中</p>
@@ -1760,6 +1847,53 @@ export default function InterviewRoom({
             </div>
           )}
 
+
+          {/* 印象テスト: 「開始する」待ち。押すまで画像はまだ見せない */}
+          {phase === 'waiting' && interviewType === 'impression' && (
+            <div className="absolute inset-0 bg-gray-950/40 backdrop-blur-sm flex items-center justify-center p-4 sm:p-8 overflow-y-auto z-10">
+              <div className="text-center max-w-md w-full bg-white rounded-2xl border border-gray-200 shadow-xl p-8">
+                <div className="w-12 h-12 mx-auto mb-4 rounded-xl bg-gray-100 flex items-center justify-center text-gray-700">
+                  <ImageIcon className="w-5 h-5" strokeWidth={1.75} />
+                </div>
+                <h1 className="text-lg font-semibold tracking-tight mb-2 text-gray-900">準備はよろしいですか？</h1>
+                <p className="text-sm text-gray-600 leading-relaxed mb-6">
+                  開始すると案内の音声が流れたあと、画像が表示されます。
+                </p>
+                <button
+                  onClick={beginStimulusIntro}
+                  disabled={isSpeaking}
+                  className="inline-flex items-center gap-1.5 bg-gray-900 hover:bg-gray-800 text-white disabled:opacity-50 disabled:cursor-wait px-6 py-2.5 rounded-md font-medium text-sm transition-colors"
+                >
+                  {isSpeaking ? '音声を再生しています…' : (<>開始する<ArrowRight className="w-4 h-4" strokeWidth={2} /></>)}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* ユーザビリティテスト: 「タスクを開始する」待ち。
+              iframe・カメラPiP・サイドバーは phase==='waiting' も対象に含めているので
+              背景の見た目は task フェーズと同じまま、このカードだけ上に重なる。 */}
+          {phase === 'waiting' && interviewType === 'usability' && (
+            <div className="absolute inset-0 bg-gray-950/40 backdrop-blur-sm flex items-center justify-center p-4 sm:p-8 overflow-y-auto z-10">
+              <div className="text-center max-w-md w-full bg-white rounded-2xl border border-gray-200 shadow-xl p-8">
+                <div className="w-12 h-12 mx-auto mb-4 rounded-xl bg-gray-100 flex items-center justify-center text-gray-700">
+                  {usabilityMode === 'prototype' ? <Palette className="w-5 h-5" strokeWidth={1.75} /> : <Monitor className="w-5 h-5" strokeWidth={1.75} />}
+                </div>
+                <h1 className="text-lg font-semibold tracking-tight mb-2 text-gray-900">準備はよろしいですか？</h1>
+                <p className="text-sm text-gray-600 leading-relaxed mb-6">
+                  {usabilityMode === 'service'
+                    ? '開始するとタスク用の小窓が表示されます。'
+                    : '開始すると画面共有のダイアログが表示されます。「画面全体」を選んで共有してください。'}
+                </p>
+                <button
+                  onClick={beginUsabilityTask}
+                  className="inline-flex items-center gap-1.5 bg-gray-900 hover:bg-gray-800 text-white px-6 py-2.5 rounded-md font-medium text-sm transition-colors"
+                >
+                  タスクを開始する<ArrowRight className="w-4 h-4" strokeWidth={2} />
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* 印象テスト: 刺激表示フェーズ */}
           {phase === 'stimulus' && stimulusUrl && (

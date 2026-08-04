@@ -232,6 +232,55 @@ eq('除外された未実施は通常側に出ない', overallSuccess(aggregateT
 eq('除外側で未実施として数えられる', aggregateTasks(withEx,{excluded:true})[0].notAttempted, 1)
 }
 
-console.log(`
-${pass} passed, ${fail} failed`)
+console.log('\n=== 深掘りの深さ（lib/follow-up.ts） ===')
+{
+  const {
+    normalizeFollowUpDepth, effectiveFollowUpDepth,
+    FOLLOW_UP_DEPTH_MIN, FOLLOW_UP_DEPTH_MAX, FOLLOW_UP_DEPTH_DEFAULT,
+  } = await import('../follow-up.ts')
+
+  eq('既定は2（従来のハードコード値と同じ）', FOLLOW_UP_DEPTH_DEFAULT, 2)
+  eq('範囲は1〜5', [FOLLOW_UP_DEPTH_MIN, FOLLOW_UP_DEPTH_MAX], [1, 5])
+
+  eq('正常値はそのまま', [1, 2, 5].map(normalizeFollowUpDepth), [1, 2, 5])
+  eq('下限より小さい値は1に丸める', [0, -3].map(normalizeFollowUpDepth), [1, 1])
+  eq('上限より大きい値は5に丸める', [6, 999].map(normalizeFollowUpDepth), [5, 5])
+  eq('小数は四捨五入', [2.4, 2.6].map(normalizeFollowUpDepth), [2, 3])
+  eq('数値でない値は既定に寄せる', ['abc', undefined, null, NaN, ''].map(normalizeFollowUpDepth), [2, 2, 2, 2, 2])
+  eq('数字文字列は受け付ける', normalizeFollowUpDepth('3'), 3)
+
+  eq('OFF なら0（AI を呼ばない）', effectiveFollowUpDepth({ followUpEnabled: false, followUpDepth: 4 }), 0)
+  eq('ON かつ深さ指定ありならその値', effectiveFollowUpDepth({ followUpEnabled: true, followUpDepth: 4 }), 4)
+  eq('深さ未指定なら既定', effectiveFollowUpDepth({ followUpEnabled: true }), 2)
+  eq('ON/OFF 未指定（旧データ）は深掘りする', effectiveFollowUpDepth({}), 2)
+  eq('OFF でも深さの値は判定に影響しない', effectiveFollowUpDepth({ followUpEnabled: false }), 0)
+  eq('壊れた深さでも無限にはならない', effectiveFollowUpDepth({ followUpEnabled: true, followUpDepth: 9999 }), 5)
+}
+
+
+console.log('\n=== 会話履歴の切り詰め（末尾＝直近を残す） ===')
+{
+  const { clampText, clampTextTail } = await import('../llm-safety.ts')
+
+  const conv = ['AI: 質問1', '参加者: 古い話', 'AI: 質問2', '参加者: いま話していること'].join('\n')
+  eq('上限内ならそのまま', clampTextTail(conv, 1000), conv)
+
+  // 上限を小さくして、どちらの端が残るかを見る
+  const head = clampText(conv, 20)
+  const tail = clampTextTail(conv, 20)
+  eq('従来の clampText は冒頭を残す（＝直近が消える）',
+    [head.includes('質問1'), head.includes('いま話していること')], [true, false])
+  eq('clampTextTail は直近を残す',
+    [tail.includes('いま話していること'), tail.includes('質問1')], [true, false])
+  eq('省略した旨を明示する', tail.startsWith('…[この前のやり取りは省略]'), true)
+
+  // 行の途中で切らない（誰の発言か分からなくなるのを防ぐ）
+  const lines = clampTextTail(conv, 20).split('\n').slice(1)
+  eq('残った行は話者から始まる', lines.every((l) => l === '' || /^(AI|参加者): /.test(l)), true)
+
+  eq('文字列以外は空文字', [clampTextTail(null, 10), clampTextTail(undefined, 10)], ['', ''])
+  eq('改行が無い長文でも落ちない', clampTextTail('あ'.repeat(100), 10).length > 0, true)
+}
+
+console.log(`\n${pass} passed, ${fail} failed`)
 if (fail > 0) process.exit(1)

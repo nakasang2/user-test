@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
+import { FOLLOW_UP_DEPTH_MIN, FOLLOW_UP_DEPTH_MAX, normalizeFollowUpDepth } from '@/lib/follow-up'
 import { prisma } from '@/lib/db'
 import { generateInterviewQuestions } from '@/lib/ai'
 import { requireAuth, handleApiError } from '@/lib/api-auth'
@@ -19,6 +20,10 @@ const createSchema = z.object({
       imageUrl: z.string().url().max(2000).nullable().optional(),
       imageMode: z.enum(['persistent', 'timed']).nullable().optional(),
       imageDuration: z.number().int().min(1).max(60).nullable().optional(),
+      // この質問で AI が深掘りするか。未指定は true（従来どおり）
+      followUpEnabled: z.boolean().optional(),
+      // 深掘りの深さ。範囲は lib/follow-up.ts に集約
+      followUpDepth: z.number().int().min(FOLLOW_UP_DEPTH_MIN).max(FOLLOW_UP_DEPTH_MAX).optional(),
     }),
   ])).optional(),
   type:             z.enum(['interview', 'impression', 'usability']).default('interview'),
@@ -79,7 +84,7 @@ export async function POST(req: NextRequest) {
     const { title, description, questions, autoGenerate, topic, type, usabilityMode, stimulusUrl, stimulusDuration, tasks, seqEnabled, hintDelaySec, screeners } = parsed.data
 
     type QuestionInput =
-      | { text: string; type?: string; imageUrl?: string | null; imageMode?: string | null; imageDuration?: number | null }
+      | { text: string; type?: string; imageUrl?: string | null; imageMode?: string | null; imageDuration?: number | null; followUpEnabled?: boolean; followUpDepth?: number }
       | string
     let questionList: QuestionInput[] = questions ?? []
 
@@ -106,6 +111,9 @@ export async function POST(req: NextRequest) {
             order: index + 1,
             // 画像が無ければ見せ方も秒数も残さない（使われない値を保存しない）
             ...toQuestionImagePayload(typeof q === 'string' ? {} : q),
+            // 深掘りの ON/OFF と深さ。未指定は既定（従来どおり）
+            followUpEnabled: typeof q === 'string' ? true : (q.followUpEnabled ?? true),
+            followUpDepth: normalizeFollowUpDepth(typeof q === 'string' ? undefined : q.followUpDepth),
           })),
         },
         tasks: {

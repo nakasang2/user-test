@@ -22,6 +22,8 @@ import ScreenerEditor, {
   type ScreenerRow,
 } from '@/components/ScreenerEditor'
 import SeqToggle from '@/components/SeqToggle'
+import FollowUpToggle from '@/components/FollowUpToggle'
+import { normalizeFollowUpDepth } from '@/lib/follow-up'
 import QuestionImageField from '@/components/QuestionImageField'
 import { toQuestionImagePayload, validateQuestionImage } from '@/lib/question-image'
 
@@ -31,6 +33,10 @@ interface Message { role: Role; content: string }
 interface Question {
   text: string
   type: string
+  /** 自由回答で AI が深掘りするか。未指定は true（従来どおり） */
+  followUpEnabled?: boolean
+  /** 深掘りの深さ */
+  followUpDepth?: number
   // 印象テストで質問ごとに提示する画像
   imageUrl?: string | null
   imageMode?: string | null
@@ -191,6 +197,9 @@ export default function DesignPage() {
           questions:        plot.questions.map((q) => ({
             text: q.text,
             type: q.type,
+            // 形式に関わらず設定をそのまま保存する（理由は EditInterviewModal 参照）
+            followUpEnabled: q.followUpEnabled !== false,
+            followUpDepth: normalizeFollowUpDepth(q.followUpDepth),
             ...(sessionType === 'impression' ? toQuestionImagePayload(q) : {}),
           })),
           type:             sessionType,
@@ -657,6 +666,26 @@ export default function DesignPage() {
                         >
                           {Q_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
                         </select>
+                        {/* 深掘りの ON/OFF。自由回答のときだけ意味を持つ */}
+                        {q.type === 'open' && (
+                          <FollowUpToggle
+                            checked={q.followUpEnabled}
+                            depth={q.followUpDepth}
+                            questionNumber={i + 1}
+                            onChange={(next) => {
+                              if (!plot) return
+                              const updated = [...plot.questions]
+                              updated[i] = { ...updated[i], followUpEnabled: next }
+                              setPlot({ ...plot, questions: updated })
+                            }}
+                            onDepthChange={(next) => {
+                              if (!plot) return
+                              const updated = [...plot.questions]
+                              updated[i] = { ...updated[i], followUpDepth: next }
+                              setPlot({ ...plot, questions: updated })
+                            }}
+                          />
+                        )}
                         {sessionType === 'impression' && (
                           <QuestionImageField
                             value={q}

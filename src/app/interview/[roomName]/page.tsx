@@ -33,6 +33,9 @@ export default async function InterviewPage(props: { params: Promise<{ roomName:
         imageUrl: q.imageUrl,
         imageMode: q.imageMode,
         imageDuration: q.imageDuration,
+        // 渡し忘れると、深掘りを切った質問でも AI が深掘りしてくる
+        followUpEnabled: q.followUpEnabled,
+        followUpDepth: q.followUpDepth,
       }))}
       interviewTitle={session.interview.title}
       participantName={session.participant?.name}
