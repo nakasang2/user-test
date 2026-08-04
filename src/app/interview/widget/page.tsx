@@ -68,6 +68,12 @@ function WidgetContent() {
   const [micStream, setMicStream]              = useState<MediaStream | null>(null)
   // メイン画面が読み上げ中か（tts_state で届く）。読み上げ中は沈黙検知を止める
   const [ttsSpeaking, setTtsSpeaking]          = useState(false)
+  // タスク1の前に読む思考発話の案内。メイン側から guidance_text で届くまでは
+  // プレースホルダーを出す（案内のテキストはメイン側の speak() が唯一の情報源）
+  const [guidanceText, setGuidanceText]        = useState('')
+  // 案内の「スタート」を押したか。押すまではタスク1の文言・結果ボタンを出さない
+  // （案内を読み終える前にタスクが見えてしまう不具合の修正）
+  const [guidanceDismissed, setGuidanceDismissed] = useState(false)
   // ヒントを見たタスク番号（0始まり）。結果送信時に添えて集計で自力達成と分ける
   const usedHintIdxRef                          = useRef<Set<number>>(new Set())
 
@@ -99,6 +105,8 @@ function WidgetContent() {
           setRecoveryAtIdx((cur) => (cur === next ? cur : null))
         } else if (type === 'tts_state') {
           setTtsSpeaking(e.data.speaking === true)
+        } else if (type === 'guidance_text' && typeof e.data.text === 'string') {
+          setGuidanceText(e.data.text)
         } else if (type === 'prereq_recovery' && typeof e.data.index === 'number') {
           // メイン画面側で前提タスクの断念が記録された（フォールバック操作時）。
           // 小窓でも同じ立て直し画面を出し、操作の起点が割れないようにする
@@ -389,26 +397,41 @@ function WidgetContent() {
   // 完了して初めてタスク文言と結果ボタンを表示し、準備中は隠して混乱を防ぐ。
   const readyForTask = isScreenRecording && (serviceOpened || !stimulusUrl)
 
-  // タスク文言が実際に見えた瞬間をメインへ通知する。
-  // 所要時間（time on task）の計測開始をこの時点に合わせ、
-  // 録画の開始操作やサイトを開く操作の時間がタスク1に混入しないようにする。
+  // タスク1の直前だけ、思考発話の案内→「スタート」を挟む（2問目以降は不要）。
+  // 案内を読み終える前にタスク1の文言が見えてしまう不具合の修正のため、
+  // ready になっても即座にはタスクを見せず、まず案内を出す。
+  const showGuidance = readyForTask && currentTaskIndex === 0 && !guidanceDismissed
+  const taskVisible = readyForTask && !showGuidance
+
+  // 事前手続きが揃った瞬間にメインへ通知する。
+  // タスク1のみ、まず案内を読ませてから（guidance_ready）、「スタート」を押して
+  // 初めて task_ready を送る＝所要時間の計測はそこが起点になる。
+  // 2問目以降（小窓の開き直し等）は案内不要なのでそのまま task_ready を送る。
   // ※フック規則のため、必ず早期 return より前で呼ぶこと。
   const taskReadySentRef = useRef(false)
+  const guidanceRequestedRef = useRef(false)
   useEffect(() => {
     if (!readyForTask || taskReadySentRef.current) return
+    if (showGuidance) {
+      if (guidanceRequestedRef.current) return
+      guidanceRequestedRef.current = true
+      channelRef.current?.postMessage({ type: 'guidance_ready' })
+      return
+    }
     taskReadySentRef.current = true
     channelRef.current?.postMessage({ type: 'task_ready' })
-  }, [readyForTask])
+  }, [readyForTask, showGuidance])
 
-  // 詰まった参加者への声かけ。着手（readyForTask）してから hintDelaySec 後に出す。
+  // 詰まった参加者への声かけ。着手（タスク1が実際に見えてから＝taskVisible）してから
+  // hintDelaySec 後に出す。案内の表示中はカウントしない。
   // タスクが変わるとタイマーを張り直すので、前のタスクの経過は持ち越さない。
   // ※フック規則のため、必ず早期 return より前に置くこと。
   useEffect(() => {
-    if (!hintDelaySec || !readyForTask) return
+    if (!hintDelaySec || !taskVisible) return
     const idx = currentTaskIndex
     const timer = setTimeout(() => setStuckAtIdx(idx), hintDelaySec * 1000)
     return () => clearTimeout(timer)
-  }, [hintDelaySec, readyForTask, currentTaskIndex])
+  }, [hintDelaySec, taskVisible, currentTaskIndex])
 
   const stuckOnTask = stuckAtIdx === currentTaskIndex
   const hintShown = hintShownAtIdx === currentTaskIndex
@@ -425,7 +448,7 @@ function WidgetContent() {
     // 読み上げ音声はマイク信号から除去されるため、入れないと読み上げ中も沈黙として数え、
     // 促しが読み上げを途中で打ち切ってしまう。false に戻った時点で計測を張り直す
     // ＝「読み上げが終わってから」20秒を数え始める。
-    active: widgetPhase === 'task' && readyForTask && !ttsSpeaking
+    active: widgetPhase === 'task' && taskVisible && !ttsSpeaking
       && !stuckOnTask && !recoveryPending && !awaitingSeq,
     resetKey: currentTaskIndex,
     onNudge: () => {
@@ -518,9 +541,25 @@ function WidgetContent() {
       </div>
 
       {/* タスク内容（上詰め。長文はここだけスクロールし、下のボタンは常に見える。vh非依存で px 上限）。
-          事前手続き（録画・サービス起動）が終わるまでは、タスク文言ではなく準備の案内を出す。 */}
+          事前手続き（録画・サービス起動）が終わるまでは、タスク文言ではなく準備の案内を出す。
+          タスク1の直前は、案内の読み上げ→「スタート」を挟む（showGuidance）。 */}
       <div className="px-3 py-3 max-h-64 overflow-y-auto">
-        {readyForTask ? (
+        {showGuidance ? (
+          <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 space-y-2.5">
+            <p className="text-[10px] text-gray-500 uppercase tracking-wide font-medium">はじめに</p>
+            <p className="text-sm text-gray-900 leading-relaxed">
+              {guidanceText || '案内を読み上げています…'}
+            </p>
+            <button
+              type="button"
+              onClick={() => setGuidanceDismissed(true)}
+              disabled={ttsSpeaking}
+              className="w-full inline-flex items-center justify-center gap-1.5 bg-gray-900 hover:bg-gray-800 disabled:opacity-50 disabled:cursor-wait text-white py-2.5 rounded-lg text-sm font-semibold transition-colors"
+            >
+              {ttsSpeaking ? '読み上げています…' : 'スタート'}
+            </button>
+          </div>
+        ) : taskVisible ? (
           currentTask ? (
             <div className="space-y-2">
               <div className="bg-gray-50 border border-gray-200 rounded-lg p-3">
@@ -625,8 +664,9 @@ function WidgetContent() {
           </div>
         )}
 
-        {/* 結果ボタン: サービスを開いた後（サービス URL 未設定なら録画開始後）に初めて表示 */}
-        {isScreenRecording && (serviceOpened || !stimulusUrl) && (
+        {/* 結果ボタン: サービスを開いた後（サービス URL 未設定なら録画開始後）に初めて表示。
+            タスク1の直前は案内の「スタート」を押すまでは出さない（taskVisible） */}
+        {taskVisible && (
           <>
             {stimulusUrl && (
               <div className="flex items-center justify-center gap-1.5 text-xs text-emerald-700">
