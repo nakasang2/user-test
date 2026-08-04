@@ -1236,13 +1236,25 @@ export default function InterviewRoom({
     startMediaRecorder()
     if (videoRef.current) startDetection(videoRef.current)
 
+    // サービスモードのユーザビリティテストは、中間の「準備はよろしいですか？」画面を
+    // 挟まず、ここで直接小窓を開く（ユーザーの要望で待機画面を廃止し、小窓に集約）。
+    // documentPictureInPicture.requestWindow() は transient user activation を要求するため、
+    // 後続の await（PATCH）より前に、このボタンのクリックハンドラ内で同期的に呼ぶ必要がある。
+    if (interviewType === 'usability' && usabilityMode === 'service') {
+      beginUsabilityTask()
+    }
+
     await fetch(`/api/sessions/${sessionId}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json', 'x-participant-token': participantToken ?? '' },
       body: JSON.stringify({ status: 'active' }),
     })
 
-    // ユーザビリティ・印象テストは、ここで即座にタスク／画像へ進まず、
+    if (interviewType === 'usability' && usabilityMode === 'service') {
+      return  // 上ですでに beginUsabilityTask() が phase を 'task' に進めている
+    }
+
+    // プロトタイプのユーザビリティテスト・印象テストは、ここで即座にタスク／画像へ進まず、
     // 参加者が明示的に押す「開始する」ボタン待ちの画面（waiting）を挟む。
     // 録画・カメラはこの待機中も継続する（ガイド画面の滞在と同様、タスク1の
     // 所要時間には含めない＝markFirstTaskStart / beginStimulusIntro が実際の起点）。
@@ -1261,11 +1273,11 @@ export default function InterviewRoom({
     })
   }
 
-  // ── ユーザビリティテスト: 「タスクを開始する」ボタン ──────────
-  // waiting フェーズで押された時点から実際のタスクを始める。
-  // service モードのウィジェット起動・prototype モードの画面共有ダイアログは、
-  // 従来ガイド画面のボタンで行っていたものをここに移した（トリガーが1テンポ遅れるだけで、
-  // 「ダイアログの操作時間はタスク1に含めない」という計測方針自体は変えない）。
+  // ── ユーザビリティテストの実タスク開始 ──────────────────────
+  // service モード: startInterview() からガイド画面のボタンで直接呼ばれる（待機画面なし）。
+  // prototype モード: waiting フェーズの「タスクを開始する」ボタンから呼ばれる。
+  // どちらも画面共有ダイアログ・小窓の操作時間はタスク1の所要時間に含めない
+  // （markFirstTaskStart / task_ready が実際の計測起点）。
   function beginUsabilityTask() {
     if (taskPhaseStartedRef.current) return  // 二重クリック防止
     taskPhaseStartedRef.current = true
@@ -1891,20 +1903,19 @@ export default function InterviewRoom({
             </div>
           )}
 
-          {/* ユーザビリティテスト: 「タスクを開始する」待ち。
+          {/* ユーザビリティテスト（プロトタイプ）: 「タスクを開始する」待ち。
+              service モードはガイド画面のボタンで直接小窓へ進むため、ここには来ない。
               iframe・カメラPiP・サイドバーは phase==='waiting' も対象に含めているので
               背景の見た目は task フェーズと同じまま、このカードだけ上に重なる。 */}
-          {phase === 'waiting' && interviewType === 'usability' && (
+          {phase === 'waiting' && interviewType === 'usability' && usabilityMode === 'prototype' && (
             <div className="absolute inset-0 bg-gray-950/40 backdrop-blur-sm flex items-center justify-center p-4 sm:p-8 overflow-y-auto z-10">
               <div className="text-center max-w-md w-full bg-white rounded-2xl border border-gray-200 shadow-xl p-8">
                 <div className="w-12 h-12 mx-auto mb-4 rounded-xl bg-gray-100 flex items-center justify-center text-gray-700">
-                  {usabilityMode === 'prototype' ? <Palette className="w-5 h-5" strokeWidth={1.75} /> : <Monitor className="w-5 h-5" strokeWidth={1.75} />}
+                  <Palette className="w-5 h-5" strokeWidth={1.75} />
                 </div>
                 <h1 className="text-lg font-semibold tracking-tight mb-2 text-gray-900">準備はよろしいですか？</h1>
                 <p className="text-sm text-gray-600 leading-relaxed mb-6">
-                  {usabilityMode === 'service'
-                    ? '開始するとタスク用の小窓が表示されます。'
-                    : '開始すると画面共有のダイアログが表示されます。「画面全体」を選んで共有してください。'}
+                  開始すると画面共有のダイアログが表示されます。「画面全体」を選んで共有してください。
                 </p>
                 <button
                   onClick={beginUsabilityTask}
