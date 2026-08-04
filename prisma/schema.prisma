@@ -322,7 +322,7 @@ model Session {
   answers       Answer[]
   highlights    Highlight[]
   screenerAnswers ScreenerAnswer[]
-  interview     Interview       @relation(fields: [interviewId], references: [id])
+  interview     Interview       @relation(fields: [interviewId], references: [id], onDelete: Cascade)
   participant   Participant?    @relation(fields: [participantId], references: [id])
   createdAt     DateTime        @default(now())
   updatedAt     DateTime        @updatedAt
