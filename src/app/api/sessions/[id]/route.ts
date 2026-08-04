@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { del } from '@vercel/blob'
 import { requireAuth, requireRole, getRole, requireParticipantToken, handleApiError } from '@/lib/api-auth'
+import { deleteSessionWithBlob } from '@/lib/delete-interview'
 
 export async function GET(_req: NextRequest, props: { params: Promise<{ id: string }> }) {
   try {
@@ -83,20 +83,8 @@ export async function DELETE(_req: NextRequest, props: { params: Promise<{ id: s
     // 録画・文字起こしごと消える取り返しのつかない操作なので、閲覧者には許可しない
     const { orgId } = await requireRole('editor')
     const { id } = await props.params
-
-    const session = await prisma.session.findFirst({
-      where: { id, interview: { organizationId: orgId } },
-      select: { recordingUrl: true },
-    })
-    if (!session) return NextResponse.json({ error: 'Not found' }, { status: 404 })
-
-    if (session.recordingUrl) {
-      try { await del(session.recordingUrl) } catch (e) {
-        console.error('Blob deletion failed (continuing):', e)
-      }
-    }
-
-    await prisma.session.delete({ where: { id } })
+    const result = await deleteSessionWithBlob(id, orgId)
+    if (!result.ok) return NextResponse.json({ error: result.error }, { status: 404 })
     return NextResponse.json({ ok: true })
   } catch (err) {
     return handleApiError(err)

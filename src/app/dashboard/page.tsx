@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { track } from '@/lib/analytics'
 import CreateInterviewModal from '@/components/CreateInterviewModal'
 import StatusBadge from '@/components/StatusBadge'
+import BulkDeleteModal from '@/components/BulkDeleteModal'
 import {
   Search,
   X,
@@ -14,6 +15,7 @@ import {
   LogOut,
   Mail,
   Check,
+  Trash2,
 } from 'lucide-react'
 
 interface Question {
@@ -27,9 +29,15 @@ interface Interview {
   id: string
   title: string
   description: string | null
+  type: string
   questions: Question[]
   _count: { sessions: number }
   createdAt: string
+}
+
+type TypeFilter = 'all' | 'interview' | 'impression' | 'usability'
+const TYPE_LABELS: Record<string, string> = {
+  all: 'すべて', interview: 'インタビュー', impression: '印象テスト', usability: 'ユーザビリティ',
 }
 
 interface Session {
@@ -62,9 +70,24 @@ export default function Dashboard() {
 
   const [searchQuery, setSearchQuery] = useState('')
   const [sortKey, setSortKey] = useState<SortKey>('date-desc')
+  const [typeFilter, setTypeFilter] = useState<TypeFilter>('all')
 
   const [loadError, setLoadError] = useState(false)
   const [loading, setLoading] = useState(true)
+
+  // 一覧の複数選択・一括削除
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false)
+  const [bulkDeleting, setBulkDeleting] = useState(false)
+
+  function toggleSelect(id: string) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
 
   useEffect(() => { fetchData() }, [])
 
@@ -122,11 +145,12 @@ export default function Dashboard() {
     return m
   }, [realSessions])
 
-  // テスト一覧（テスト名で検索＋並び替え）
+  // テスト一覧（テスト名で検索＋タイプ絞り込み＋並び替え）
   const visibleInterviews = useMemo(() => {
     const q = searchQuery.trim().toLowerCase()
     return interviews
       .filter((iv) => (q ? iv.title.toLowerCase().includes(q) : true))
+      .filter((iv) => (typeFilter === 'all' ? true : iv.type === typeFilter))
       .slice()
       .sort((a, b) => {
         if (sortKey === 'name-asc') return a.title.localeCompare(b.title, 'ja')
@@ -134,7 +158,46 @@ export default function Dashboard() {
         const da = new Date(a.createdAt).getTime(), db = new Date(b.createdAt).getTime()
         return sortKey === 'date-asc' ? da - db : db - da
       })
-  }, [interviews, searchQuery, sortKey, countsByInterview])
+  }, [interviews, searchQuery, typeFilter, sortKey, countsByInterview])
+
+  // 選択されているのに、絞り込みで見えなくなった id は選択解除する
+  // （見えない項目を「削除される」と気づけないまま実行してしまうのを防ぐ）
+  const visibleIdSet = useMemo(() => new Set(visibleInterviews.map((iv) => iv.id)), [visibleInterviews])
+  const selectedVisible = useMemo(
+    () => [...selectedIds].filter((id) => visibleIdSet.has(id)),
+    [selectedIds, visibleIdSet]
+  )
+
+  async function bulkDelete() {
+    setBulkDeleting(true)
+    try {
+      const res = await fetch('/api/interviews/bulk-delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids: selectedVisible }),
+      })
+      const data = await res.json().catch(() => null)
+      if (!res.ok || !data) {
+        alert(
+          res.status === 403
+            ? '削除する権限がありません（管理者以上が必要です）。'
+            : (data?.error ?? '削除に失敗しました')
+        )
+        return
+      }
+      const ng = data.failed?.length > 0
+        ? `\n${data.failed.length} 件は削除できませんでした（${data.failed.map((f: { error: string }) => f.error).join(' / ')}）。`
+        : ''
+      setBulkDeleteOpen(false)
+      setSelectedIds(new Set())
+      await fetchData()
+      if (ng) alert(`${data.deleted?.length ?? 0} 件を削除しました。${ng}`)
+    } catch {
+      alert('削除に失敗しました')
+    } finally {
+      setBulkDeleting(false)
+    }
+  }
 
   const doneCount = realSessions.filter((s) => s.status === 'done').length
 
@@ -240,7 +303,7 @@ export default function Dashboard() {
           </div>
         )}
 
-        {/* ツールバー（テスト名で検索＋並び替え） */}
+        {/* ツールバー（テスト名で検索＋タイプ絞り込み＋並び替え） */}
         <div className="flex flex-wrap items-center gap-2 mb-4">
           <div className="relative flex-1 min-w-40">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" strokeWidth={2} />
@@ -262,6 +325,16 @@ export default function Dashboard() {
           </div>
 
           <select
+            value={typeFilter}
+            onChange={(e) => setTypeFilter(e.target.value as TypeFilter)}
+            className="bg-white border border-gray-300 text-gray-700 text-xs rounded-md px-2.5 py-1.5 focus:outline-none focus:border-gray-900 transition-colors"
+          >
+            {(['all', 'interview', 'impression', 'usability'] as TypeFilter[]).map((t) => (
+              <option key={t} value={t}>{TYPE_LABELS[t]}</option>
+            ))}
+          </select>
+
+          <select
             value={sortKey}
             onChange={(e) => setSortKey(e.target.value as SortKey)}
             className="bg-white border border-gray-300 text-gray-700 text-xs rounded-md px-2.5 py-1.5 focus:outline-none focus:border-gray-900 transition-colors"
@@ -271,6 +344,42 @@ export default function Dashboard() {
             ))}
           </select>
         </div>
+
+        {/* 選択バー。1件以上選ぶと現れる */}
+        {!loading && visibleInterviews.length > 0 && (
+          <div className="flex items-center gap-2 mb-3 text-xs text-gray-600">
+            <label className="flex items-center gap-1.5 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={selectedVisible.length > 0 && selectedVisible.length === visibleInterviews.length}
+                ref={(el) => {
+                  if (el) el.indeterminate = selectedVisible.length > 0 && selectedVisible.length < visibleInterviews.length
+                }}
+                onChange={(e) => {
+                  setSelectedIds(e.target.checked ? new Set(visibleInterviews.map((iv) => iv.id)) : new Set())
+                }}
+                className="accent-gray-900"
+              />
+              すべて選択
+            </label>
+            {selectedVisible.length > 0 && (
+              <>
+                <span className="text-gray-300">·</span>
+                <span>{selectedVisible.length} 件選択中</span>
+                <button
+                  onClick={() => setBulkDeleteOpen(true)}
+                  className="inline-flex items-center gap-1 text-red-600 hover:text-red-700 font-medium ml-1"
+                >
+                  <Trash2 className="w-3 h-3" strokeWidth={2} />
+                  削除
+                </button>
+                <button onClick={() => setSelectedIds(new Set())} className="text-gray-500 hover:text-gray-900 underline underline-offset-2">
+                  選択を解除
+                </button>
+              </>
+            )}
+          </div>
+        )}
 
         {/* テスト一覧 */}
         <div className="space-y-3">
@@ -297,6 +406,13 @@ export default function Dashboard() {
                   key={iv.id}
                   className="bg-white border border-gray-200 hover:border-gray-300 rounded-lg p-4 flex items-start justify-between gap-3 transition-colors"
                 >
+                  <input
+                    type="checkbox"
+                    checked={selectedIds.has(iv.id)}
+                    onChange={() => toggleSelect(iv.id)}
+                    aria-label={`${iv.title} を選択`}
+                    className="mt-1 flex-shrink-0 accent-gray-900"
+                  />
                   <Link href={`/dashboard/interviews/${iv.id}`} className="min-w-0 flex-1 group">
                     <span className="block font-medium text-sm text-gray-900 group-hover:text-gray-600 transition-colors truncate mb-0.5">
                       {iv.title}
@@ -338,6 +454,17 @@ export default function Dashboard() {
           )}
         </div>
       </div>
+
+      {bulkDeleteOpen && (
+        <BulkDeleteModal
+          itemLabel="テスト"
+          items={visibleInterviews.filter((iv) => selectedIds.has(iv.id)).map((iv) => ({ id: iv.id, label: iv.title }))}
+          detailNote="配下のセッション（録画・文字起こし・回答）と、調査に使った画像もすべてサーバーから削除されます。"
+          deleting={bulkDeleting}
+          onConfirm={bulkDelete}
+          onClose={() => setBulkDeleteOpen(false)}
+        />
+      )}
 
       {showCreateInterview && (
         <CreateInterviewModal
