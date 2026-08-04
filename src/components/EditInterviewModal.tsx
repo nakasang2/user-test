@@ -8,6 +8,8 @@ import ScreenerEditor, {
   type ScreenerRow,
 } from './ScreenerEditor'
 import SeqToggle from './SeqToggle'
+import FollowUpToggle from '@/components/FollowUpToggle'
+import { FOLLOW_UP_DEPTH_DEFAULT, normalizeFollowUpDepth } from '@/lib/follow-up'
 import QuestionImageField from './QuestionImageField'
 import { toQuestionImagePayload, validateQuestionImage } from '@/lib/question-image'
 
@@ -20,12 +22,16 @@ export interface EditableInterview {
   type: string
   seqEnabled?: boolean
   hintDelaySec?: number | null
-  questions: { id: string; text: string; order: number; type: string; imageUrl?: string | null; imageMode?: string | null; imageDuration?: number | null }[]
+  questions: { id: string; text: string; order: number; type: string; imageUrl?: string | null; imageMode?: string | null; imageDuration?: number | null; followUpEnabled?: boolean; followUpDepth?: number }[]
   tasks?: { id: string; text: string; order: number; hint?: string | null; isPrerequisite?: boolean | null }[]
   screeners?: { id: string; label: string; options: string[]; disqualify: string[]; required: boolean; order: number }[]
 }
 
 interface Row {
+  /** 自由回答で AI が深掘りするか。未指定は true（従来どおり） */
+  followUpEnabled?: boolean
+  /** 深掘りの深さ */
+  followUpDepth?: number
   id?: string
   text: string
   type: QType
@@ -67,6 +73,8 @@ export default function EditInterviewModal({
       text: q.text,
       type: (q.type as QType) ?? 'open',
       imageUrl: q.imageUrl ?? null,
+      followUpEnabled: q.followUpEnabled ?? true,
+      followUpDepth: q.followUpDepth ?? FOLLOW_UP_DEPTH_DEFAULT,
       imageMode: q.imageMode ?? null,
       imageDuration: q.imageDuration ?? null,
     }))
@@ -139,6 +147,11 @@ export default function EditInterviewModal({
             .filter((q) => q.text.trim())
             .map((q) => ({
               id: q.id, text: q.text.trim(), type: q.type,
+              // 形式に関わらず設定をそのまま保存する。評価・NPS のときに true で
+              // 上書きすると、一時的に形式を変えて戻しただけで OFF 設定が消える
+              // （参加者側は rating/nps では元々深掘りしないので、上書きの実益もない）
+              followUpEnabled: q.followUpEnabled !== false,
+              followUpDepth: normalizeFollowUpDepth(q.followUpDepth),
               ...(isImpression ? toQuestionImagePayload(q) : {}),
             })),
           // 選択肢が無い設問は落とす（被験者が回答できず参加不能になるため）
@@ -274,6 +287,7 @@ export default function EditInterviewModal({
             placeholder="例: 使ってみて迷った点はありますか"
             withType
             withImage={isImpression}
+            withFollowUp
           />
 
           {/* 事前質問（スクリーニング／属性）。作成・AI設計ページと共通のエディタ */}
@@ -308,7 +322,7 @@ export default function EditInterviewModal({
 
 /** 質問／タスクの共通エディタ（追加・削除・並べ替え） */
 function RowEditor({
-  label, rows, setRows, placeholder, withType, withHint = false, withImage = false,
+  label, rows, setRows, placeholder, withType, withHint = false, withImage = false, withFollowUp = false,
 }: {
   label: string
   rows: Row[]
@@ -319,6 +333,8 @@ function RowEditor({
   withHint?: boolean
   /** 印象テストの質問用: 質問ごとに提示する画像も設定する */
   withImage?: boolean
+  /** 質問用: 自由回答で AI が深掘りするかを選ぶ */
+  withFollowUp?: boolean
 }) {
   const move = (from: number, to: number) => {
     if (to < 0 || to >= rows.length) return
@@ -333,7 +349,7 @@ function RowEditor({
       <div className="flex items-center justify-between mb-1.5">
         <span className="text-xs font-medium text-gray-700">{label}</span>
         <button
-          onClick={() => setRows([...rows, { text: '', type: 'open' }])}
+          onClick={() => setRows([...rows, { text: '', type: 'open', followUpEnabled: true, followUpDepth: FOLLOW_UP_DEPTH_DEFAULT }])}
           className="inline-flex items-center gap-1 text-xs text-gray-600 hover:text-gray-900 border border-gray-300 hover:border-gray-400 px-2 py-1 rounded transition-colors"
         >
           <Plus className="w-3 h-3" strokeWidth={2} />追加
@@ -375,6 +391,20 @@ function RowEditor({
               <Trash2 className="w-3.5 h-3.5" strokeWidth={2} />
             </button>
           </div>
+          {/* 深掘りの ON/OFF。自由回答のときだけ意味を持つ（評価・NPS は元々深掘りしない） */}
+          {withFollowUp && row.type === 'open' && (
+            <div className="flex items-start gap-1.5 mt-1">
+              <span className="w-4 flex-shrink-0" aria-hidden="true" />
+              <FollowUpToggle
+                checked={row.followUpEnabled}
+                depth={row.followUpDepth}
+                questionNumber={i + 1}
+                onChange={(next) => setRows(rows.map((r, j) => (j === i ? { ...r, followUpEnabled: next } : r)))}
+                onDepthChange={(next) => setRows(rows.map((r, j) => (j === i ? { ...r, followUpDepth: next } : r)))}
+              />
+              <span className="w-[52px] flex-shrink-0" aria-hidden="true" />
+            </div>
+          )}
           {withImage && (
             <div className="flex items-start gap-1.5 mt-1">
               <span className="w-4 flex-shrink-0" aria-hidden="true" />

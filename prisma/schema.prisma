@@ -127,6 +127,16 @@ model Question {
   imageMode   String?
   // timed のときに見せる秒数。null なら既定 5 秒
   imageDuration Int?
+  // この質問で AI が深掘り（追加質問）をするか。
+  // 既定 true = 従来どおり。事実だけ聞きたい質問（例「普段どのブラウザですか」）で
+  // false にすると、回答を受けたらすぐ次の質問へ進む（AI 呼び出し自体を行わない）。
+  // rating / nps は元々深掘りの対象外なので、この値は open のときだけ意味を持つ。
+  followUpEnabled Boolean @default(true)
+  // 深掘りの深さ（この質問で最大何回まで追い質問するか）。1〜5。
+  // followUpEnabled が false のときは使わない。無効化しても値は残るので、
+  // もう一度有効にしたときに前の設定が戻る。
+  // 既定 2 は従来のハードコード値と同じなので、既存調査の挙動は変わらない。
+  followUpDepth   Int     @default(2)
   interviewId String
   interview   Interview @relation(fields: [interviewId], references: [id], onDelete: Cascade)
   answers     Answer[]

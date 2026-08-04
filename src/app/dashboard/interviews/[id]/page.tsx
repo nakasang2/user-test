@@ -49,7 +49,7 @@ interface CompareData {
     title: string
     description: string | null
     type: string
-    questions: { id: string; text: string; order: number; type: string; imageUrl?: string | null; imageMode?: string | null; imageDuration?: number | null }[]
+    questions: { id: string; text: string; order: number; type: string; imageUrl?: string | null; imageMode?: string | null; imageDuration?: number | null; followUpEnabled?: boolean; followUpDepth?: number }[]
     tasks: { id: string; text: string; order: number; hint?: string | null; isPrerequisite?: boolean | null }[]
     seqEnabled?: boolean
     hintDelaySec?: number | null

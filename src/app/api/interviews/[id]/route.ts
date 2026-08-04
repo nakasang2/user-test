@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
+import { FOLLOW_UP_DEPTH_MIN, FOLLOW_UP_DEPTH_MAX, normalizeFollowUpDepth } from '@/lib/follow-up'
 import { prisma } from '@/lib/db'
 import { del } from '@vercel/blob'
 import { requireAuth, requireRole, handleApiError } from '@/lib/api-auth'
@@ -50,6 +51,9 @@ const patchSchema = z.object({
     imageUrl: z.string().url().max(2000).nullable().optional(),
     imageMode: z.enum(['persistent', 'timed']).nullable().optional(),
     imageDuration: z.number().int().min(1).max(60).nullable().optional(),
+    // この質問で AI が深掘りするか。未指定は変更しない（既存値を保つ）
+    followUpEnabled: z.boolean().optional(),
+    followUpDepth: z.number().int().min(FOLLOW_UP_DEPTH_MIN).max(FOLLOW_UP_DEPTH_MAX).optional(),
   })).optional(),
   tasks: z.array(z.object({
     id:   z.string().optional(),
@@ -120,10 +124,15 @@ export async function PATCH(req: NextRequest, props: { params: Promise<{ id: str
         // 画像は毎回明示的に書く。update で省くと「外したのに残る」、
         // create で省くと「付けたのに保存されない」になる
         const image = toQuestionImagePayload(q)
+        // 深掘りの設定。未指定の項目は既存値を変えない（送られてきたものだけ書く）
+        const followUp = {
+          ...(q.followUpEnabled === undefined ? {} : { followUpEnabled: q.followUpEnabled }),
+          ...(q.followUpDepth === undefined ? {} : { followUpDepth: normalizeFollowUpDepth(q.followUpDepth) }),
+        }
         if (q.id && ownQuestionIds.has(q.id)) {
-          ops.push(prisma.question.update({ where: { id: q.id }, data: { text: q.text, type: q.type, order, ...image } }))
+          ops.push(prisma.question.update({ where: { id: q.id }, data: { text: q.text, type: q.type, order, ...image, ...followUp } }))
         } else {
-          ops.push(prisma.question.create({ data: { interviewId: id, text: q.text, type: q.type, order, ...image } }))
+          ops.push(prisma.question.create({ data: { interviewId: id, text: q.text, type: q.type, order, ...image, ...followUp } }))
         }
       })
     }

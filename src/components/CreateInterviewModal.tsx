@@ -19,6 +19,8 @@ import ScreenerEditor, {
   type ScreenerRow,
 } from './ScreenerEditor'
 import SeqToggle from './SeqToggle'
+import FollowUpToggle from '@/components/FollowUpToggle'
+import { normalizeFollowUpDepth } from '@/lib/follow-up'
 import QuestionImageField from './QuestionImageField'
 import { toQuestionImagePayload, validateQuestionImage } from '@/lib/question-image'
 
@@ -27,6 +29,10 @@ type InterviewType = 'interview' | 'impression' | 'usability'
 interface QuestionItem {
   text: string
   type: 'open' | 'rating' | 'nps'
+  /** 自由回答で AI が深掘りするか。未指定は true（従来どおり） */
+  followUpEnabled?: boolean
+  /** 深掘りの深さ */
+  followUpDepth?: number
   // 印象テストで、この質問に紐づけて提示する画像
   imageUrl?: string | null
   imageMode?: string | null
@@ -141,10 +147,18 @@ export default function CreateInterviewModal({ onClose, onCreated }: Props) {
           seqEnabled:       sessionType === 'usability' ? seqEnabled : undefined,
           screeners:        toScreenerPayload(screeners),
           questions: sessionType === 'interview'
-            ? (autoGenerate ? [] : questions.filter((q) => q.text.trim()).map((q) => ({ text: q.text, type: q.type })))
+            ? (autoGenerate ? [] : questions.filter((q) => q.text.trim()).map((q) => ({
+                text: q.text,
+                type: q.type,
+                // 形式に関わらず設定をそのまま保存する（理由は EditInterviewModal 参照）
+                followUpEnabled: q.followUpEnabled !== false,
+                followUpDepth: normalizeFollowUpDepth(q.followUpDepth),
+              })))
             : questions.filter((q) => q.text.trim()).map((q) => ({
                 text: q.text,
                 type: q.type,
+                followUpEnabled: q.followUpEnabled !== false,
+                followUpDepth: normalizeFollowUpDepth(q.followUpDepth),
                 ...(sessionType === 'impression' ? toQuestionImagePayload(q) : {}),
               })),
           autoGenerate: sessionType === 'interview' ? autoGenerate : false,
@@ -449,25 +463,40 @@ export default function CreateInterviewModal({ onClose, onCreated }: Props) {
                   </div>
                   <div className="space-y-1.5">
                     {questions.map((q, i) => (
-                      <div key={i} className="flex gap-2 items-start">
-                        <span className="text-gray-400 text-xs pt-2 w-5 flex-shrink-0 text-right">{i + 1}.</span>
-                        <div className="flex-1 flex gap-2">
-                          <input
-                            value={q.text}
-                            onChange={(e) => updateQuestion(i, { text: e.target.value })}
-                            placeholder={`質問 ${i + 1}`}
-                            className={inputClass}
-                          />
-                          <button type="button" onClick={() => cycleType(i)}
-                            className={`flex-shrink-0 px-2 py-1 rounded-md text-[10px] font-medium border transition-colors ${QUESTION_TYPE_COLORS[q.type]}`}>
-                            {QUESTION_TYPE_LABELS[q.type]}
-                          </button>
+                      <div key={i} className="space-y-1">
+                        <div className="flex gap-2 items-start">
+                          <span className="text-gray-400 text-xs pt-2 w-5 flex-shrink-0 text-right">{i + 1}.</span>
+                          <div className="flex-1 flex gap-2">
+                            <input
+                              value={q.text}
+                              onChange={(e) => updateQuestion(i, { text: e.target.value })}
+                              placeholder={`質問 ${i + 1}`}
+                              className={inputClass}
+                            />
+                            <button type="button" onClick={() => cycleType(i)}
+                              className={`flex-shrink-0 px-2 py-1 rounded-md text-[10px] font-medium border transition-colors ${QUESTION_TYPE_COLORS[q.type]}`}>
+                              {QUESTION_TYPE_LABELS[q.type]}
+                            </button>
+                          </div>
+                          {questions.length > 1 && (
+                            <button type="button" onClick={() => setQuestions(questions.filter((_, j) => j !== i))}
+                              className="text-gray-300 hover:text-red-600 transition-colors p-1 mt-1">
+                              <X className="w-3.5 h-3.5" strokeWidth={2} />
+                            </button>
+                          )}
                         </div>
-                        {questions.length > 1 && (
-                          <button type="button" onClick={() => setQuestions(questions.filter((_, j) => j !== i))}
-                            className="text-gray-300 hover:text-red-600 transition-colors p-1 mt-1">
-                            <X className="w-3.5 h-3.5" strokeWidth={2} />
-                          </button>
+                        {q.type === 'open' && (
+                          <div className="flex gap-2 items-start">
+                            <span className="w-5 flex-shrink-0" aria-hidden="true" />
+                            <FollowUpToggle
+                              checked={q.followUpEnabled}
+                              depth={q.followUpDepth}
+                              questionNumber={i + 1}
+                              onChange={(next) => updateQuestion(i, { followUpEnabled: next })}
+                              onDepthChange={(next) => updateQuestion(i, { followUpDepth: next })}
+                            />
+                            {questions.length > 1 && <span className="w-[26px] flex-shrink-0" aria-hidden="true" />}
+                          </div>
                         )}
                       </div>
                     ))}
@@ -510,6 +539,18 @@ export default function CreateInterviewModal({ onClose, onCreated }: Props) {
                           <X className="w-3.5 h-3.5" strokeWidth={2} />
                         </button>
                       )}
+                    </div>
+                    {/* この経路の質問は形式が自由回答固定なので、常に出す */}
+                    <div className="flex gap-2 items-start">
+                      <span className="w-5 flex-shrink-0" aria-hidden="true" />
+                      <FollowUpToggle
+                        checked={q.followUpEnabled}
+                        depth={q.followUpDepth}
+                        questionNumber={i + 1}
+                        onChange={(next) => updateQuestion(i, { followUpEnabled: next })}
+                        onDepthChange={(next) => updateQuestion(i, { followUpDepth: next })}
+                      />
+                      {questions.length > 1 && <span className="w-[26px] flex-shrink-0" aria-hidden="true" />}
                     </div>
                     {/* 印象テストのみ。質問文のすぐ下に置いて対応関係を明確にする */}
                     {sessionType === 'impression' && (
