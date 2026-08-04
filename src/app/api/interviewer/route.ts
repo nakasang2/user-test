@@ -54,9 +54,11 @@ export async function POST(req: NextRequest) {
     })
   }
 
-  // 明示的に 0 が来たら「この質問では深掘りしない」。
-  // normalizeFollowUpDepth は 0 を下限の 1 に丸めるので、その前に判定する
-  if (maxFollowUps === 0) {
+  // 0 以下が来たら「この質問では深掘りしない」。
+  // normalizeFollowUpDepth は 0 を下限の 1 に丸めるので、その前に判定する。
+  // 厳密等価だと "0"・-1・false がすり抜けるため数値に直して比較する
+  // （未指定＝null/undefined は既定値に任せるので、ここでは弾かない）。
+  if (maxFollowUps !== null && maxFollowUps !== undefined && Number(maxFollowUps) <= 0) {
     return NextResponse.json<InterviewerDecision>({ action: 'next_question', reason: 'この質問は深掘りしない設定' })
   }
   const safeFollowUpCount = typeof followUpCount === 'number' ? followUpCount : 0
