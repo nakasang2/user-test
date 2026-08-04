@@ -2,9 +2,9 @@ import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { FOLLOW_UP_DEPTH_MIN, FOLLOW_UP_DEPTH_MAX, normalizeFollowUpDepth } from '@/lib/follow-up'
 import { prisma } from '@/lib/db'
-import { del } from '@vercel/blob'
 import { requireAuth, requireRole, handleApiError } from '@/lib/api-auth'
 import { toQuestionImagePayload } from '@/lib/question-image'
+import { deleteInterviewWithBlobs } from '@/lib/delete-interview'
 
 export async function GET(req: NextRequest, props: { params: Promise<{ id: string }> }) {
   try {
@@ -209,29 +209,10 @@ export async function DELETE(req: NextRequest, props: { params: Promise<{ id: st
     // 配下の全セッション（被験者の録画・発言を含む）が消える。編集者より上の権限を要求する
     const { orgId } = await requireRole('admin')
     const { id } = await props.params
-    const interview = await prisma.interview.findFirst({
-      where: { id, organizationId: orgId },
-      select: { id: true, sessions: { select: { recordingUrl: true } } },
-    })
-    if (!interview) return NextResponse.json({ error: 'Not found' }, { status: 404 })
-
-    // 録画は Blob ストレージにあり、DB のカスケード削除では消えない。
-    // 先に消さないと、参加者の録画が誰からも参照できないまま保管され続ける。
-    // 1件でも失敗したら中断する（DB を消してしまうと URL が分からなくなり、二度と消せない）。
-    const urls = interview.sessions.map((s) => s.recordingUrl).filter((u): u is string => !!u)
-    for (const url of urls) {
-      try {
-        await del(url)
-      } catch (e) {
-        console.error('Blob deletion failed (aborting interview delete):', e)
-        return NextResponse.json(
-          { error: '録画データの削除に失敗したため、中断しました。時間をおいて再度お試しください。' },
-          { status: 502 }
-        )
-      }
+    const result = await deleteInterviewWithBlobs(id, orgId)
+    if (!result.ok) {
+      return NextResponse.json({ error: result.error }, { status: result.error === 'Not found' ? 404 : 502 })
     }
-
-    await prisma.interview.delete({ where: { id } })
     return NextResponse.json({ ok: true })
   } catch (err) {
     return handleApiError(err)

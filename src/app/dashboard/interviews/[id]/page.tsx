@@ -12,6 +12,7 @@ import InterviewMetrics from '@/components/InterviewMetrics'
 import InterviewSummary from '@/components/InterviewSummary'
 import TranscriptSearch from '@/components/TranscriptSearch'
 import AnswerMatrix from '@/components/AnswerMatrix'
+import BulkDeleteModal from '@/components/BulkDeleteModal'
 import { type TaskResultData, type AnswerData } from '@/components/SessionMetrics'
 
 type SortKey = 'date-desc' | 'date-asc' | 'name-asc' | 'status'
@@ -123,8 +124,37 @@ export default function InterviewComparePage(props: { params: Promise<{ id: stri
     }
   }
 
-  // 全セッションをまとめて再分析する。
-  // AI へのプロンプトを変えた後（要約の日本語化など）に既存セッションを追随させる用途。
+  async function bulkDeleteSessions() {
+    setBulkDeleting(true)
+    try {
+      const res = await fetch('/api/sessions/bulk-delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids: selectedVisibleSessions.map((s) => s.id) }),
+      })
+      const resData = await res.json().catch(() => null)
+      if (!res.ok || !resData) {
+        alert(
+          res.status === 403
+            ? '削除する権限がありません（編集者以上が必要です）。'
+            : (resData?.error ?? '削除に失敗しました')
+        )
+        return
+      }
+      const ng = resData.failed?.length > 0
+        ? `\n${resData.failed.length} 件は削除できませんでした。`
+        : ''
+      setBulkDeleteOpen(false)
+      setSelectedSessionIds(new Set())
+      setReloadKey((k) => k + 1)
+      if (ng) alert(`${resData.deleted?.length ?? 0} 件を削除しました。${ng}`)
+    } catch {
+      alert('削除に失敗しました')
+    } finally {
+      setBulkDeleting(false)
+    }
+  }
+
   // 全セッションをまとめて再分析する。
   // AI へのプロンプトを変えた後（要約の日本語化など）に既存セッションを追随させる用途。
   // 1回のリクエストで処理できる件数に限りがあるため、残りが無くなるまで自動で繰り返す。
@@ -215,6 +245,19 @@ export default function InterviewComparePage(props: { params: Promise<{ id: stri
   // 事前質問の回答（属性）によるセグメント絞り込み。ラベル → 選んだ値。空文字は「すべて」
   const [attrFilter, setAttrFilter] = useState<Record<string, string>>({})
 
+  // 個別結果一覧の複数選択・一括削除
+  const [selectedSessionIds, setSelectedSessionIds] = useState<Set<string>>(new Set())
+  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false)
+  const [bulkDeleting, setBulkDeleting] = useState(false)
+  function toggleSessionSelect(id: string) {
+    setSelectedSessionIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
   const visibleSessions = useMemo(() => {
     const STATUS_ORDER: Record<string, number> = { active: 0, pending: 1, done: 2, completed: 3 }
     return (data?.sessions ?? [])
@@ -231,6 +274,10 @@ export default function InterviewComparePage(props: { params: Promise<{ id: stri
   }, [data, statusFilter, search, sortKey, attrFilter])
   const isFiltering =
     statusFilter !== 'all' || search.trim() !== '' || Object.values(attrFilter).some((v) => v)
+
+  // 選択されているのに、絞り込みで見えなくなった id は確認ダイアログにも削除対象にも含めない
+  // （見えていない項目が消えることに気づけないまま実行してしまうのを防ぐ）
+  const selectedVisibleSessions = visibleSessions.filter((s) => selectedSessionIds.has(s.id))
 
   // 集計対象の変更後にデータを取り直すためのカウンタ。
   // 画面全体をリロードすると AI インサイトの再取得やスクロール位置の喪失が起きるので、
@@ -517,6 +564,45 @@ export default function InterviewComparePage(props: { params: Promise<{ id: stri
             </select>
           </div>
 
+          {/* 選択バー。編集者以上にのみ削除操作を出す（単体のセッション削除と同じ権限） */}
+          {visibleSessions.length > 0 && hasPermission(viewerRole ?? 'viewer', 'editor') && (
+            <div className="px-4 py-2 border-b border-gray-100 flex items-center gap-2 text-xs text-gray-600 bg-gray-50">
+              <label className="flex items-center gap-1.5 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={selectedVisibleSessions.length > 0 && selectedVisibleSessions.length === visibleSessions.length}
+                  ref={(el) => {
+                    if (el) {
+                      const n = selectedVisibleSessions.length
+                      el.indeterminate = n > 0 && n < visibleSessions.length
+                    }
+                  }}
+                  onChange={(e) => {
+                    setSelectedSessionIds(e.target.checked ? new Set(visibleSessions.map((s) => s.id)) : new Set())
+                  }}
+                  className="accent-gray-900"
+                />
+                すべて選択
+              </label>
+              {selectedVisibleSessions.length > 0 && (
+                <>
+                  <span className="text-gray-300">·</span>
+                  <span>{selectedVisibleSessions.length} 件選択中</span>
+                  <button
+                    onClick={() => setBulkDeleteOpen(true)}
+                    className="inline-flex items-center gap-1 text-red-600 hover:text-red-700 font-medium ml-1"
+                  >
+                    <Trash2 className="w-3 h-3" strokeWidth={2} />
+                    削除
+                  </button>
+                  <button onClick={() => setSelectedSessionIds(new Set())} className="text-gray-500 hover:text-gray-900 underline underline-offset-2">
+                    選択を解除
+                  </button>
+                </>
+              )}
+            </div>
+          )}
+
           {visibleSessions.length === 0 ? (
             <div className="px-4 py-8 text-center text-sm text-gray-500">
               {isFiltering ? '条件に一致する結果がありません' : 'まだセッションがありません。招待リンクを参加者に送りましょう。'}
@@ -524,10 +610,19 @@ export default function InterviewComparePage(props: { params: Promise<{ id: stri
           ) : (
             <div className="divide-y divide-gray-100">
               {visibleSessions.map((s) => (
+                <div key={s.id} className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors">
+                  {hasPermission(viewerRole ?? 'viewer', 'editor') && (
+                    <input
+                      type="checkbox"
+                      checked={selectedSessionIds.has(s.id)}
+                      onChange={() => toggleSessionSelect(s.id)}
+                      aria-label={`${s.participantName} を選択`}
+                      className="flex-shrink-0 accent-gray-900"
+                    />
+                  )}
                 <Link
-                  key={s.id}
                   href={`/dashboard/sessions/${s.id}`}
-                  className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors"
+                  className="flex items-center gap-3 flex-1 min-w-0"
                 >
                   <span className="font-medium text-sm text-gray-900 w-36 flex-shrink-0 truncate">{s.participantName}</span>
                   <StatusBadge status={s.status} />
@@ -556,6 +651,7 @@ export default function InterviewComparePage(props: { params: Promise<{ id: stri
                   <span className="hidden md:block text-xs text-gray-500 flex-1 truncate">{s.summary ?? '—'}</span>
                   <span className="text-xs text-gray-400 flex-shrink-0 ml-auto">{new Date(s.createdAt).toLocaleDateString('ja-JP')}</span>
                 </Link>
+                </div>
               ))}
             </div>
           )}
@@ -770,6 +866,17 @@ export default function InterviewComparePage(props: { params: Promise<{ id: stri
           sessionCount={realSessions.length}
           onClose={() => setEditing(false)}
           onSaved={() => { setEditing(false); window.location.reload() }}
+        />
+      )}
+
+      {bulkDeleteOpen && (
+        <BulkDeleteModal
+          itemLabel="セッション"
+          items={selectedVisibleSessions.map((s) => ({ id: s.id, label: s.participantName }))}
+          detailNote="録画・文字起こし・回答・ハイライトがすべてサーバーから削除されます。"
+          deleting={bulkDeleting}
+          onConfirm={bulkDeleteSessions}
+          onClose={() => setBulkDeleteOpen(false)}
         />
       )}
 
