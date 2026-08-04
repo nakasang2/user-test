@@ -9,7 +9,6 @@ import BulkDeleteModal from '@/components/BulkDeleteModal'
 import {
   Search,
   X,
-  Sparkles,
   Plus,
   Users,
   LogOut,
@@ -223,19 +222,12 @@ export default function Dashboard() {
           <span className="text-gray-600 text-sm">ダッシュボード</span>
         </div>
         <div className="flex flex-wrap items-center justify-end gap-2">
-          <Link
-            href="/dashboard/design"
-            className="inline-flex items-center gap-1.5 bg-gray-900 hover:bg-gray-800 text-white px-3 py-1.5 rounded-md text-sm font-medium transition-colors"
-          >
-            <Sparkles className="w-3.5 h-3.5" strokeWidth={2} />
-            AIで質問設計
-          </Link>
           <button
             onClick={() => setShowCreateInterview(true)}
-            className="inline-flex items-center gap-1.5 border border-gray-300 hover:border-gray-400 px-3 py-1.5 rounded-md text-sm text-gray-700 hover:text-gray-900 transition-colors"
+            className="inline-flex items-center gap-1.5 bg-gray-900 hover:bg-gray-800 text-white px-3 py-1.5 rounded-md text-sm font-medium transition-colors"
           >
             <Plus className="w-3.5 h-3.5" strokeWidth={2} />
-            手動で作成
+            新規作成
           </button>
           <Link
             href="/dashboard/settings/members"
