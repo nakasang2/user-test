@@ -104,6 +104,11 @@ interface TranscriptEntry {
 
 type Phase = 'guide' | 'waiting' | 'stimulus' | 'task' | 'intro' | 'interview' | 'thinking' | 'ending' | 'done'
 
+// ユーザビリティテストのタスク1の前に読む思考発話のお願い。小窓にも同じ文言を
+// テキストで表示するため、speak() に渡す文字列と1つの値として共有する。
+const USABILITY_GUIDANCE_TEXT = '操作しながら、考えていることを声に出してください。'
+  + '操作方法などのご質問にはお答えできませんが、気になったことは、あとの質問でお聞かせください。'
+
 export default function InterviewRoom({
   sessionId,
   participantToken,
@@ -463,29 +468,29 @@ export default function InterviewRoom({
       })
   }, [showNotice, sessionId])
 
+  // ── 思考発話のお願い（案内） ──────────────────────────
+  // タスク1の内容を見せる前に、まずこれだけを読み上げる。従来はタスク1の文言と
+  // 一続きの音声にしていたが、視覚（小窓のタスク表示）は録画・サイトアクセスが
+  // 終わった時点で即座に出てしまい、この案内を読み終える前にタスク1が見えてしまう
+  // 問題があった（ユーザー指摘）。案内と本文を分け、案内は小窓にもテキストで
+  // 表示させ、参加者が小窓の「スタート」を押してから初めてタスク1を出す。
+  const speakGuidance = useCallback(() => {
+    widgetChannelRef.current?.postMessage({ type: 'guidance_text', text: USABILITY_GUIDANCE_TEXT })
+    speak(USABILITY_GUIDANCE_TEXT, undefined, {
+      log: false,
+      failNotice: '音声を再生できませんでした。画面の案内をご覧ください。',
+    })
+  }, [speak])
+
   // ── タスクの読み上げ ────────────────────────────────
   // 事後インタビューの質問は読み上げるのに、タスクだけ無音だった。service モードの
   // 参加者は別タブでサービスを操作しているので、読むたびに小窓へ視線を戻すことになり、
   // その動作自体がテストのノイズになる。テキスト表示は残したまま音声を足す
   // （音声だけにすると記憶に頼らせることになる）。
-  // 最初の読み上げにだけ思考発話のお願いを添える（毎回言うと聞き流される）
-  const thinkAloudAskedRef = useRef(false)
   const speakTask = useCallback((idx: number) => {
     const t = tasks?.[idx]
     if (!t) return
-    let prefix = ''
-    if (!thinkAloudAskedRef.current) {
-      thinkAloudAskedRef.current = true
-      // 思考発話のお願いと、質問には答えられないことを一度だけ伝える。
-      // 無反応で放置すると「無視された」と受け取られるため、先に言っておく
-      // 「答えない」ではなく「あとで聞く」にする。明確に拒否すると
-      // 「話しても無駄」と学習されて思考発話そのものが減る。また範囲は
-      // 画面の注意書きと揃える（進行上の困りごとまで諦められると、
-      // 測っているものがサービスではなくツールの分かりにくさに変わる）
-      prefix = '操作しながら、考えていることを声に出してください。'
-        + '操作方法などのご質問にはお答えできませんが、気になったことは、あとの質問でお聞かせください。それでは、'
-    }
-    speak(`${prefix}タスク${idx + 1}。${t.text}`, undefined, {
+    speak(`タスク${idx + 1}。${t.text}`, undefined, {
       // 文字起こしには残さない（結果記録側にタスク文言があるため二重になる）
       log: false,
       failNotice: '音声を再生できませんでした。画面のタスク文をご覧ください。',
@@ -1293,6 +1298,9 @@ export default function InterviewRoom({
         else if (e.data.type === 'recording_started') setScreenSharing(true)
         else if (e.data.type === 'service_opened') setServiceOpened(true)
         else if (e.data.type === 'task_ready') markFirstTaskStart() // 小窓でタスクが見えた＝着手できる時点
+        // 小窓の録画・サイトアクセスが揃った（タスク1のみ）。まず思考発話の案内を読む。
+        // markFirstTaskStart はまだ呼ばない＝小窓で「スタート」を押すまでタスク1は始めない
+        else if (e.data.type === 'guidance_ready') speakGuidance()
         // 前提タスクの立て直し: 小窓での選択をメイン側の記録に反映する
         else if (e.data.type === 'prereq_recovered') proceedAfterRecovery()
         else if (e.data.type === 'prereq_failed') skipBlockedTasks()
