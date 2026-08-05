@@ -8,6 +8,7 @@ import { hasPermission } from '@/lib/permissions'
 import EditInterviewModal from '@/components/EditInterviewModal'
 import FloatingAgentChat from '@/components/FloatingAgentChat'
 import StatusBadge from '@/components/StatusBadge'
+import TypeBadge from '@/components/TypeBadge'
 import InterviewMetrics from '@/components/InterviewMetrics'
 import InterviewSummary from '@/components/InterviewSummary'
 import TranscriptSearch from '@/components/TranscriptSearch'
@@ -50,7 +51,7 @@ interface CompareData {
     title: string
     description: string | null
     type: string
-    questions: { id: string; text: string; order: number; type: string; imageUrl?: string | null; imageMode?: string | null; imageDuration?: number | null; followUpEnabled?: boolean; followUpDepth?: number }[]
+    questions: { id: string; text: string; order: number; type: string; imageUrl?: string | null; imageMode?: string | null; imageDuration?: number | null; followUpEnabled?: boolean; followUpDepth?: number; naturalCapture?: boolean }[]
     tasks: { id: string; text: string; order: number; hint?: string | null; isPrerequisite?: boolean | null }[]
     seqEnabled?: boolean
     hintDelaySec?: number | null
@@ -401,7 +402,10 @@ export default function InterviewComparePage(props: { params: Promise<{ id: stri
         {/* ヘッダー */}
         <div className="flex items-start justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-semibold mb-1 tracking-tight text-gray-900">{interview.title}</h1>
+            <div className="flex items-center gap-2 mb-1">
+              <TypeBadge type={interview.type} />
+              <h1 className="text-2xl font-semibold tracking-tight text-gray-900">{interview.title}</h1>
+            </div>
             <p className="text-gray-500 text-sm">
               セッション {realSessions.length} 件（分析済み {doneAll} 件） · 質問 {interview.questions.length} 問
               {pilotCount > 0 && <span className="text-gray-400"> · パイロット {pilotCount} 件（集計対象外）</span>}

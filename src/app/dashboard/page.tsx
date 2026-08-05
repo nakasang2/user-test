@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { track } from '@/lib/analytics'
 import CreateInterviewModal from '@/components/CreateInterviewModal'
 import StatusBadge from '@/components/StatusBadge'
+import TypeBadge from '@/components/TypeBadge'
 import BulkDeleteModal from '@/components/BulkDeleteModal'
 import {
   Search,
@@ -406,9 +407,12 @@ export default function Dashboard() {
                     className="mt-1 flex-shrink-0 accent-gray-900"
                   />
                   <Link href={`/dashboard/interviews/${iv.id}`} className="min-w-0 flex-1 group">
-                    <span className="block font-medium text-sm text-gray-900 group-hover:text-gray-600 transition-colors truncate mb-0.5">
-                      {iv.title}
-                    </span>
+                    <div className="flex items-center gap-1.5 mb-0.5">
+                      <TypeBadge type={iv.type} />
+                      <span className="font-medium text-sm text-gray-900 group-hover:text-gray-600 transition-colors truncate">
+                        {iv.title}
+                      </span>
+                    </div>
                     {iv.description && (
                       <p className="text-xs text-gray-500 truncate mb-1.5">{iv.description}</p>
                     )}

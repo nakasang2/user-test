@@ -24,6 +24,8 @@ const createSchema = z.object({
       followUpEnabled: z.boolean().optional(),
       // 深掘りの深さ。範囲は lib/follow-up.ts に集約
       followUpDepth: z.number().int().min(FOLLOW_UP_DEPTH_MIN).max(FOLLOW_UP_DEPTH_MAX).optional(),
+      // rating/nps でもボタンを出さず会話の中で自然に聞き、値は後で抽出する
+      naturalCapture: z.boolean().optional(),
     }),
   ])).optional(),
   type:             z.enum(['interview', 'impression', 'usability']).default('interview'),
@@ -84,7 +86,7 @@ export async function POST(req: NextRequest) {
     const { title, description, questions, autoGenerate, topic, type, usabilityMode, stimulusUrl, stimulusDuration, tasks, seqEnabled, hintDelaySec, screeners } = parsed.data
 
     type QuestionInput =
-      | { text: string; type?: string; imageUrl?: string | null; imageMode?: string | null; imageDuration?: number | null; followUpEnabled?: boolean; followUpDepth?: number }
+      | { text: string; type?: string; imageUrl?: string | null; imageMode?: string | null; imageDuration?: number | null; followUpEnabled?: boolean; followUpDepth?: number; naturalCapture?: boolean }
       | string
     let questionList: QuestionInput[] = questions ?? []
 
@@ -114,6 +116,7 @@ export async function POST(req: NextRequest) {
             // 深掘りの ON/OFF と深さ。未指定は既定（従来どおり）
             followUpEnabled: typeof q === 'string' ? true : (q.followUpEnabled ?? true),
             followUpDepth: normalizeFollowUpDepth(typeof q === 'string' ? undefined : q.followUpDepth),
+            naturalCapture: typeof q === 'string' ? false : (q.naturalCapture ?? false),
           })),
         },
         tasks: {

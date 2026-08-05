@@ -245,6 +245,54 @@ ${wrapUntrusted(transcript, LIMITS.transcript)}`,
   return out
 }
 
+/**
+ * 会話の中で自然に答えてもらった rating/nps 質問の発言から、厳密な数値を抽出する。
+ *
+ * 参加者は普段どおり自由に話しており、言い回しはバラバラ（「1です」「1だよ」等）。
+ * ボタンでの回答（submitRating）と違って会話は止めない代わりに、後から数値だけを
+ * 取り出して回答分布の集計に使う。抽出できない・曖昧な場合は無理に数値を作らず null を返す
+ * （呼び出し側は文字起こしの引用（valueText）をそのまま残すので、null でも実害はない）。
+ */
+export async function extractStrictChoice(
+  questionText: string,
+  answerText: string,
+  type: 'rating' | 'nps',
+): Promise<number | null> {
+  const min = type === 'nps' ? 0 : 1
+  const max = type === 'nps' ? 10 : 5
+
+  const response = await getOpenAI().chat.completions.create({
+    model: 'gpt-4o',
+    max_tokens: 128,
+    response_format: { type: 'json_object' },
+    messages: [
+      {
+        role: 'system',
+        content: `You are extracting a strict numeric choice (integer ${min}-${max}) from a participant's free-form spoken answer to a question that expects one of these numbers.
+Return JSON: {"value": <integer ${min}-${max}>} or {"value": null}
+- Return the number the participant clearly chose, even if phrased casually (e.g. "1です", "1だよ", "うーん、1かな").
+- If the answer does not clearly state one of the numbers ${min}-${max}, or is ambiguous, or mentions multiple numbers without a clear final choice, return {"value": null}. Do not guess.
+${UNTRUSTED_DATA_GUARD}`,
+      },
+      {
+        role: 'user',
+        content: `Question: ${clampText(questionText, LIMITS.question)}
+Participant's answer: ${wrapUntrusted(answerText, 2000)}`,
+      },
+    ],
+  })
+
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(response.choices[0].message.content ?? '')
+  } catch {
+    return null
+  }
+  const v = (parsed as { value?: unknown })?.value
+  const n = typeof v === 'number' ? v : NaN
+  return Number.isInteger(n) && n >= min && n <= max ? n : null
+}
+
 export async function chatWithAgent(
   messages: Array<{ role: 'user' | 'assistant'; content: string }>,
   context: string

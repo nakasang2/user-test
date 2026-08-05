@@ -196,6 +196,25 @@ export function avgSessionDuration(sessions: SessionLike[]): { mean: number; n: 
   return { mean: totals.reduce((a, b) => a + b, 0) / totals.length, n: totals.length }
 }
 
+/** 選択肢別の回答分布（何を選んだ人が何人か）。値の昇順で返す。 */
+export interface ChoiceCount {
+  value: number
+  count: number
+}
+
+/**
+ * スコア質問（rating / nps）の値ごとの件数を集計する。
+ * 平均・NPSスコアだけでは「1を選んだ人が何人、2は何人…」が分からず、
+ * 極端な回答が両側にある（賛否が割れている）ケースが平均に埋もれてしまう。
+ */
+export function scoreDistribution(values: number[]): ChoiceCount[] {
+  const counts = new Map<number, number>()
+  values.forEach((v) => counts.set(v, (counts.get(v) ?? 0) + 1))
+  return [...counts.entries()]
+    .sort(([a], [b]) => a - b)
+    .map(([value, count]) => ({ value, count }))
+}
+
 /**
  * 代表スコアを1つ選ぶ。NPS があれば最優先（業界標準の指標なので見出しに向く）、
  * 無ければ最初の評価質問の平均を返す。

@@ -54,6 +54,8 @@ const patchSchema = z.object({
     // この質問で AI が深掘りするか。未指定は変更しない（既存値を保つ）
     followUpEnabled: z.boolean().optional(),
     followUpDepth: z.number().int().min(FOLLOW_UP_DEPTH_MIN).max(FOLLOW_UP_DEPTH_MAX).optional(),
+    // rating/nps でもボタンを出さず会話の中で自然に聞き、値は後で抽出する。未指定は変更しない
+    naturalCapture: z.boolean().optional(),
   })).optional(),
   tasks: z.array(z.object({
     id:   z.string().optional(),
@@ -128,6 +130,7 @@ export async function PATCH(req: NextRequest, props: { params: Promise<{ id: str
         const followUp = {
           ...(q.followUpEnabled === undefined ? {} : { followUpEnabled: q.followUpEnabled }),
           ...(q.followUpDepth === undefined ? {} : { followUpDepth: normalizeFollowUpDepth(q.followUpDepth) }),
+          ...(q.naturalCapture === undefined ? {} : { naturalCapture: q.naturalCapture }),
         }
         if (q.id && ownQuestionIds.has(q.id)) {
           ops.push(prisma.question.update({ where: { id: q.id }, data: { text: q.text, type: q.type, order, ...image, ...followUp } }))

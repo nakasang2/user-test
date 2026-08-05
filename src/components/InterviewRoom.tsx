@@ -47,6 +47,8 @@ interface Question {
   followUpEnabled?: boolean
   /** 深掘りの深さ（最大何回まで追い質問するか）。未指定は既定値 */
   followUpDepth?: number | null
+  /** rating/nps でも会話を遮らず自然に聞き、値は後で文字起こしから抽出する */
+  naturalCapture?: boolean
 }
 
 interface Props {
@@ -881,7 +883,8 @@ export default function InterviewRoom({
   function recordOpenAnswerIfAny() {
     const qIdx = currentQuestionIndexRef.current
     const q = questions[qIdx]
-    if (!q || q.type !== 'open') return
+    // rating/nps でも「会話の中で自然に聞く」設定なら、open 質問と同じくここで記録する
+    if (!q || (q.type !== 'open' && !q.naturalCapture)) return
     const utterances = conversationBufferRef.current
       .split('\n')
       .filter((l) => l.startsWith('参加者: '))
@@ -893,12 +896,15 @@ export default function InterviewRoom({
     // 沈黙・手動スキップで答えなかった分が抜けるため、カウンタの値を使う。
     // ※この関数は followUpCountRef のリセット前に呼ばれる前提（moveToNextPlannedQuestion 参照）
     const followUpCount = followUpCountRef.current
+    const order = qIdx + 1
     answersRef.current = [
-      ...answersRef.current.filter((a) => a.order !== qIdx + 1),
+      ...answersRef.current.filter((a) => a.order !== order),
       {
         questionId: q.id ?? null,
-        order: qIdx + 1,
+        order,
         text: q.text,
+        // naturalCapture の rating/nps は、厳密な値を後で抽出するまでは type/valueNum を
+        // 決められないので、いったん open と同じ扱いで文字起こしの引用だけ保存する
         type: 'open',
         valueText: said,
         followUpCount,
@@ -909,6 +915,28 @@ export default function InterviewRoom({
       },
     ]
     saveResults()
+
+    // rating/nps を自然な会話で聞いた場合だけ、発言から厳密な値を抽出する。
+    // 会話は止めない（結果を待たずに次の質問へ進む）。抽出できたら同じ行を
+    // valueNum 付きで上書き保存し、抽出できなければ文字起こしの引用だけが残る。
+    if (q.naturalCapture && (q.type === 'rating' || q.type === 'nps')) {
+      const type = q.type
+      fetch('/api/extract-answer-value', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ questionText: q.text, answerText: said, type }),
+      })
+        .then((res) => (res.ok ? res.json() : null))
+        .then((data: { value?: number | null } | null) => {
+          const value = data?.value
+          if (typeof value !== 'number') return
+          answersRef.current = answersRef.current.map((a) =>
+            a.order === order ? { ...a, type, valueNum: value } : a
+          )
+          saveResults()
+        })
+        .catch(() => {}) // 抽出失敗は無視（文字起こしの引用は既に保存済み）
+    }
   }
 
   /**
@@ -988,10 +1016,11 @@ export default function InterviewRoom({
 
     const ask = () => {
       speak(q.text, () => {
-        if (q.type === 'open') {
+        // rating / nps は通常ボタン UI で回答するため聞き取らないが、
+        // 「会話の中で自然に聞く」設定なら open 質問と同じく聞き取る
+        if (q.type === 'open' || q.naturalCapture) {
           listenForAnswer(decideNext)
         }
-        // rating / nps は UI で回答 → listenForAnswer は起動しない
       })
     }
 
@@ -1595,6 +1624,11 @@ export default function InterviewRoom({
 
   const progress = ((currentQuestionIndex + 1) / questions.length) * 100
   const currentQ = questions[currentQuestionIndex]
+  // rating/nps でも「会話の中で自然に聞く」設定なら、参加者への見え方は open 質問と
+  // 同じにする（ボタンを出さず自由回答欄のまま）。厳密な値は文字起こしから後で抽出する
+  // （バックフィル。lib/ai.ts extractAnswersFromTranscript）ため、type 自体は rating/nps
+  // のまま保持し、参加者向けの表示・分岐だけをこの値で切り替える。
+  const liveQuestionType = currentQ?.naturalCapture ? 'open' : currentQ?.type
 
   // ── 質問に紐づけた画像（印象テスト）の表示判定 ──
   // persistent: その質問に答えている間ずっと出す
@@ -2249,7 +2283,7 @@ export default function InterviewRoom({
           )}
 
           {/* 評価質問（オーバーレイ） */}
-          {phase === 'interview' && !isSpeaking && currentQ?.type === 'rating' && (
+          {phase === 'interview' && !isSpeaking && liveQuestionType === 'rating' && (
             <div className="absolute inset-0 bg-gray-950/40 backdrop-blur-sm flex items-center justify-center p-4 sm:p-8 overflow-y-auto">
               <div className="bg-white rounded-xl border border-gray-200 shadow-xl p-8">
                 <RatingQuestion
@@ -2259,7 +2293,7 @@ export default function InterviewRoom({
               </div>
             </div>
           )}
-          {phase === 'interview' && !isSpeaking && currentQ?.type === 'nps' && (
+          {phase === 'interview' && !isSpeaking && liveQuestionType === 'nps' && (
             <div className="absolute inset-0 bg-gray-950/40 backdrop-blur-sm flex items-center justify-center p-4 sm:p-8 overflow-y-auto">
               <div className="bg-white rounded-xl border border-gray-200 shadow-xl p-8">
                 <NpsQuestion
@@ -2402,9 +2436,9 @@ export default function InterviewRoom({
                 <span>{isFollowUp ? `質問 ${currentQuestionIndex + 1}（深掘り中）` : `質問 ${currentQuestionIndex + 1} / ${questions.length}`}</span>
                 <span className="flex items-center gap-1.5">
                   {isFollowUp && <span className="bg-amber-50 border border-amber-200 text-amber-700 px-1.5 py-0.5 rounded text-[9px]">AI 深掘り</span>}
-                  {currentQ?.type !== 'open' && (
+                  {liveQuestionType !== 'open' && (
                     <span className="bg-blue-50 border border-blue-200 text-blue-700 px-1.5 py-0.5 rounded text-[9px]">
-                      {currentQ?.type === 'rating' ? '5段階評価' : 'NPS'}
+                      {liveQuestionType === 'rating' ? '5段階評価' : 'NPS'}
                     </span>
                   )}
                 </span>
@@ -2435,7 +2469,7 @@ export default function InterviewRoom({
             </div>
           )}
 
-          {phase === 'interview' && !isSpeaking && !aiThinking && currentQ?.type === 'open' && (
+          {phase === 'interview' && !isSpeaking && !aiThinking && liveQuestionType === 'open' && (
             <div className="p-3 border-b border-gray-200 space-y-2 flex-shrink-0 bg-white">
               {isListening && (
                 <div className="flex items-center gap-2 text-[10px] text-emerald-700 font-medium">
@@ -2450,7 +2484,8 @@ export default function InterviewRoom({
                 <input
                   value={textInput}
                   onChange={(e) => setTextInput(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); submitTextAnswer() } }}
+                  // isComposing のガードが無いと、日本語入力の変換確定Enterで途中の文章のまま回答送信されてしまう
+                  onKeyDown={(e) => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) { e.preventDefault(); submitTextAnswer() } }}
                   placeholder={speechSupported ? 'テキストでも入力できます' : '回答を入力...'}
                   className="flex-1 bg-white border border-gray-300 focus:border-gray-900 focus:ring-1 focus:ring-gray-900 rounded-md px-2.5 py-1.5 text-xs text-gray-900 placeholder-gray-500 focus:outline-none"
                 />

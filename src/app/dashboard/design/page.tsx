@@ -41,6 +41,8 @@ interface Question {
   imageUrl?: string | null
   imageMode?: string | null
   imageDuration?: number | null
+  /** rating/nps でもボタンを出さず会話の中で自然に聞き、値は後で抽出する */
+  naturalCapture?: boolean
 }
 /** AI が生成する質問は自由回答固定なので、保存前にここで形式を選べるようにする */
 const Q_TYPES: { value: string; label: string }[] = [
@@ -200,6 +202,7 @@ export default function DesignPage() {
             // 形式に関わらず設定をそのまま保存する（理由は EditInterviewModal 参照）
             followUpEnabled: q.followUpEnabled !== false,
             followUpDepth: normalizeFollowUpDepth(q.followUpDepth),
+            naturalCapture: q.naturalCapture === true,
             ...(sessionType === 'impression' ? toQuestionImagePayload(q) : {}),
           })),
           type:             sessionType,
@@ -264,7 +267,8 @@ export default function DesignPage() {
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
-    if (e.key === 'Enter' && !e.shiftKey) {
+    // isComposing のガードが無いと、日本語入力の変換確定Enterで途中の文章のまま送信されてしまう
+    if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault()
       sendMessage()
     }
@@ -685,6 +689,28 @@ export default function DesignPage() {
                               setPlot({ ...plot, questions: updated })
                             }}
                           />
+                        )}
+                        {/* rating/nps でも会話の中で自然に聞く。値は文字起こしから後で抽出する */}
+                        {q.type !== 'open' && (
+                          <label className="flex items-start gap-1.5 text-[11px] text-gray-600 leading-snug cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={q.naturalCapture === true}
+                              onChange={(e) => {
+                                if (!plot) return
+                                const updated = [...plot.questions]
+                                updated[i] = { ...updated[i], naturalCapture: e.target.checked }
+                                setPlot({ ...plot, questions: updated })
+                              }}
+                              className="mt-0.5 flex-shrink-0"
+                            />
+                            <span>
+                              ボタンではなく会話の中で自然に聞く
+                              <span className="block text-gray-400">
+                                参加者は自由に話して回答します。厳密な値は文字起こしからAIが後で抽出するため、稀に抽出できないことがあります
+                              </span>
+                            </span>
+                          </label>
                         )}
                         {sessionType === 'impression' && (
                           <QuestionImageField

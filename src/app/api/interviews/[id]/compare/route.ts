@@ -29,7 +29,7 @@ export async function GET(req: NextRequest, props: { params: Promise<{ id: strin
       // （isPrerequisite で実際に起きた。LESSONS「データ設計」参照）
       questions: {
         orderBy: { order: 'asc' },
-        select: { id: true, text: true, order: true, type: true, imageUrl: true, imageMode: true, imageDuration: true, followUpEnabled: true, followUpDepth: true },
+        select: { id: true, text: true, order: true, type: true, imageUrl: true, imageMode: true, imageDuration: true, followUpEnabled: true, followUpDepth: true, naturalCapture: true },
       },
       // 一覧表示のため全ステータスのセッションを返す（分析・レーダーは done のみで算出）
       sessions: {
