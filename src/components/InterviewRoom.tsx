@@ -111,12 +111,10 @@ type Phase = 'guide' | 'waiting' | 'stimulus' | 'task' | 'intro' | 'interview' |
 const USABILITY_GUIDANCE_TEXT = '操作しながら、考えていることを声に出してください。'
   + '操作方法などのご質問にはお答えできませんが、気になったことは、あとの質問でお聞かせください。'
 
-// 小窓のウィンドウサイズ。「画面を隠して邪魔」という指摘を受けて縮小した。
-// 開いた後に動的にリサイズすることも試したが、Document PiP では widget/page.tsx が
-// PiP ウィンドウ自身ではなく中の iframe として動くため、iframe 側からの
-// window.resizeTo() は機能しなかった（LESSONS.md参照）。そのため固定サイズを
-// 小さめにする方針にした。はみ出す内容は widget 側で自然にスクロールする。
-const WIDGET_WINDOW_SIZE = { width: 380, height: 260 }
+// 小窓のウィンドウサイズ。折りたたみ時の動的リサイズは Document PiP の制約で
+// 機能しなかった（LESSONS.md参照）。固定サイズを縮小する案も試したが、
+// 準備画面・案内画面が窮屈になるため見送り、元のサイズに戻した。
+const WIDGET_WINDOW_SIZE = { width: 400, height: 560 }
 
 export default function InterviewRoom({
   sessionId,
