@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useRef, useMemo, Suspense } from 'react'
 import { useSearchParams } from 'next/navigation'
-import { Monitor, Check, X, AlertTriangle, CheckCircle2, Globe, Volume2, ChevronUp, ChevronDown } from 'lucide-react'
+import { Monitor, Check, X, AlertTriangle, CheckCircle2, Globe, Volume2 } from 'lucide-react'
 import SeqScale from '@/components/SeqScale'
 import StuckHelp from '@/components/StuckHelp'
 import TaskRecovery, { TaskRecoveryActions } from '@/components/TaskRecovery'
@@ -76,10 +76,6 @@ function WidgetContent() {
   const [guidanceDismissed, setGuidanceDismissed] = useState(false)
   // ヒントを見たタスク番号（0始まり）。結果送信時に添えて集計で自力達成と分ける
   const usedHintIdxRef                          = useRef<Set<number>>(new Set())
-  // タスク中は普段、細い帯（カメラの小さいサムネイル＋タスク番号＋達成/できなかった）に
-  // 折りたたんでおき、サービス画面を覆う面積を減らす。参加者要望で追加
-  // （小窓が画面を隠して邪魔、という指摘への対応）。手動で展開・折りたたみできる。
-  const [expanded, setExpanded]                 = useState(false)
 
   const channelRef             = useRef<BroadcastChannel | null>(null)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -442,9 +438,6 @@ function WidgetContent() {
   // 前提タスクの立て直し待ち。この間は達成/できなかったの操作を出さない
   const recoveryPending = recoveryAtIdx === currentTaskIndex && needsRecovery(tasks, currentTaskIndex)
 
-  // 参加者の対応が必要な状態は、折りたたんでいても見落とされないよう強制的に展開する
-  const needsAttention = recoveryPending || (stuckOnTask && !awaitingSeq) || awaitingSeq !== null || warnNoRecord
-
   // 思考発話の促し。黙って操作している間だけ出す。
   // 他の案内（詰まったときの声かけ・立て直し手順・SEQ）が出ているときは促さない
   // ＝画面に2枚重ねない。読んでほしいものが増えるほど、どれも読まれなくなる。
@@ -491,17 +484,6 @@ function WidgetContent() {
   }
 
   const currentTask = tasks[currentTaskIndex]
-  // 折りたためるのは「通常のタスク実施中」だけ（準備待ち・案内・完了画面には適用しない）
-  const canCollapse = taskVisible && !!currentTask
-  const isCollapsed = canCollapse && !expanded && !needsAttention
-
-  // カメラの <video> は折りたたみ/展開で別々の要素に切り替わる（別JSXツリーなので
-  // React が都度アンマウント/マウントする）。ref を差し替えるコールバック ref にして、
-  // マウントのたびに既存の MediaStream を貼り直す（初期化・許可の再取得はしない）。
-  const attachVideoRef = (el: HTMLVideoElement | null) => {
-    webcamVideoRef.current = el
-    if (el && webcamStreamRef.current) el.srcObject = webcamStreamRef.current
-  }
 
   /* ── タスク画面 ─────────────────────────────────────────────── */
   // 注: Document PiP の iframe 内では 100vh 等の viewport 単位が実際の窓より大きく評価され、
@@ -509,77 +491,18 @@ function WidgetContent() {
   //     ヘッダー→カメラ→タスク→ボタンを自然な縦積み（block flow）で並べて崩れを防ぐ。
   return (
     <div className="bg-white text-gray-900">
-      {isCollapsed ? (
-        /* 折りたたみ表示: カメラの小さいサムネイル＋タスク番号＋達成/できなかった だけを
-           常時表示し、サービス画面を覆う面積を最小限にする。顔は録画に残す必要があるため
-           カメラ自体は消さず、円形の小さいサムネイルとして残す（DECISIONS参照）。 */
-        <div className="px-3 py-2 space-y-2">
-          <button
-            type="button"
-            onClick={() => setExpanded(true)}
-            className="w-full flex items-center gap-2 text-left"
-            aria-label="タスクの詳細を展開する"
-          >
-            <div className="relative bg-gray-900 rounded-full overflow-hidden flex-shrink-0" style={{ width: 32, height: 32 }}>
-              <video
-                ref={attachVideoRef}
-                autoPlay
-                muted
-                playsInline
-                aria-hidden="true"
-                className={`w-full h-full object-cover scale-x-[-1] ${cameraError ? 'hidden' : ''}`}
-              />
-              {isScreenRecording && (
-                <span className="absolute inset-0 rounded-full ring-2 ring-red-500" aria-hidden="true" />
-              )}
-            </div>
-            <span className="flex-1 min-w-0 text-xs text-gray-700 truncate">
-              タスク {currentTaskIndex + 1}/{tasks.length}: {currentTask?.text}
-            </span>
-            <ChevronDown className="w-4 h-4 text-gray-400 flex-shrink-0" strokeWidth={2} aria-hidden="true" />
-          </button>
-          <div className="flex gap-2">
-            <button
-              onClick={() => handleOutcome('completed')}
-              className="flex-1 inline-flex items-center justify-center gap-1.5 bg-gray-900 hover:bg-gray-800 active:bg-black text-white py-2 rounded-lg text-xs font-semibold transition-colors"
-            >
-              <Check className="w-3.5 h-3.5" strokeWidth={2.5} />
-              達成して{isLastTask ? '質問へ' : '次へ'}
-            </button>
-            <button
-              onClick={() => handleOutcome('gave_up')}
-              className="flex-1 inline-flex items-center justify-center gap-1.5 bg-white border border-gray-300 hover:border-gray-400 text-gray-700 hover:text-gray-900 py-2 rounded-lg text-xs font-medium transition-colors"
-            >
-              できなかった
-            </button>
-          </div>
-        </div>
-      ) : (
-      <>
       {/* ヘッダー */}
       <div className="flex items-center justify-between px-3 py-2 border-b border-gray-200">
         <span className="text-xs font-semibold text-gray-900 tracking-tight">UserVoice</span>
-        <div className="flex items-center gap-2">
-          {tasks.length > 0 && (
-            <span className="text-gray-500 text-xs">タスク {currentTaskIndex + 1} / {tasks.length}</span>
-          )}
-          {canCollapse && (
-            <button
-              type="button"
-              onClick={() => setExpanded(false)}
-              aria-label="折りたたむ"
-              className="text-gray-400 hover:text-gray-900 transition-colors"
-            >
-              <ChevronUp className="w-4 h-4" strokeWidth={2} />
-            </button>
-          )}
-        </div>
+        {tasks.length > 0 && (
+          <span className="text-gray-500 text-xs">タスク {currentTaskIndex + 1} / {tasks.length}</span>
+        )}
       </div>
 
       {/* ウェブカメラ（16:9 で潰れず表示。取得失敗時はフォールバック） */}
       <div className="relative bg-gray-900 aspect-video">
         <video
-          ref={attachVideoRef}
+          ref={webcamVideoRef}
           autoPlay
           muted
           playsInline
@@ -831,8 +754,6 @@ function WidgetContent() {
           セッションを終了
         </button>
       </div>
-      </>
-      )}
     </div>
   )
 }
