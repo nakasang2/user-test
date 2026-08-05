@@ -1,11 +1,15 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest, NextResponse, after } from 'next/server'
 import { handleUpload, type HandleUploadBody } from '@vercel/blob/client'
 import { prisma } from '@/lib/db'
 import { requireAuth, requireParticipantToken, handleApiError } from '@/lib/api-auth'
 import { createSignedBlobUrl } from '@/lib/blob'
+import { reanalyzeFromRecording } from '@/lib/reanalyze-recording'
 import { rateLimit, getClientIp } from '@/lib/ratelimit'
 
 export const runtime = 'nodejs'
+// ユーザビリティテストは録画保存後に自動でWhisper再文字起こし＋AI分析を行う（after()）。
+// その分の実行時間を確保する
+export const maxDuration = 300
 
 /** GET — 認可済みダッシュボード向けに録画の短命署名付き URL を発行する */
 export async function GET(
@@ -61,10 +65,20 @@ export async function POST(
       },
       onUploadCompleted: async ({ blob, tokenPayload }) => {
         const sessionId = tokenPayload ?? id
-        await prisma.session.update({
+        const updated = await prisma.session.update({
           where: { id: sessionId },
           data: { recordingUrl: blob.url },
+          select: { interview: { select: { type: true } } },
         })
+        // ユーザビリティテストは、タスク中の思考発話がライブでは音量判定のみで
+        // 文字化されない（useSilenceNudge）ため、録画の音声から拾い直さないと
+        // 不満やつぶやきが分析対象に入らない。録画保存完了を機に自動で行う。
+        // 参加者を待たせないよう after() でレスポンス送信後に実行する。
+        if (updated.interview.type === 'usability') {
+          after(() => reanalyzeFromRecording(sessionId).catch((err) => {
+            console.error('録画からの自動文字起こしに失敗しました:', err)
+          }))
+        }
       },
     })
 
