@@ -57,6 +57,8 @@ interface Props {
   roomName: string
   questions: Question[]
   interviewTitle: string
+  /** 調査作成時に入力する「説明（任意）」。各方式の最初の読み上げに含める */
+  description?: string
   participantName?: string
   interviewType?: 'interview' | 'impression' | 'usability'
   usabilityMode?: 'prototype' | 'service'
@@ -121,6 +123,7 @@ export default function InterviewRoom({
   participantToken,
   questions,
   interviewTitle,
+  description,
   participantName,
   interviewType,
   usabilityMode,
@@ -497,12 +500,15 @@ export default function InterviewRoom({
   const speakTask = useCallback((idx: number) => {
     const t = tasks?.[idx]
     if (!t) return
-    speak(`タスク${idx + 1}。${t.text}`, undefined, {
+    // 調査作成時の「説明（任意）」は、タスク1の直前だけ読み上げに含める
+    // （guidance・screen-share 解決後に呼ばれるため、PiP/画面共有のユーザー操作起点を崩さない）
+    const prefix = idx === 0 && description?.trim() ? `${description.trim()}` : ''
+    speak(`${prefix}タスク${idx + 1}。${t.text}`, undefined, {
       // 文字起こしには残さない（結果記録側にタスク文言があるため二重になる）
       log: false,
       failNotice: '音声を再生できませんでした。画面のタスク文をご覧ください。',
     })
-  }, [tasks, speak])
+  }, [tasks, speak, description])
 
   // 読み上げ済みの提示回。speak（＝showNotice）の識別子が変わって effect が
   // 再実行されても、同じ提示を二度読まないようにする
@@ -1308,7 +1314,9 @@ export default function InterviewRoom({
 
     // 通常インタビュー
     setPhase('intro')
-    const intro = `こんにちは${participantName ? `、${participantName}さん` : ''}。本日はインタビューにご参加いただきありがとうございます。「${interviewTitle}」についてお聞きします。`
+    const greeting = `こんにちは${participantName ? `、${participantName}さん` : ''}。本日はインタビューにご参加いただきありがとうございます。「${interviewTitle}」についてお聞きします。`
+    // 調査作成時の「説明（任意）」を、あれば読み上げに含める
+    const intro = description?.trim() ? `${greeting}${description.trim()}` : greeting
     speak(intro, () => {
       if (questions.length === 0) { endInterview(); return }  // 質問ゼロでもクラッシュさせない
       setPhase('interview')
@@ -1391,7 +1399,9 @@ export default function InterviewRoom({
   // 読み上げ終了後（失敗時も含む。speak は失敗時も onEnd を呼ぶ）に画像を表示する。
   function beginStimulusIntro() {
     const sec = stimulusDuration ?? 5
-    const intro = `これから画像を${sec}秒間お見せします。ご覧になったら、そのあと感想をお伺いします。`
+    const stimulusIntro = `これから画像を${sec}秒間お見せします。ご覧になったら、そのあと感想をお伺いします。`
+    // 調査作成時の「説明（任意）」を、あれば読み上げに含める
+    const intro = description?.trim() ? `${description.trim()}${stimulusIntro}` : stimulusIntro
     speak(intro, () => {
       stimulusStartedRef.current = false
       stimulusProceededRef.current = false

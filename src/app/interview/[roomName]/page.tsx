@@ -38,6 +38,7 @@ export default async function InterviewPage(props: { params: Promise<{ roomName:
         followUpDepth: q.followUpDepth,
       }))}
       interviewTitle={session.interview.title}
+      description={session.interview.description ?? undefined}
       participantName={session.participant?.name}
       interviewType={session.interview.type as 'interview' | 'impression' | 'usability'}
       usabilityMode={(session.interview.usabilityMode as 'prototype' | 'service' | null | undefined) ?? undefined}
