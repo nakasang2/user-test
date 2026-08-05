@@ -111,6 +111,13 @@ type Phase = 'guide' | 'waiting' | 'stimulus' | 'task' | 'intro' | 'interview' |
 const USABILITY_GUIDANCE_TEXT = '操作しながら、考えていることを声に出してください。'
   + '操作方法などのご質問にはお答えできませんが、気になったことは、あとの質問でお聞かせください。'
 
+// 小窓のウィンドウサイズ。「画面を隠して邪魔」という指摘を受けて縮小した。
+// 開いた後に動的にリサイズすることも試したが、Document PiP では widget/page.tsx が
+// PiP ウィンドウ自身ではなく中の iframe として動くため、iframe 側からの
+// window.resizeTo() は機能しなかった（LESSONS.md参照）。そのため固定サイズを
+// 小さめにする方針にした。はみ出す内容は widget 側で自然にスクロールする。
+const WIDGET_WINDOW_SIZE = { width: 380, height: 260 }
+
 export default function InterviewRoom({
   sessionId,
   participantToken,
@@ -1095,7 +1102,7 @@ export default function InterviewRoom({
     if (docPiP) {
       try {
         // Document PiP: どのタブ・ウィンドウの上にも常時浮く小窓（Chrome 116+ / Google Meet と同じ仕組み）
-        const pipWindow: Window = await docPiP.requestWindow({ width: 400, height: 560 })
+        const pipWindow: Window = await docPiP.requestWindow(WIDGET_WINDOW_SIZE)
         // ⚠️ html/body に高さを与えないと iframe の height:100% が解決できず、
         //    HTML デフォルトの 150px に潰れる（Chrome は補完するが Brave 等では潰れる）。
         //    高さの連鎖を明示し、iframe を窓いっぱいに広げる。
@@ -1115,7 +1122,11 @@ export default function InterviewRoom({
       }
     }
     // ポップアップ fallback（最前面固定は不可）
-    const popup = window.open(url, 'uservoice-widget', 'popup,width=400,height=560,top=40,left=40')
+    const popup = window.open(
+      url,
+      'uservoice-widget',
+      `popup,width=${WIDGET_WINDOW_SIZE.width},height=${WIDGET_WINDOW_SIZE.height},top=40,left=40`
+    )
     if (popup) pipWindowRef.current = popup
     setWidgetBlocked(!popup)
   }
