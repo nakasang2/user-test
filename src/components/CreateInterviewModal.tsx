@@ -37,6 +37,8 @@ interface QuestionItem {
   imageUrl?: string | null
   imageMode?: string | null
   imageDuration?: number | null
+  /** rating/nps でもボタンを出さず会話の中で自然に聞き、値は後で抽出する */
+  naturalCapture?: boolean
 }
 
 interface TaskItem { text: string; hint?: string; isPrerequisite?: boolean }
@@ -153,12 +155,14 @@ export default function CreateInterviewModal({ onClose, onCreated }: Props) {
                 // 形式に関わらず設定をそのまま保存する（理由は EditInterviewModal 参照）
                 followUpEnabled: q.followUpEnabled !== false,
                 followUpDepth: normalizeFollowUpDepth(q.followUpDepth),
+                naturalCapture: q.naturalCapture === true,
               })))
             : questions.filter((q) => q.text.trim()).map((q) => ({
                 text: q.text,
                 type: q.type,
                 followUpEnabled: q.followUpEnabled !== false,
                 followUpDepth: normalizeFollowUpDepth(q.followUpDepth),
+                naturalCapture: q.naturalCapture === true,
                 ...(sessionType === 'impression' ? toQuestionImagePayload(q) : {}),
               })),
           autoGenerate: sessionType === 'interview' ? autoGenerate : false,
@@ -495,6 +499,26 @@ export default function CreateInterviewModal({ onClose, onCreated }: Props) {
                               onChange={(next) => updateQuestion(i, { followUpEnabled: next })}
                               onDepthChange={(next) => updateQuestion(i, { followUpDepth: next })}
                             />
+                            {questions.length > 1 && <span className="w-[26px] flex-shrink-0" aria-hidden="true" />}
+                          </div>
+                        )}
+                        {q.type !== 'open' && (
+                          <div className="flex gap-2 items-start">
+                            <span className="w-5 flex-shrink-0" aria-hidden="true" />
+                            <label className="flex items-start gap-1.5 text-[11px] text-gray-600 leading-snug cursor-pointer">
+                              <input
+                                type="checkbox"
+                                checked={q.naturalCapture === true}
+                                onChange={(e) => updateQuestion(i, { naturalCapture: e.target.checked })}
+                                className="mt-0.5 flex-shrink-0"
+                              />
+                              <span>
+                                ボタンではなく会話の中で自然に聞く
+                                <span className="block text-gray-400">
+                                  参加者は自由に話して回答します。厳密な値は文字起こしからAIが後で抽出するため、稀に抽出できないことがあります
+                                </span>
+                              </span>
+                            </label>
                             {questions.length > 1 && <span className="w-[26px] flex-shrink-0" aria-hidden="true" />}
                           </div>
                         )}

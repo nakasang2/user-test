@@ -10,7 +10,7 @@
  */
 import {
   aggregateTasks, aggregateScores, overallSuccess, avgSessionDuration,
-  headlineScore, hardestTask, calcNps,
+  headlineScore, hardestTask, calcNps, scoreDistribution,
 } from '../interview-aggregate.ts'
 
 let pass = 0
@@ -294,6 +294,18 @@ console.log('\n=== 深掘りを「しない」の伝わり方（API ガードと
   eq('false（Number(false)=0）も深掘りしない', skip(false), true)
   eq('未指定は既定に任せる（ここでは弾かない）', [skip(null), skip(undefined)], [false, false])
   eq('正の値は通常どおり', [skip(1), skip(2), skip('3')], [false, false, false])
+}
+
+console.log('\n=== 回答分布（選択肢別の件数） ===')
+{
+  eq('件数を値の昇順で返す', scoreDistribution([3, 1, 3, 2, 1, 3]), [
+    { value: 1, count: 2 }, { value: 2, count: 1 }, { value: 3, count: 3 },
+  ])
+  eq('空なら空配列', scoreDistribution([]), [])
+  eq('全員同じ値でも1件にまとまる', scoreDistribution([5, 5, 5]), [{ value: 5, count: 3 }])
+  eq('NPS の0〜10も値ごとに分かれる', scoreDistribution([0, 10, 10, 7]), [
+    { value: 0, count: 1 }, { value: 7, count: 1 }, { value: 10, count: 2 },
+  ])
 }
 
 console.log(`\n${pass} passed, ${fail} failed`)

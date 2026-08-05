@@ -8,6 +8,7 @@ import {
   aggregateScores,
   overallSuccess,
   calcNps,
+  scoreDistribution,
   type SessionLike,
 } from '@/lib/interview-aggregate'
 
@@ -209,27 +210,51 @@ export default function InterviewMetrics({
             {scoreRows.map((s) => {
               const mean = s.values.reduce((a, b) => a + b, 0) / s.values.length
               const isNps = s.type === 'nps'
+              // 選択肢別の回答分布。平均・NPSスコアだけでは賛否が割れているケースが埋もれるため
+              const range = isNps ? Array.from({ length: 11 }, (_, i) => i) : [1, 2, 3, 4, 5]
+              const countByValue = new Map(scoreDistribution(s.values).map((d) => [d.value, d.count]))
+              const maxCount = Math.max(1, ...range.map((v) => countByValue.get(v) ?? 0))
               return (
-                <div key={s.key} className="flex items-baseline justify-between gap-3 pb-3 border-b border-gray-100 last:border-0 last:pb-0">
-                  <p className="text-sm text-gray-900 leading-snug min-w-0">
-                    <span className="text-gray-400 mr-1.5">{s.order}.</span>{s.text}
-                  </p>
-                  <div className="flex-shrink-0 flex items-baseline gap-2">
-                    <div className="text-right tabular-nums">
-                      <p className="text-sm font-semibold text-gray-900">
-                        {isNps ? `NPS ${calcNps(s.values)}` : `平均 ${mean.toFixed(1)}`}
-                        <span className="text-xs font-normal text-gray-500 ml-1">
-                          {isNps ? `（平均 ${mean.toFixed(1)} / 10）` : '/ 5'}
-                        </span>
-                      </p>
-                      <p className="text-[11px] text-gray-500">n = {s.values.length}</p>
+                <div key={s.key} className="pb-3 border-b border-gray-100 last:border-0 last:pb-0">
+                  <div className="flex items-baseline justify-between gap-3">
+                    <p className="text-sm text-gray-900 leading-snug min-w-0">
+                      <span className="text-gray-400 mr-1.5">{s.order}.</span>{s.text}
+                    </p>
+                    <div className="flex-shrink-0 flex items-baseline gap-2">
+                      <div className="text-right tabular-nums">
+                        <p className="text-sm font-semibold text-gray-900">
+                          {isNps ? `NPS ${calcNps(s.values)}` : `平均 ${mean.toFixed(1)}`}
+                          <span className="text-xs font-normal text-gray-500 ml-1">
+                            {isNps ? `（平均 ${mean.toFixed(1)} / 10）` : '/ 5'}
+                          </span>
+                        </p>
+                        <p className="text-[11px] text-gray-500">n = {s.values.length}</p>
+                      </div>
+                      {allowExclude && (
+                        <ExcludeButton
+                          busy={busy === s.key}
+                          onClick={() => setExcluded('answer', s.key, s.text, true)}
+                        />
+                      )}
                     </div>
-                    {allowExclude && (
-                      <ExcludeButton
-                        busy={busy === s.key}
-                        onClick={() => setExcluded('answer', s.key, s.text, true)}
-                      />
-                    )}
+                  </div>
+                  {/* 回答分布（選択肢別の件数） */}
+                  <div className="flex items-end gap-1 mt-2.5">
+                    {range.map((v) => {
+                      const count = countByValue.get(v) ?? 0
+                      return (
+                        <div key={v} className="flex-1 flex flex-col items-center gap-0.5" title={`${v}: ${count}人`}>
+                          <div className="w-full h-8 bg-gray-100 rounded-sm overflow-hidden flex items-end">
+                            <div
+                              className="w-full bg-gray-400 rounded-sm transition-all"
+                              style={{ height: count > 0 ? `${(count / maxCount) * 100}%` : '0%' }}
+                            />
+                          </div>
+                          <span className="text-[9px] text-gray-500 tabular-nums">{v}</span>
+                          <span className="text-[9px] text-gray-400 tabular-nums">{count}</span>
+                        </div>
+                      )
+                    })}
                   </div>
                 </div>
               )

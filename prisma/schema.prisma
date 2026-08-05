@@ -119,6 +119,11 @@ model Question {
   text        String
   order       Int
   type        String    @default("open") // open | rating | nps
+  // rating/nps でも、参加者に選択ボタンを出さず会話の中で自然に聞く（言い回しは自由）。
+  // その場では type/valueNum を確定させず open と同じく文字起こしの引用だけ保存し、
+  // 発言内容から AI が厳密な値（例: 1）を後から抽出して同じ回答行に上書きする。
+  // false（既定）のときは従来どおりボタン UI で厳密に回答してもらう。
+  naturalCapture Boolean @default(false)
   // 印象テストで、この質問に紐づけて提示する画像。null なら画像なし（従来どおり）。
   // Interview.stimulusUrl（最初に1回見せる全体の刺激）とは別物で、併用できる。
   imageUrl    String?
@@ -130,7 +135,8 @@ model Question {
   // この質問で AI が深掘り（追加質問）をするか。
   // 既定 true = 従来どおり。事実だけ聞きたい質問（例「普段どのブラウザですか」）で
   // false にすると、回答を受けたらすぐ次の質問へ進む（AI 呼び出し自体を行わない）。
-  // rating / nps は元々深掘りの対象外なので、この値は open のときだけ意味を持つ。
+  // rating / nps はボタン UI で回答する限り深掘りの対象外だが、naturalCapture が
+  // true の間は open と同じ会話フローを通るため、この値がそのまま意味を持つ。
   followUpEnabled Boolean @default(true)
   // 深掘りの深さ（この質問で最大何回まで追い質問するか）。1〜5。
   // followUpEnabled が false のときは使わない。無効化しても値は残るので、

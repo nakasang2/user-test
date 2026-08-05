@@ -22,7 +22,7 @@ export interface EditableInterview {
   type: string
   seqEnabled?: boolean
   hintDelaySec?: number | null
-  questions: { id: string; text: string; order: number; type: string; imageUrl?: string | null; imageMode?: string | null; imageDuration?: number | null; followUpEnabled?: boolean; followUpDepth?: number }[]
+  questions: { id: string; text: string; order: number; type: string; imageUrl?: string | null; imageMode?: string | null; imageDuration?: number | null; followUpEnabled?: boolean; followUpDepth?: number; naturalCapture?: boolean }[]
   tasks?: { id: string; text: string; order: number; hint?: string | null; isPrerequisite?: boolean | null }[]
   screeners?: { id: string; label: string; options: string[]; disqualify: string[]; required: boolean; order: number }[]
 }
@@ -41,6 +41,8 @@ interface Row {
   imageUrl?: string | null
   imageMode?: string | null
   imageDuration?: number | null
+  /** rating/nps でもボタンを出さず会話の中で自然に聞き、値は後で抽出する */
+  naturalCapture?: boolean
 }
 
 const Q_TYPES: { value: QType; label: string }[] = [
@@ -77,6 +79,7 @@ export default function EditInterviewModal({
       followUpDepth: q.followUpDepth ?? FOLLOW_UP_DEPTH_DEFAULT,
       imageMode: q.imageMode ?? null,
       imageDuration: q.imageDuration ?? null,
+      naturalCapture: q.naturalCapture ?? false,
     }))
   )
   const [tasks, setTasks] = useState<Row[]>(
@@ -152,6 +155,7 @@ export default function EditInterviewModal({
               // （参加者側は rating/nps では元々深掘りしないので、上書きの実益もない）
               followUpEnabled: q.followUpEnabled !== false,
               followUpDepth: normalizeFollowUpDepth(q.followUpDepth),
+              naturalCapture: q.naturalCapture === true,
               ...(isImpression ? toQuestionImagePayload(q) : {}),
             })),
           // 選択肢が無い設問は落とす（被験者が回答できず参加不能になるため）
@@ -288,6 +292,7 @@ export default function EditInterviewModal({
             withType
             withImage={isImpression}
             withFollowUp
+            withNaturalCapture
           />
 
           {/* 事前質問（スクリーニング／属性）。作成・AI設計ページと共通のエディタ */}
@@ -323,6 +328,7 @@ export default function EditInterviewModal({
 /** 質問／タスクの共通エディタ（追加・削除・並べ替え） */
 function RowEditor({
   label, rows, setRows, placeholder, withType, withHint = false, withImage = false, withFollowUp = false,
+  withNaturalCapture = false,
 }: {
   label: string
   rows: Row[]
@@ -335,6 +341,8 @@ function RowEditor({
   withImage?: boolean
   /** 質問用: 自由回答で AI が深掘りするかを選ぶ */
   withFollowUp?: boolean
+  /** 質問用: rating/nps でもボタンを出さず会話の中で自然に聞くかを選ぶ */
+  withNaturalCapture?: boolean
 }) {
   const move = (from: number, to: number) => {
     if (to < 0 || to >= rows.length) return
@@ -402,6 +410,27 @@ function RowEditor({
                 onChange={(next) => setRows(rows.map((r, j) => (j === i ? { ...r, followUpEnabled: next } : r)))}
                 onDepthChange={(next) => setRows(rows.map((r, j) => (j === i ? { ...r, followUpDepth: next } : r)))}
               />
+              <span className="w-[52px] flex-shrink-0" aria-hidden="true" />
+            </div>
+          )}
+          {/* rating/nps でも会話の中で自然に聞く。値は文字起こしから後で抽出する */}
+          {withNaturalCapture && row.type !== 'open' && (
+            <div className="flex items-start gap-1.5 mt-1">
+              <span className="w-4 flex-shrink-0" aria-hidden="true" />
+              <label className="flex items-start gap-1.5 text-[11px] text-gray-600 leading-snug cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={row.naturalCapture === true}
+                  onChange={(e) => setRows(rows.map((r, j) => (j === i ? { ...r, naturalCapture: e.target.checked } : r)))}
+                  className="mt-0.5 flex-shrink-0"
+                />
+                <span>
+                  ボタンではなく会話の中で自然に聞く
+                  <span className="block text-gray-400">
+                    参加者は自由に話して回答します。厳密な値は文字起こしからAIが後で抽出するため、稀に抽出できないことがあります
+                  </span>
+                </span>
+              </label>
               <span className="w-[52px] flex-shrink-0" aria-hidden="true" />
             </div>
           )}
