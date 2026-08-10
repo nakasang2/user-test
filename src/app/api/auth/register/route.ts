@@ -1,65 +1,16 @@
-import { NextRequest, NextResponse } from 'next/server'
-import bcrypt from 'bcryptjs'
-import { z } from 'zod'
-import { prisma } from '@/lib/db'
-import { signToken } from '@/lib/jwt'
-import { handleApiError } from '@/lib/api-auth'
+import { NextResponse } from 'next/server'
 
-const schema = z.object({
-  orgName:  z.string().min(1, '組織名を入力してください').max(100),
-  name:     z.string().min(1, '名前を入力してください').max(100),
-  email:    z.string().email('有効なメールアドレスを入力してください'),
-  password: z.string().min(8, 'パスワードは8文字以上にしてください'),
-})
-
-export async function POST(req: NextRequest) {
-  try {
-    const body = await req.json()
-    const parsed = schema.safeParse(body)
-    if (!parsed.success) {
-      const msg = parsed.error.issues[0]?.message ?? '入力内容を確認してください'
-      return NextResponse.json({ error: msg }, { status: 400 })
-    }
-    const { orgName, name, email, password } = parsed.data
-
-    // メール重複チェック
-    const existing = await prisma.user.findUnique({ where: { email } })
-    if (existing) {
-      return NextResponse.json({ error: 'このメールアドレスは既に使用されています' }, { status: 409 })
-    }
-
-    const passwordHash = await bcrypt.hash(password, 12)
-
-    // トランザクションで組織・ユーザー・メンバーレコードを一括作成
-    const { org, user } = await prisma.$transaction(async (tx) => {
-      const org = await tx.organization.create({ data: { name: orgName } })
-      const user = await tx.user.create({
-        data: { email, name, passwordHash, organizationId: org.id, role: 'owner' },
-      })
-      // Member junction table にオーナーとして登録
-      await tx.member.create({
-        data: { userId: user.id, organizationId: org.id, role: 'owner' },
-      })
-      // 既存の未所属インタビューをこの組織に割り当て（初回登録時の自動マイグレーション）
-      await tx.interview.updateMany({
-        where: { organizationId: null },
-        data: { organizationId: org.id },
-      })
-      return { org, user }
-    })
-
-    const token = await signToken({ userId: user.id, orgId: org.id, email: user.email })
-
-    const res = NextResponse.json({ ok: true }, { status: 201 })
-    res.cookies.set('token', token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-      maxAge: 60 * 60 * 24 * 7, // 7日
-      path: '/',
-    })
-    return res
-  } catch (err) {
-    return handleApiError(err)
-  }
+/**
+ * POST /api/auth/register — 無効化済み。
+ *
+ * 社内利用のみのため、新しい組織を誰でも作れる公開登録は廃止した。
+ * 新しいメンバーは既存組織のオーナー/管理者からの招待（/invite/[token]）経由でのみ参加できる。
+ * 元の実装（新規組織作成込みの登録処理）は git 履歴に残っているため、
+ * 将来公開登録を再開する場合はそこから復元する。
+ */
+export async function POST() {
+  return NextResponse.json(
+    { error: '新規登録は現在ご利用いただけません。管理者からの招待リンクをご利用ください。' },
+    { status: 403 }
+  )
 }

@@ -23,6 +23,7 @@ import FollowUpToggle from '@/components/FollowUpToggle'
 import { normalizeFollowUpDepth } from '@/lib/follow-up'
 import QuestionImageField from './QuestionImageField'
 import { toQuestionImagePayload, validateQuestionImage } from '@/lib/question-image'
+import { DESCRIPTION_TEMPLATES } from '@/lib/description-templates'
 
 type InterviewType = 'interview' | 'impression' | 'usability'
 
@@ -97,6 +98,7 @@ export default function CreateInterviewModal({ onClose, onCreated }: Props) {
     setError(null)
     // 入力検証（送信前）
     if (!title.trim()) { setError('タイトルを入力してください'); return }
+    if (!description.trim()) { setError('説明を入力してください'); return }
     // 質問ごとに画像を付けられるようになったので、全体の刺激画像は必須にしない。
     // ただし画像がどこにも無い印象テストは成立しないので、どちらか一方は求める。
     if (sessionType === 'impression'
@@ -131,7 +133,7 @@ export default function CreateInterviewModal({ onClose, onCreated }: Props) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           title,
-          description:      description || undefined,
+          description,
           type:             sessionType,
           usabilityMode:    sessionType === 'usability' ? usabilityMode : undefined,
           stimulusUrl:      (sessionType === 'impression' || sessionType === 'usability') ? (stimulusUrl || undefined) : undefined,
@@ -278,15 +280,29 @@ export default function CreateInterviewModal({ onClose, onCreated }: Props) {
           </div>
 
           <div>
-            <label htmlFor="ci-desc" className="block text-xs font-medium text-gray-700 mb-1.5">説明 <span className="text-gray-400 font-normal">（任意）</span></label>
+            <div className="flex items-center justify-between mb-1.5">
+              <label htmlFor="ci-desc" className="text-xs font-medium text-gray-700">説明 <span className="text-red-500">*</span></label>
+              <button
+                type="button"
+                onClick={() => {
+                  if (description.trim() && !window.confirm('入力中の説明をテンプレートで置き換えます。よろしいですか？')) return
+                  setDescription(DESCRIPTION_TEMPLATES[sessionType])
+                }}
+                className="text-xs text-gray-500 hover:text-gray-900 underline underline-offset-2"
+              >
+                テンプレートを挿入
+              </button>
+            </div>
             <textarea
               id="ci-desc"
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              rows={2}
+              rows={3}
+              required
               placeholder="目的や対象者を記述..."
               className={`${inputClass} resize-none`}
             />
+            <p className="text-[11px] text-gray-500 mt-1">テスト開始時に参加者へ読み上げられます。必ず読んでいただきたい内容を記載してください。</p>
           </div>
 
           {sessionType === 'impression' && (

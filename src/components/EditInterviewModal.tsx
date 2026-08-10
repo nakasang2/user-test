@@ -12,6 +12,7 @@ import FollowUpToggle from '@/components/FollowUpToggle'
 import { FOLLOW_UP_DEPTH_DEFAULT, normalizeFollowUpDepth } from '@/lib/follow-up'
 import QuestionImageField from './QuestionImageField'
 import { toQuestionImagePayload, validateQuestionImage } from '@/lib/question-image'
+import { DESCRIPTION_TEMPLATES } from '@/lib/description-templates'
 
 type QType = 'open' | 'rating' | 'nps'
 
@@ -118,6 +119,7 @@ export default function EditInterviewModal({
 
   async function save() {
     if (!title.trim()) { setError('タイトルを入力してください'); return }
+    if (!description.trim()) { setError('説明を入力してください'); return }
     const badScreener = findScreenerWithoutOptions(screeners)
     if (badScreener) { setError(`事前質問「${badScreener}」に選択肢を入力してください`); return }
     if (isImpression) {
@@ -233,14 +235,27 @@ export default function EditInterviewModal({
           </div>
 
           <div>
-            <label htmlFor="edit-desc" className="block text-xs font-medium text-gray-700 mb-1.5">説明（任意）</label>
+            <div className="flex items-center justify-between mb-1.5">
+              <label htmlFor="edit-desc" className="text-xs font-medium text-gray-700">説明 <span className="text-red-500">*</span></label>
+              <button
+                type="button"
+                onClick={() => {
+                  if (description.trim() && !window.confirm('入力中の説明をテンプレートで置き換えます。よろしいですか？')) return
+                  setDescription(DESCRIPTION_TEMPLATES[interview.type as 'interview' | 'impression' | 'usability'] ?? DESCRIPTION_TEMPLATES.interview)
+                }}
+                className="text-xs text-gray-500 hover:text-gray-900 underline underline-offset-2"
+              >
+                テンプレートを挿入
+              </button>
+            </div>
             <textarea
               id="edit-desc"
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              rows={2}
+              rows={3}
               className="w-full border border-gray-300 focus:border-gray-900 rounded-md px-3 py-2 text-sm focus:outline-none resize-y"
             />
+            <p className="text-[11px] text-gray-500 mt-1">テスト開始時に参加者へ読み上げられます。必ず読んでいただきたい内容を記載してください。</p>
           </div>
 
           {isUsability && <SeqToggle checked={seqEnabled} onChange={setSeqEnabled} />}
