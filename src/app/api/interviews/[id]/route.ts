@@ -34,7 +34,8 @@ export async function GET(req: NextRequest, props: { params: Promise<{ id: strin
 
 const patchSchema = z.object({
   title:            z.string().min(1, 'タイトルを入力してください').max(200).optional(),
-  description:      z.string().max(1000).nullable().optional(),
+  // テスト開始時に参加者へ読み上げるため必須（送られてきた場合は空にできない）
+  description:      z.string().min(1, '説明を入力してください').max(1000).optional(),
   stimulusUrl:      z.string().url().nullable().optional().or(z.literal('')),
   stimulusDuration: z.number().int().min(1).max(60).nullable().optional(),
   seqEnabled:       z.boolean().optional(),
@@ -183,7 +184,7 @@ export async function PATCH(req: NextRequest, props: { params: Promise<{ id: str
 
     const data: Record<string, unknown> = {}
     if (title !== undefined) data.title = title
-    if (description !== undefined) data.description = description || null
+    if (description !== undefined) data.description = description
     if (stimulusUrl !== undefined) data.stimulusUrl = stimulusUrl || null
     if (stimulusDuration !== undefined) data.stimulusDuration = stimulusDuration
     if (seqEnabled !== undefined) data.seqEnabled = seqEnabled

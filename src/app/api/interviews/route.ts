@@ -8,7 +8,8 @@ import { toQuestionImagePayload } from '@/lib/question-image'
 
 const createSchema = z.object({
   title:            z.string().min(1, 'タイトルを入力してください').max(200),
-  description:      z.string().max(1000).optional(),
+  // テスト開始時に参加者へ読み上げるため必須（テンプレートを挿入して編集する運用）
+  description:      z.string().min(1, '説明を入力してください').max(1000),
   autoGenerate:     z.boolean().optional(),
   topic:            z.string().max(500).optional(),
   questions:        z.array(z.union([
