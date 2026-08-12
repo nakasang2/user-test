@@ -63,7 +63,7 @@ const SESSION_TYPES: { value: InterviewType; icon: React.ReactNode; label: strin
 ]
 
 export default function CreateInterviewModal({ onClose, onCreated }: Props) {
-  const descriptionTemplates = useDescriptionTemplates()
+  const { templates: descriptionTemplates, loaded: templatesLoaded } = useDescriptionTemplates()
   const [sessionType, setSessionType] = useState<InterviewType>('interview')
   const [title, setTitle]             = useState('')
   const [description, setDescription] = useState('')
@@ -293,6 +293,7 @@ export default function CreateInterviewModal({ onClose, onCreated }: Props) {
               onChange={(e) => setObjective(e.target.value)}
               rows={2}
               required
+              maxLength={1000}
               placeholder="例：新しい検索UIで、目的の商品にたどり着けるか確認したい"
               className={`${inputClass} resize-none`}
             />
@@ -306,11 +307,12 @@ export default function CreateInterviewModal({ onClose, onCreated }: Props) {
               <label htmlFor="ci-desc" className="text-xs font-medium text-gray-700">説明 <span className="text-red-500">*</span></label>
               <button
                 type="button"
+                disabled={!templatesLoaded}
                 onClick={() => {
                   if (description.trim() && !window.confirm('入力中の説明をテンプレートで置き換えます。よろしいですか？')) return
                   setDescription(descriptionTemplates[sessionType])
                 }}
-                className="text-xs text-gray-500 hover:text-gray-900 underline underline-offset-2"
+                className="text-xs text-gray-500 hover:text-gray-900 underline underline-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 テンプレートを挿入
               </button>

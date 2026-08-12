@@ -23,10 +23,12 @@ export async function GET() {
   }
 }
 
+// 上限は挿入先の description の上限(1000)と揃える。ここだけ長く保存できると、
+// テンプレートを挿入した瞬間に description 側の保存エラーになる
 const patchSchema = z.object({
-  templateInterview: z.string().max(2000).nullable().optional(),
-  templateImpression: z.string().max(2000).nullable().optional(),
-  templateUsability: z.string().max(2000).nullable().optional(),
+  templateInterview: z.string().max(1000).nullable().optional(),
+  templateImpression: z.string().max(1000).nullable().optional(),
+  templateUsability: z.string().max(1000).nullable().optional(),
 })
 
 /** PATCH /api/organizations/templates — テンプレートを更新（admin+）。空文字は null にし、既定文言へ戻す */

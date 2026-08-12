@@ -7,29 +7,36 @@ export type SessionType = 'interview' | 'impression' | 'usability'
 
 /**
  * 「テンプレートを挿入」で使う文言を組織のカスタム設定から取得する。
- * 未カスタマイズ（null）またはまだ読み込めていない間は、コード上の既定文言を返す。
- * 組織設定は /dashboard/settings/templates で編集する。
+ * 未カスタマイズ（null）ならコード上の既定文言を返す。
+ *
+ * `loaded` が false の間はまだ組織のカスタム設定を確認できていない状態。
+ * この間に「テンプレートを挿入」を押されると、カスタム設定があっても
+ * 気づかず既定文言を挿入してしまうため、呼び出し側は loaded になるまで
+ * 挿入ボタンを無効化すること。
  */
-export function useDescriptionTemplates(): Record<SessionType, string> {
+export function useDescriptionTemplates(): { templates: Record<SessionType, string>; loaded: boolean } {
   const [templates, setTemplates] = useState<Record<SessionType, string>>(DESCRIPTION_TEMPLATES)
+  const [loaded, setLoaded] = useState(false)
 
   useEffect(() => {
     let cancelled = false
     fetch('/api/organizations/templates')
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
-        if (cancelled || !data) return
-        setTemplates({
-          interview: data.templateInterview || DESCRIPTION_TEMPLATES.interview,
-          impression: data.templateImpression || DESCRIPTION_TEMPLATES.impression,
-          usability: data.templateUsability || DESCRIPTION_TEMPLATES.usability,
-        })
+        if (cancelled) return
+        if (data) {
+          setTemplates({
+            interview: data.templateInterview || DESCRIPTION_TEMPLATES.interview,
+            impression: data.templateImpression || DESCRIPTION_TEMPLATES.impression,
+            usability: data.templateUsability || DESCRIPTION_TEMPLATES.usability,
+          })
+        }
+        // 取得に失敗しても既定文言のまま「読み込み済み」にする（挿入自体は止めない）
+        setLoaded(true)
       })
-      .catch(() => {
-        // 取得に失敗しても既定文言のままボタンは使える（挿入自体を止めない）
-      })
+      .catch(() => { if (!cancelled) setLoaded(true) })
     return () => { cancelled = true }
   }, [])
 
-  return templates
+  return { templates, loaded }
 }

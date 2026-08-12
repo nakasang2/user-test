@@ -136,6 +136,7 @@ export default function TemplatesSettingsPage() {
                 onChange={(e) => setValues((v) => ({ ...v, [type]: e.target.value }))}
                 placeholder={DESCRIPTION_TEMPLATES[type]}
                 rows={4}
+                maxLength={1000}
                 disabled={!canEdit}
                 className="w-full bg-white border border-gray-300 focus:border-gray-900 focus:ring-1 focus:ring-gray-900 focus:outline-none rounded-md px-3 py-2 text-sm text-gray-900 placeholder-gray-400 disabled:bg-gray-50 disabled:text-gray-500 resize-y"
               />

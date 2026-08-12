@@ -71,7 +71,7 @@ const INITIAL_MESSAGE: Message = {
 }
 
 export default function DesignPage() {
-  const descriptionTemplates = useDescriptionTemplates()
+  const { templates: descriptionTemplates, loaded: templatesLoaded } = useDescriptionTemplates()
   const [messages, setMessages] = useState<Message[]>([INITIAL_MESSAGE])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
@@ -657,6 +657,7 @@ export default function DesignPage() {
                   value={plot.objective ?? ''}
                   onChange={(e) => setPlot({ ...plot, objective: e.target.value })}
                   rows={2}
+                  maxLength={1000}
                   className="w-full bg-white border border-gray-300 focus:border-gray-900 focus:ring-1 focus:ring-gray-900 focus:outline-none rounded-md px-3 py-2 text-sm text-gray-900 resize-none"
                 />
                 <p className="text-[11px] text-gray-500 mt-1">
@@ -672,11 +673,12 @@ export default function DesignPage() {
                   </label>
                   <button
                     type="button"
+                    disabled={!templatesLoaded}
                     onClick={() => {
                       if (plot.description.trim() && !window.confirm('入力中の説明をテンプレートで置き換えます。よろしいですか？')) return
                       setPlot({ ...plot, description: descriptionTemplates[sessionType] })
                     }}
-                    className="text-xs text-gray-500 hover:text-gray-900 underline underline-offset-2"
+                    className="text-xs text-gray-500 hover:text-gray-900 underline underline-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     テンプレートを挿入
                   </button>

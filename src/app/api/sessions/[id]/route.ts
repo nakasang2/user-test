@@ -72,7 +72,11 @@ export async function PATCH(req: NextRequest, props: { params: Promise<{ id: str
         participant: true,
       },
     })
-    return NextResponse.json(session)
+    // objective は参加者には見せない研究者向け項目（GET と同じ理由でここでも落とす）。
+    // このエンドポイントは被験者トークンでも呼べるため、素通しすると DevTools から読める
+    const { objective: _objective, ...interviewRest } = session.interview
+    void _objective
+    return NextResponse.json({ ...session, interview: interviewRest })
   } catch (err) {
     return handleApiError(err)
   }

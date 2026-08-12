@@ -112,6 +112,9 @@ model Interview {
   // insightsCount = キャッシュ生成時点の done セッション数（増減で再生成を判定）。
   commonInsights   String?
   insightsCount    Int?
+  // キャッシュ生成時点の objective のスナップショット。セッション数が変わらなくても
+  // objective を編集したら再生成したいので、現在値とのズレも再生成条件に含める。
+  insightsObjective String?
   // 各タスク直後に SEQ（Single Ease Question: 1〜7 の主観的な易しさ）を聞くか。
   // 既存調査の進行を変えないため既定は無効。
   seqEnabled       Boolean       @default(false)

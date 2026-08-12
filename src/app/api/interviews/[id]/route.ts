@@ -36,8 +36,10 @@ const patchSchema = z.object({
   title:            z.string().min(1, 'タイトルを入力してください').max(200).optional(),
   // テスト開始時に参加者へ読み上げるため必須（送られてきた場合は空にできない）
   description:      z.string().min(1, '説明を入力してください').max(1000).optional(),
-  // このテストで明らかにしたいこと。送られてきた場合は空にできない（作成 API と同じ理由）
-  objective:        z.string().min(1, '目的を入力してください').max(1000).optional(),
+  // このテストで明らかにしたいこと。作成時とは異なり、既存の調査（この項目が
+  // 無かった時代に作られたものは null）を編集する際に空欄を強制しないよう、
+  // 空文字を許容して null（未設定）に戻せるようにする
+  objective:        z.string().max(1000).optional(),
   stimulusUrl:      z.string().url().nullable().optional().or(z.literal('')),
   stimulusDuration: z.number().int().min(1).max(60).nullable().optional(),
   seqEnabled:       z.boolean().optional(),
@@ -187,7 +189,7 @@ export async function PATCH(req: NextRequest, props: { params: Promise<{ id: str
     const data: Record<string, unknown> = {}
     if (title !== undefined) data.title = title
     if (description !== undefined) data.description = description
-    if (objective !== undefined) data.objective = objective
+    if (objective !== undefined) data.objective = objective.trim() || null
     if (stimulusUrl !== undefined) data.stimulusUrl = stimulusUrl || null
     if (stimulusDuration !== undefined) data.stimulusDuration = stimulusDuration
     if (seqEnabled !== undefined) data.seqEnabled = seqEnabled

@@ -19,6 +19,7 @@ export async function GET(req: NextRequest, props: { params: Promise<{ id: strin
       objective: true,
       commonInsights: true,
       insightsCount: true,
+      insightsObjective: true,
       type: true,
       seqEnabled: true,
       hintDelaySec: true,
@@ -117,7 +118,9 @@ export async function GET(req: NextRequest, props: { params: Promise<{ id: strin
   const doneStats = sessionsWithStats.filter((s) => s.status === 'done' && s.summary && !s.isPilot)
   const doneCount = doneStats.length
   let commonInsights: string | null = interview.commonInsights
-  if (doneCount >= 2 && (refresh || interview.commonInsights === null || interview.insightsCount !== doneCount)) {
+  // セッション数が変わらなくても、目的（objective）を編集したら再生成したい
+  const objectiveChanged = interview.objective !== interview.insightsObjective
+  if (doneCount >= 2 && (refresh || interview.commonInsights === null || interview.insightsCount !== doneCount || objectiveChanged)) {
     const allSummaries = doneStats
       .map((s, i) => `参加者${i + 1}（${s.participantName}）: ${s.summary}`)
       .join('\n')
@@ -127,7 +130,7 @@ export async function GET(req: NextRequest, props: { params: Promise<{ id: strin
     if (commonInsights !== null) {
       await prisma.interview.update({
         where: { id },
-        data: { commonInsights, insightsCount: doneCount },
+        data: { commonInsights, insightsCount: doneCount, insightsObjective: interview.objective },
       })
     }
   }

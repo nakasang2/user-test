@@ -68,7 +68,7 @@ export default function EditInterviewModal({
   onClose: () => void
   onSaved: () => void
 }) {
-  const descriptionTemplates = useDescriptionTemplates()
+  const { templates: descriptionTemplates, loaded: templatesLoaded } = useDescriptionTemplates()
   const [title, setTitle] = useState(interview.title)
   const [description, setDescription] = useState(interview.description ?? '')
   const [objective, setObjective] = useState(interview.objective ?? '')
@@ -123,7 +123,6 @@ export default function EditInterviewModal({
   async function save() {
     if (!title.trim()) { setError('タイトルを入力してください'); return }
     if (!description.trim()) { setError('説明を入力してください'); return }
-    if (!objective.trim()) { setError('目的を入力してください'); return }
     const badScreener = findScreenerWithoutOptions(screeners)
     if (badScreener) { setError(`事前質問「${badScreener}」に選択肢を入力してください`); return }
     if (isImpression) {
@@ -241,17 +240,19 @@ export default function EditInterviewModal({
 
           <div>
             <label htmlFor="edit-objective" className="block text-xs font-medium text-gray-700 mb-1.5">
-              目的（このテストで明らかにしたいこと） <span className="text-red-500">*</span>
+              目的（このテストで明らかにしたいこと）
             </label>
             <textarea
               id="edit-objective"
               value={objective}
               onChange={(e) => setObjective(e.target.value)}
               rows={2}
+              maxLength={1000}
               className="w-full border border-gray-300 focus:border-gray-900 rounded-md px-3 py-2 text-sm focus:outline-none resize-y"
             />
             <p className="text-[11px] text-gray-500 mt-1">
               参加者には表示・読み上げされません。AIによる分析やレポート作成が、この目的に沿った観点で行われるようになります。
+              このテストより前に作成された調査には設定されていないことがあります。
             </p>
           </div>
 
@@ -260,11 +261,12 @@ export default function EditInterviewModal({
               <label htmlFor="edit-desc" className="text-xs font-medium text-gray-700">説明 <span className="text-red-500">*</span></label>
               <button
                 type="button"
+                disabled={!templatesLoaded}
                 onClick={() => {
                   if (description.trim() && !window.confirm('入力中の説明をテンプレートで置き換えます。よろしいですか？')) return
                   setDescription(descriptionTemplates[interview.type as 'interview' | 'impression' | 'usability'] ?? descriptionTemplates.interview)
                 }}
-                className="text-xs text-gray-500 hover:text-gray-900 underline underline-offset-2"
+                className="text-xs text-gray-500 hover:text-gray-900 underline underline-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 テンプレートを挿入
               </button>
