@@ -23,7 +23,7 @@ import FollowUpToggle from '@/components/FollowUpToggle'
 import { normalizeFollowUpDepth } from '@/lib/follow-up'
 import QuestionImageField from './QuestionImageField'
 import { toQuestionImagePayload, validateQuestionImage } from '@/lib/question-image'
-import { DESCRIPTION_TEMPLATES } from '@/lib/description-templates'
+import { useDescriptionTemplates } from '@/lib/use-description-templates'
 
 type InterviewType = 'interview' | 'impression' | 'usability'
 
@@ -63,9 +63,11 @@ const SESSION_TYPES: { value: InterviewType; icon: React.ReactNode; label: strin
 ]
 
 export default function CreateInterviewModal({ onClose, onCreated }: Props) {
+  const descriptionTemplates = useDescriptionTemplates()
   const [sessionType, setSessionType] = useState<InterviewType>('interview')
   const [title, setTitle]             = useState('')
   const [description, setDescription] = useState('')
+  const [objective, setObjective]     = useState('')
   const [questions, setQuestions]     = useState<QuestionItem[]>([
     { text: '', type: 'open' },
     { text: '', type: 'open' },
@@ -99,6 +101,7 @@ export default function CreateInterviewModal({ onClose, onCreated }: Props) {
     // 入力検証（送信前）
     if (!title.trim()) { setError('タイトルを入力してください'); return }
     if (!description.trim()) { setError('説明を入力してください'); return }
+    if (!objective.trim()) { setError('目的を入力してください'); return }
     // 質問ごとに画像を付けられるようになったので、全体の刺激画像は必須にしない。
     // ただし画像がどこにも無い印象テストは成立しないので、どちらか一方は求める。
     if (sessionType === 'impression'
@@ -134,6 +137,7 @@ export default function CreateInterviewModal({ onClose, onCreated }: Props) {
         body: JSON.stringify({
           title,
           description,
+          objective,
           type:             sessionType,
           usabilityMode:    sessionType === 'usability' ? usabilityMode : undefined,
           stimulusUrl:      (sessionType === 'impression' || sessionType === 'usability') ? (stimulusUrl || undefined) : undefined,
@@ -280,13 +284,31 @@ export default function CreateInterviewModal({ onClose, onCreated }: Props) {
           </div>
 
           <div>
+            <label htmlFor="ci-objective" className="block text-xs font-medium text-gray-700 mb-1.5">
+              目的（このテストで明らかにしたいこと） <span className="text-red-500">*</span>
+            </label>
+            <textarea
+              id="ci-objective"
+              value={objective}
+              onChange={(e) => setObjective(e.target.value)}
+              rows={2}
+              required
+              placeholder="例：新しい検索UIで、目的の商品にたどり着けるか確認したい"
+              className={`${inputClass} resize-none`}
+            />
+            <p className="text-[11px] text-gray-500 mt-1">
+              参加者には表示・読み上げされません。AIによる分析やレポート作成が、この目的に沿った観点で行われるようになります。
+            </p>
+          </div>
+
+          <div>
             <div className="flex items-center justify-between mb-1.5">
               <label htmlFor="ci-desc" className="text-xs font-medium text-gray-700">説明 <span className="text-red-500">*</span></label>
               <button
                 type="button"
                 onClick={() => {
                   if (description.trim() && !window.confirm('入力中の説明をテンプレートで置き換えます。よろしいですか？')) return
-                  setDescription(DESCRIPTION_TEMPLATES[sessionType])
+                  setDescription(descriptionTemplates[sessionType])
                 }}
                 className="text-xs text-gray-500 hover:text-gray-900 underline underline-offset-2"
               >

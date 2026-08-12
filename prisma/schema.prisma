@@ -38,6 +38,11 @@ model Organization {
   interviews Interview[]
   members    Member[]
   invites    Invite[]
+  // 説明欄の「テンプレートを挿入」で使う、テスト種別ごとの定型文。
+  // null は未カスタマイズ＝コード上の既定文言（lib/description-templates.ts）を使う。
+  templateInterview  String?
+  templateImpression String?
+  templateUsability  String?
 }
 
 model User {
@@ -92,6 +97,9 @@ model Interview {
   organization     Organization? @relation(fields: [organizationId], references: [id])
   title            String
   description      String?
+  // このテストで明らかにしたいこと（研究者向け）。参加者には見せず読み上げもしない。
+  // AI の分析（共通インサイト生成）や資料生成で「目的から逆算して何を見るか」の基準にする。
+  objective        String?
   type             String        @default("interview") // interview | impression | usability
   usabilityMode    String?       // prototype | service (only when type = usability)
   stimulusUrl      String?       // impression: image URL, prototype: Figma embed URL

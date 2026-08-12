@@ -12,7 +12,7 @@ import FollowUpToggle from '@/components/FollowUpToggle'
 import { FOLLOW_UP_DEPTH_DEFAULT, normalizeFollowUpDepth } from '@/lib/follow-up'
 import QuestionImageField from './QuestionImageField'
 import { toQuestionImagePayload, validateQuestionImage } from '@/lib/question-image'
-import { DESCRIPTION_TEMPLATES } from '@/lib/description-templates'
+import { useDescriptionTemplates } from '@/lib/use-description-templates'
 
 type QType = 'open' | 'rating' | 'nps'
 
@@ -20,6 +20,7 @@ export interface EditableInterview {
   id: string
   title: string
   description: string | null
+  objective: string | null
   type: string
   seqEnabled?: boolean
   hintDelaySec?: number | null
@@ -67,8 +68,10 @@ export default function EditInterviewModal({
   onClose: () => void
   onSaved: () => void
 }) {
+  const descriptionTemplates = useDescriptionTemplates()
   const [title, setTitle] = useState(interview.title)
   const [description, setDescription] = useState(interview.description ?? '')
+  const [objective, setObjective] = useState(interview.objective ?? '')
   const [questions, setQuestions] = useState<Row[]>(
     // 画像の3列を落とすと、保存のたびに設定が静かに消える（isPrerequisite で起きた事故と同じ）
     interview.questions.map((q) => ({
@@ -120,6 +123,7 @@ export default function EditInterviewModal({
   async function save() {
     if (!title.trim()) { setError('タイトルを入力してください'); return }
     if (!description.trim()) { setError('説明を入力してください'); return }
+    if (!objective.trim()) { setError('目的を入力してください'); return }
     const badScreener = findScreenerWithoutOptions(screeners)
     if (badScreener) { setError(`事前質問「${badScreener}」に選択肢を入力してください`); return }
     if (isImpression) {
@@ -148,6 +152,7 @@ export default function EditInterviewModal({
         body: JSON.stringify({
           title: title.trim(),
           description: description.trim(),
+          objective: objective.trim(),
           questions: questions
             .filter((q) => q.text.trim())
             .map((q) => ({
@@ -235,13 +240,29 @@ export default function EditInterviewModal({
           </div>
 
           <div>
+            <label htmlFor="edit-objective" className="block text-xs font-medium text-gray-700 mb-1.5">
+              目的（このテストで明らかにしたいこと） <span className="text-red-500">*</span>
+            </label>
+            <textarea
+              id="edit-objective"
+              value={objective}
+              onChange={(e) => setObjective(e.target.value)}
+              rows={2}
+              className="w-full border border-gray-300 focus:border-gray-900 rounded-md px-3 py-2 text-sm focus:outline-none resize-y"
+            />
+            <p className="text-[11px] text-gray-500 mt-1">
+              参加者には表示・読み上げされません。AIによる分析やレポート作成が、この目的に沿った観点で行われるようになります。
+            </p>
+          </div>
+
+          <div>
             <div className="flex items-center justify-between mb-1.5">
               <label htmlFor="edit-desc" className="text-xs font-medium text-gray-700">説明 <span className="text-red-500">*</span></label>
               <button
                 type="button"
                 onClick={() => {
                   if (description.trim() && !window.confirm('入力中の説明をテンプレートで置き換えます。よろしいですか？')) return
-                  setDescription(DESCRIPTION_TEMPLATES[interview.type as 'interview' | 'impression' | 'usability'] ?? DESCRIPTION_TEMPLATES.interview)
+                  setDescription(descriptionTemplates[interview.type as 'interview' | 'impression' | 'usability'] ?? descriptionTemplates.interview)
                 }}
                 className="text-xs text-gray-500 hover:text-gray-900 underline underline-offset-2"
               >

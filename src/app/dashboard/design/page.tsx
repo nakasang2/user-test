@@ -26,7 +26,7 @@ import FollowUpToggle from '@/components/FollowUpToggle'
 import { normalizeFollowUpDepth } from '@/lib/follow-up'
 import QuestionImageField from '@/components/QuestionImageField'
 import { toQuestionImagePayload, validateQuestionImage } from '@/lib/question-image'
-import { DESCRIPTION_TEMPLATES } from '@/lib/description-templates'
+import { useDescriptionTemplates } from '@/lib/use-description-templates'
 
 type Role = 'user' | 'assistant'
 type InterviewType = 'interview' | 'impression' | 'usability'
@@ -54,6 +54,7 @@ const Q_TYPES: { value: string; label: string }[] = [
 interface TaskItem  { text: string; order: number; hint?: string; isPrerequisite?: boolean }
 interface InterviewPlot {
   title: string
+  objective?: string
   description: string
   questions: Question[]
 }
@@ -70,6 +71,7 @@ const INITIAL_MESSAGE: Message = {
 }
 
 export default function DesignPage() {
+  const descriptionTemplates = useDescriptionTemplates()
   const [messages, setMessages] = useState<Message[]>([INITIAL_MESSAGE])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
@@ -172,6 +174,10 @@ export default function DesignPage() {
       alert('説明を入力してください')
       return
     }
+    if (!plot.objective?.trim()) {
+      alert('目的を入力してください')
+      return
+    }
     const badScreener = findScreenerWithoutOptions(screeners)
     if (badScreener) {
       alert(`事前質問「${badScreener}」に選択肢を入力してください`)
@@ -200,6 +206,7 @@ export default function DesignPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           title:            plot.title,
+          objective:        plot.objective,
           description:      plot.description,
           questions:        plot.questions.map((q) => ({
             text: q.text,
@@ -641,17 +648,33 @@ export default function DesignPage() {
                 />
               </div>
 
+              {/* 目的 */}
+              <div>
+                <label className="block text-xs text-gray-500 mb-1.5 font-medium uppercase tracking-wide">
+                  目的（このテストで明らかにしたいこと） <span className="text-red-500">*</span>
+                </label>
+                <textarea
+                  value={plot.objective ?? ''}
+                  onChange={(e) => setPlot({ ...plot, objective: e.target.value })}
+                  rows={2}
+                  className="w-full bg-white border border-gray-300 focus:border-gray-900 focus:ring-1 focus:ring-gray-900 focus:outline-none rounded-md px-3 py-2 text-sm text-gray-900 resize-none"
+                />
+                <p className="text-[11px] text-gray-500 mt-1">
+                  参加者には表示・読み上げされません。AIによる分析やレポート作成が、この目的に沿った観点で行われるようになります。
+                </p>
+              </div>
+
               {/* 説明 */}
               <div>
                 <div className="flex items-center justify-between mb-1.5">
                   <label className="text-xs text-gray-500 font-medium uppercase tracking-wide">
-                    インタビューの目的・背景 <span className="text-red-500">*</span>
+                    参加者への説明 <span className="text-red-500">*</span>
                   </label>
                   <button
                     type="button"
                     onClick={() => {
                       if (plot.description.trim() && !window.confirm('入力中の説明をテンプレートで置き換えます。よろしいですか？')) return
-                      setPlot({ ...plot, description: DESCRIPTION_TEMPLATES[sessionType] })
+                      setPlot({ ...plot, description: descriptionTemplates[sessionType] })
                     }}
                     className="text-xs text-gray-500 hover:text-gray-900 underline underline-offset-2"
                   >

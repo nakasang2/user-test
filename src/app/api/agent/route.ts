@@ -114,6 +114,7 @@ function emotionSummary(emotions: EmotionLike[]): string {
 function buildSessionContext(session: {
   interview: {
     title: string
+    objective: string | null
     type: string
     usabilityMode: string | null
     questions: { text: string; type: string }[]
@@ -153,7 +154,7 @@ function buildSessionContext(session: {
 
   return `
 Interview: ${session.interview.title}
-Type: ${session.interview.type}${session.interview.type === 'usability' ? ` (${session.interview.usabilityMode ?? ''})` : ''}
+${session.interview.objective ? `Research objective (what we want to find out): ${session.interview.objective}\n` : ''}Type: ${session.interview.type}${session.interview.type === 'usability' ? ` (${session.interview.usabilityMode ?? ''})` : ''}
 Participant: ${session.participant?.name ?? 'Anonymous'}
 Status: ${session.status}
 
@@ -189,6 +190,7 @@ const MAX_SESSION_DETAILS = 30
 
 function buildInterviewContext(interview: {
   title: string
+  objective: string | null
   type: string
   usabilityMode: string | null
   questions: { text: string; type: string }[]
@@ -265,7 +267,7 @@ Session ${i + 1} - ${s.participant?.name ?? 'Anonymous'}:
 
   return `
 Interview: ${interview.title}
-Type: ${interview.type}${interview.type === 'usability' ? ` (${interview.usabilityMode ?? ''})` : ''}
+${interview.objective ? `Research objective (what we want to find out): ${interview.objective}\n` : ''}Type: ${interview.type}${interview.type === 'usability' ? ` (${interview.usabilityMode ?? ''})` : ''}
 Total Sessions: ${interview.sessions.length}
 
 Questions:

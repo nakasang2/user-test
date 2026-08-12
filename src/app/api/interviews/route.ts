@@ -10,6 +10,9 @@ const createSchema = z.object({
   title:            z.string().min(1, 'タイトルを入力してください').max(200),
   // テスト開始時に参加者へ読み上げるため必須（テンプレートを挿入して編集する運用）
   description:      z.string().min(1, '説明を入力してください').max(1000),
+  // このテストで明らかにしたいこと。参加者には見せない研究者向けの項目。
+  // AI の分析・共通インサイト生成の基準にする
+  objective:        z.string().min(1, '目的を入力してください').max(1000),
   autoGenerate:     z.boolean().optional(),
   topic:            z.string().max(500).optional(),
   questions:        z.array(z.union([
@@ -84,7 +87,7 @@ export async function POST(req: NextRequest) {
     if (!parsed.success) {
       return NextResponse.json({ error: parsed.error.issues[0]?.message }, { status: 400 })
     }
-    const { title, description, questions, autoGenerate, topic, type, usabilityMode, stimulusUrl, stimulusDuration, tasks, seqEnabled, hintDelaySec, screeners } = parsed.data
+    const { title, description, objective, questions, autoGenerate, topic, type, usabilityMode, stimulusUrl, stimulusDuration, tasks, seqEnabled, hintDelaySec, screeners } = parsed.data
 
     type QuestionInput =
       | { text: string; type?: string; imageUrl?: string | null; imageMode?: string | null; imageDuration?: number | null; followUpEnabled?: boolean; followUpDepth?: number; naturalCapture?: boolean }
@@ -101,6 +104,7 @@ export async function POST(req: NextRequest) {
         organizationId: orgId,
         title,
         description,
+        objective,
         type,
         usabilityMode: usabilityMode ?? null,
         stimulusUrl: stimulusUrl || null,

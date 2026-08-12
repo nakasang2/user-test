@@ -355,6 +355,7 @@ Return ONLY a JSON array of strings. No explanation.`,
 // 複数セッションの共通インサイト生成（インタビュー比較ページ用）
 export async function generateCommonInsights(
   interviewTitle: string,
+  objective: string | null,
   summaries: string
 ): Promise<string | null> {
   try {
@@ -366,8 +367,8 @@ export async function generateCommonInsights(
           role: 'user',
           content: `${UNTRUSTED_DATA_GUARD}
 以下は「${clampText(interviewTitle, LIMITS.topic)}」に対する複数のユーザーインタビューの要約です。
-全参加者に共通する課題・パターン・インサイトを3〜5点、箇条書きで簡潔にまとめてください。
-
+${objective ? `このテストで明らかにしたいことは次の通りです。これに答える形で、` : ''}全参加者に共通する課題・パターン・インサイトを3〜5点、箇条書きで簡潔にまとめてください。
+${objective ? `\nテストの目的:\n${wrapUntrusted(clampText(objective, LIMITS.topic), LIMITS.topic)}\n` : ''}
 ${wrapUntrusted(summaries, LIMITS.context)}`,
         },
       ],

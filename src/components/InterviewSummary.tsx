@@ -25,6 +25,7 @@ import {
  */
 export default function InterviewSummary({
   sessions,
+  objective,
   commonInsights,
   onBackfill,
   backfilling,
@@ -32,6 +33,8 @@ export default function InterviewSummary({
 }: {
   /** パイロットを除いた本番セッション（セグメント絞り込み後） */
   sessions: SessionLike[]
+  /** このテストで明らかにしたいこと。AI 総括と並べて表示し、照らし合わせやすくする */
+  objective: string | null
   commonInsights: string | null
   onBackfill: () => void
   backfilling: boolean
@@ -83,6 +86,11 @@ export default function InterviewSummary({
     return (
       <div className="bg-gray-50 border border-gray-200 rounded-xl p-6">
         <h2 className="text-sm font-semibold text-gray-900 mb-1">結果サマリー</h2>
+        {objective && (
+          <p className="text-xs text-gray-500 mb-2">
+            <span className="font-medium text-gray-600">目的：</span>{objective}
+          </p>
+        )}
         <p className="text-sm text-gray-600 leading-relaxed">
           {sessions.length === 0
             ? segmented
@@ -112,7 +120,7 @@ export default function InterviewSummary({
 
   return (
     <div className="bg-white border border-gray-200 rounded-xl p-6">
-      <h2 className="text-sm font-semibold text-gray-900 mb-4">
+      <h2 className={`text-sm font-semibold text-gray-900 ${objective ? 'mb-1' : 'mb-4'}`}>
         結果サマリー
         {segmented && (
           <span className="ml-2 text-[11px] font-normal text-gray-500">
@@ -120,6 +128,11 @@ export default function InterviewSummary({
           </span>
         )}
       </h2>
+      {objective && (
+        <p className="text-xs text-gray-500 mb-4">
+          <span className="font-medium text-gray-600">目的：</span>{objective}
+        </p>
+      )}
 
       {/* 見出し指標 */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-5">

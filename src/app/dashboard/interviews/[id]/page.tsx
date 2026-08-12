@@ -50,6 +50,7 @@ interface CompareData {
     id: string
     title: string
     description: string | null
+    objective: string | null
     type: string
     questions: { id: string; text: string; order: number; type: string; imageUrl?: string | null; imageMode?: string | null; imageDuration?: number | null; followUpEnabled?: boolean; followUpDepth?: number; naturalCapture?: boolean }[]
     tasks: { id: string; text: string; order: number; hint?: string | null; isPrerequisite?: boolean | null }[]
@@ -504,6 +505,7 @@ export default function InterviewComparePage(props: { params: Promise<{ id: stri
         {/* 調査全体の結論。参加者一覧より先に「この調査がどうだったか」を出す */}
         <InterviewSummary
           sessions={segmentedSessions}
+          objective={interview.objective}
           commonInsights={commonInsights}
           onBackfill={backfillAnswers}
           backfilling={backfilling}

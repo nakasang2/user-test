@@ -16,6 +16,7 @@ import {
   Mail,
   Check,
   Trash2,
+  FileText,
 } from 'lucide-react'
 
 interface Question {
@@ -230,6 +231,13 @@ export default function Dashboard() {
             <Plus className="w-3.5 h-3.5" strokeWidth={2} />
             新規作成
           </button>
+          <Link
+            href="/dashboard/settings/templates"
+            className="inline-flex items-center gap-1.5 border border-gray-300 hover:border-gray-400 px-3 py-1.5 rounded-md text-xs text-gray-600 hover:text-gray-900 transition-colors"
+          >
+            <FileText className="w-3.5 h-3.5" strokeWidth={2} />
+            テンプレート
+          </Link>
           <Link
             href="/dashboard/settings/members"
             className="inline-flex items-center gap-1.5 border border-gray-300 hover:border-gray-400 px-3 py-1.5 rounded-md text-xs text-gray-600 hover:text-gray-900 transition-colors"

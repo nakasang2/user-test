@@ -16,6 +16,7 @@ export async function GET(req: NextRequest, props: { params: Promise<{ id: strin
       id: true,
       title: true,
       description: true,
+      objective: true,
       commonInsights: true,
       insightsCount: true,
       type: true,
@@ -64,6 +65,7 @@ export async function GET(req: NextRequest, props: { params: Promise<{ id: strin
     id: interview.id,
     title: interview.title,
     description: interview.description,
+    objective: interview.objective,
     type: interview.type,
     seqEnabled: interview.seqEnabled,
     hintDelaySec: interview.hintDelaySec,
@@ -120,7 +122,7 @@ export async function GET(req: NextRequest, props: { params: Promise<{ id: strin
       .map((s, i) => `参加者${i + 1}（${s.participantName}）: ${s.summary}`)
       .join('\n')
 
-    commonInsights = await generateCommonInsights(interview.title, allSummaries)
+    commonInsights = await generateCommonInsights(interview.title, interview.objective, allSummaries)
     // 生成成功時のみキャッシュを更新
     if (commonInsights !== null) {
       await prisma.interview.update({
