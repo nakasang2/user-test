@@ -57,11 +57,12 @@ export async function POST(req: NextRequest, props: { params: Promise<{ id: stri
             select: { questionId: true, order: true, text: true, type: true, valueNum: true, valueText: true, followUpCount: true, sentiment: true, excludedAt: true },
           },
           emotions: { select: { happy: true, neutral: true, sad: true, surprised: true } },
+          transcript: { select: { summary: true } },
         },
       }),
       prisma.highlight.findMany({
         where: { session: { interviewId: id, isPilot: false } },
-        select: { quote: true, note: true },
+        select: { quote: true, note: true, session: { select: { participant: { select: { name: true } } } } },
         orderBy: { createdAt: 'desc' },
       }),
     ])
@@ -77,15 +78,26 @@ export async function POST(req: NextRequest, props: { params: Promise<{ id: stri
     }))
 
     const stats = computeSlideStats(slideSessions)
+    const highlightRows = highlights.map((h) => ({ quote: h.quote, note: h.note }))
 
     // 発言の要約だけでなく、成功率・スコア・感情などの実数値を踏まえた「事実・仮説・
     // 次のアクション」構成の総括をスライド用に生成する（画面の共通インサイトは発言の
     // 要約だけを見て書くため、ユーザビリティテストのように会話が薄い調査だと
-    // 実測値と無関係な文章になってしまう問題があった）
-    const qualitativeText = highlights
-      .map((h) => (h.note ? `${h.quote}（${h.note}）` : h.quote))
+    // 実測値と無関係な文章になってしまう問題があった）。
+    // 仮説には根拠にした参加者を明記させるため、参加者名付きで要約・ハイライトを渡す
+    const participantSummaries = sessions
+      .filter((s) => s.transcript?.summary)
+      .map((s, i) => `参加者${i + 1}（${s.participant?.name ?? 'Anonymous'}）: ${s.transcript!.summary}`)
       .join('\n')
-    const summaryText = stats.participantCount > 0
+    const highlightLines = highlights
+      .map((h) => {
+        const who = h.session.participant?.name ?? 'Anonymous'
+        return `- 参加者「${who}」: ${h.note ? `${h.quote}（${h.note}）` : h.quote}`
+      })
+      .join('\n')
+    const qualitativeText = [participantSummaries, highlightLines].filter(Boolean).join('\n\n')
+
+    const summary = stats.participantCount > 0
       ? await generateSlideSummary({
           title: interview.title,
           objective: interview.objective,
@@ -94,7 +106,7 @@ export async function POST(req: NextRequest, props: { params: Promise<{ id: stri
         })
       : null
 
-    const sections = buildSlideSections(interview.title, stats, summaryText, highlights)
+    const sections = buildSlideSections(interview.title, stats, summary, highlightRows)
 
     try {
       const { url } = await createSlideDeck(client, interview.title, sections)

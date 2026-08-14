@@ -28,7 +28,7 @@ function toRenderable(section: SlideSection): Renderable {
         paragraph: `実施期間: ${section.period}\n参加者数: ${section.participantCount}人`,
       }
     case 'summary':
-      return { title: 'サマリー（AIによる総括）', paragraph: section.text }
+      return { title: section.heading, bullets: section.items }
     case 'task-success':
       return {
         title: 'タスク成功率',

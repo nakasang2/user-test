@@ -379,47 +379,69 @@ ${wrapUntrusted(summaries, LIMITS.context)}`,
   }
 }
 
+export interface SlideSummaryResult {
+  facts: string[]
+  hypotheses: string[]
+  actions: string[]
+}
+
 /**
- * スライド資料の「サマリー」用に、定量データ（成功率・スコア・感情など）と
- * 定性データ（ハイライト）の両方を踏まえた総括を生成する。
+ * スライド資料の「事実・仮説・次のアクション」用に、定量データ（成功率・スコア・
+ * 感情など）と定性データ（参加者ごとの要約・ハイライト）の両方を踏まえて生成する。
  *
  * generateCommonInsights は発言の要約テキストだけを見て書くため、ユーザビリティ
  * テストのように会話が薄い調査では「データが少ない」というメタな感想しか書けず、
  * スライド上の数字（成功率・ヒント使用率など）と無関係な文章になっていた。
- * ここでは数字そのものを渡し、事実・仮説・次のアクションの3点に構造化させる。
+ * ここでは数字そのものを渡し、3つの配列に構造化させる。
+ * 仮説はどの参加者の発言が根拠かを本文中に明記させる（裏取りできるようにするため）。
  */
 export async function generateSlideSummary(input: {
   title: string
   objective: string | null
   statsText: string
   qualitativeText: string
-}): Promise<string | null> {
+}): Promise<SlideSummaryResult | null> {
   try {
     const response = await getOpenAI().chat.completions.create({
       model: 'gpt-4o',
-      max_tokens: 1024,
+      max_tokens: 1536,
+      response_format: { type: 'json_object' },
       messages: [
         {
           role: 'user',
           content: `${UNTRUSTED_DATA_GUARD}
 以下は「${clampText(input.title, LIMITS.topic)}」というテストの結果です。
 ${input.objective ? `このテストで明らかにしたいことは次の通りです。これを踏まえて総括してください:\n${wrapUntrusted(clampText(input.objective, LIMITS.topic), LIMITS.topic)}\n` : ''}
-社内向け資料に使う総括を、次の3つの見出しに分けて簡潔な箇条書き（見出しごとに1〜3点）で作成してください。
-■事実（数字や傾向から読み取れること）
-■仮説（なぜそうなったと考えられるか）
-■次のアクション（改善の示唆や次に検証すべきこと）
+社内向け資料に使う総括を、次のJSON形式で作成してください（キーはこの3つのみ、各値は文字列の配列。各配列1〜3件、簡潔な日本語の箇条書き）。
+{
+  "facts": ["数字や傾向から読み取れる事実"],
+  "hypotheses": ["なぜそうなったと考えられるかの仮説"],
+  "actions": ["改善の示唆・次に検証すべきこと"]
+}
 
+hypotheses（仮説）は、根拠にした参加者名を文末に「（参加者: 〇〇）」の形で必ず明記してください。
+複数人の発言が根拠なら「（参加者: 〇〇、△△）」のように列挙してください。
+発言の裏付けが無く定量データのみから導いた仮説には参加者名を付けないでください。
 データが少なく確度の低い推測になる場合は断定せず「〜の可能性がある」にとどめてください。参加者数が少ない場合はそれを踏まえた慎重な書き方にしてください。
+根拠が乏しく作れない配列は空配列にしてください（無理に埋めない）。
 
 定量データ:
 ${wrapUntrusted(input.statsText, LIMITS.context)}
 
-参加者の発言・ハイライト:
+参加者ごとの要約・発言:
 ${wrapUntrusted(input.qualitativeText || 'なし', LIMITS.context)}`,
         },
       ],
     })
-    return response.choices[0].message.content ?? null
+    const text = response.choices[0].message.content ?? '{}'
+    const parsed = JSON.parse(text)
+    const toArray = (v: unknown): string[] =>
+      Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []
+    return {
+      facts: toArray(parsed.facts),
+      hypotheses: toArray(parsed.hypotheses),
+      actions: toArray(parsed.actions),
+    }
   } catch {
     return null
   }

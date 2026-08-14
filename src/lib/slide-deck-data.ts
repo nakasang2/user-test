@@ -2,6 +2,7 @@ import {
   aggregateTasks, aggregateScores, overallSuccess, hardestTask,
   calcNps, type SessionLike,
 } from './interview-aggregate'
+import type { SlideSummaryResult } from './ai'
 
 /**
  * スライド資料の構成を決める純粋関数群（Google API は一切呼ばない）。
@@ -26,7 +27,7 @@ export interface SlideSession extends SessionLike {
 
 export type SlideSection =
   | { kind: 'cover'; title: string; period: string; participantCount: number }
-  | { kind: 'summary'; text: string }
+  | { kind: 'summary'; heading: string; items: string[] }
   | {
       kind: 'task-success'
       rate: number
@@ -157,7 +158,7 @@ export function renderStatsText(stats: SlideStats): string {
 export function buildSlideSections(
   title: string,
   stats: SlideStats,
-  summaryText: string | null,
+  summary: SlideSummaryResult | null,
   highlights: { quote: string; note: string | null }[]
 ): SlideSection[] {
   const sections: SlideSection[] = []
@@ -165,8 +166,15 @@ export function buildSlideSections(
   // 表紙は常に出す（実施実績が0件でも、調査自体の存在は示す）
   sections.push({ kind: 'cover', title, period: stats.period, participantCount: stats.participantCount })
 
-  if (summaryText) {
-    sections.push({ kind: 'summary', text: summaryText })
+  // 事実・仮説・次のアクションは1ページずつ。データが乏しく空配列の項目は省く
+  if (summary?.facts.length) {
+    sections.push({ kind: 'summary', heading: '事実', items: summary.facts })
+  }
+  if (summary?.hypotheses.length) {
+    sections.push({ kind: 'summary', heading: '仮説', items: summary.hypotheses })
+  }
+  if (summary?.actions.length) {
+    sections.push({ kind: 'summary', heading: '次のアクション', items: summary.actions })
   }
 
   if (stats.taskSuccess) {
