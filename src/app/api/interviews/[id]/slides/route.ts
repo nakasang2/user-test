@@ -3,7 +3,8 @@ import { prisma } from '@/lib/db'
 import { requireRole, handleApiError } from '@/lib/api-auth'
 import { getAuthorizedClientForUser } from '@/lib/google-auth'
 import { createSlideDeck } from '@/lib/google-slides'
-import { buildSlideSections, type SlideSession } from '@/lib/slide-deck-data'
+import { computeSlideStats, renderStatsText, buildSlideSections, type SlideSession } from '@/lib/slide-deck-data'
+import { generateSlideSummary } from '@/lib/ai'
 
 /** Google側でトークンが失効/取り消されたときのエラー形状（gaxios）を判定する */
 function isInvalidGrantError(err: unknown): boolean {
@@ -28,7 +29,7 @@ export async function POST(req: NextRequest, props: { params: Promise<{ id: stri
     const [interview, client] = await Promise.all([
       prisma.interview.findFirst({
         where: { id, organizationId: orgId },
-        select: { id: true, title: true, commonInsights: true },
+        select: { id: true, title: true, objective: true },
       }),
       getAuthorizedClientForUser(userId, origin),
     ])
@@ -38,7 +39,7 @@ export async function POST(req: NextRequest, props: { params: Promise<{ id: stri
     }
 
     // 画面の「結果サマリー」と同じ母集団（パイロットを除く全セッション。分析未完了でも実測値は含む）。
-    // ※感情の傾向だけは画面のレーダーチャートに合わせ buildSlideSections 内で done のみに絞る
+    // ※感情の傾向だけは画面のレーダーチャートに合わせ computeSlideStats 内で done のみに絞る
     const [sessions, highlights] = await Promise.all([
       prisma.session.findMany({
         where: { interviewId: id, isPilot: false },
@@ -75,12 +76,25 @@ export async function POST(req: NextRequest, props: { params: Promise<{ id: stri
       emotions: s.emotions,
     }))
 
-    const sections = buildSlideSections({
-      title: interview.title,
-      sessions: slideSessions,
-      commonInsights: interview.commonInsights,
-      highlights,
-    })
+    const stats = computeSlideStats(slideSessions)
+
+    // 発言の要約だけでなく、成功率・スコア・感情などの実数値を踏まえた「事実・仮説・
+    // 次のアクション」構成の総括をスライド用に生成する（画面の共通インサイトは発言の
+    // 要約だけを見て書くため、ユーザビリティテストのように会話が薄い調査だと
+    // 実測値と無関係な文章になってしまう問題があった）
+    const qualitativeText = highlights
+      .map((h) => (h.note ? `${h.quote}（${h.note}）` : h.quote))
+      .join('\n')
+    const summaryText = stats.participantCount > 0
+      ? await generateSlideSummary({
+          title: interview.title,
+          objective: interview.objective,
+          statsText: renderStatsText(stats),
+          qualitativeText,
+        })
+      : null
+
+    const sections = buildSlideSections(interview.title, stats, summaryText, highlights)
 
     try {
       const { url } = await createSlideDeck(client, interview.title, sections)

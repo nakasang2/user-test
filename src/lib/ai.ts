@@ -378,3 +378,49 @@ ${wrapUntrusted(summaries, LIMITS.context)}`,
     return null
   }
 }
+
+/**
+ * スライド資料の「サマリー」用に、定量データ（成功率・スコア・感情など）と
+ * 定性データ（ハイライト）の両方を踏まえた総括を生成する。
+ *
+ * generateCommonInsights は発言の要約テキストだけを見て書くため、ユーザビリティ
+ * テストのように会話が薄い調査では「データが少ない」というメタな感想しか書けず、
+ * スライド上の数字（成功率・ヒント使用率など）と無関係な文章になっていた。
+ * ここでは数字そのものを渡し、事実・仮説・次のアクションの3点に構造化させる。
+ */
+export async function generateSlideSummary(input: {
+  title: string
+  objective: string | null
+  statsText: string
+  qualitativeText: string
+}): Promise<string | null> {
+  try {
+    const response = await getOpenAI().chat.completions.create({
+      model: 'gpt-4o',
+      max_tokens: 1024,
+      messages: [
+        {
+          role: 'user',
+          content: `${UNTRUSTED_DATA_GUARD}
+以下は「${clampText(input.title, LIMITS.topic)}」というテストの結果です。
+${input.objective ? `このテストで明らかにしたいことは次の通りです。これを踏まえて総括してください:\n${wrapUntrusted(clampText(input.objective, LIMITS.topic), LIMITS.topic)}\n` : ''}
+社内向け資料に使う総括を、次の3つの見出しに分けて簡潔な箇条書き（見出しごとに1〜3点）で作成してください。
+■事実（数字や傾向から読み取れること）
+■仮説（なぜそうなったと考えられるか）
+■次のアクション（改善の示唆や次に検証すべきこと）
+
+データが少なく確度の低い推測になる場合は断定せず「〜の可能性がある」にとどめてください。参加者数が少ない場合はそれを踏まえた慎重な書き方にしてください。
+
+定量データ:
+${wrapUntrusted(input.statsText, LIMITS.context)}
+
+参加者の発言・ハイライト:
+${wrapUntrusted(input.qualitativeText || 'なし', LIMITS.context)}`,
+        },
+      ],
+    })
+    return response.choices[0].message.content ?? null
+  } catch {
+    return null
+  }
+}

@@ -24,21 +24,6 @@ export interface SlideSession extends SessionLike {
   emotions?: SlideEmotion[]
 }
 
-export interface SlideDeckInput {
-  title: string
-  /**
-   * 非パイロットの全セッションを渡す（ステータス問わず）。タスク成功率・満足度スコアは
-   * 画面の「結果サマリー」と同じ母集団（実測値は分析未完了でも含む）。
-   * ただし感情の傾向だけは画面のレーダーチャートに合わせて buildSlideSections 内で
-   * status === 'done' のセッションに絞り込む（分析系はdoneのみで算出する既存の慣習に揃える）
-   */
-  sessions: SlideSession[]
-  /** 既に生成済みの共通インサイト。null なら該当セクションを出さない */
-  commonInsights: string | null
-  /** リサーチャーが付けたハイライト（新しい順） */
-  highlights: { quote: string; note: string | null }[]
-}
-
 export type SlideSection =
   | { kind: 'cover'; title: string; period: string; participantCount: number }
   | { kind: 'summary'; text: string }
@@ -58,11 +43,27 @@ export type SlideSection =
 const MAX_HIGHLIGHTS = 8
 const MAX_SCORE_ROWS = 12
 
-export function buildSlideSections(input: SlideDeckInput): SlideSection[] {
-  const sections: SlideSection[] = []
-  const sessions = input.sessions
+/**
+ * セッションから集計した「素材」。AIへのサマリー生成プロンプトと、実際のスライドの
+ * 両方がこれを見る（同じ数字を2回計算しない／画面と食い違わないようにするため）。
+ */
+export interface SlideStats {
+  participantCount: number
+  period: string
+  taskSuccess: { rate: number; unaidedRate: number; completed: number; total: number; hardest: { text: string; rate: number } | null } | null
+  taskRows: { text: string; rate: string; avgDuration: string; hintRate: string }[]
+  scoreRows: { label: string; value: string }[]
+  emotionRows: { label: string; value: string }[]
+}
 
-  // 表紙は常に出す（実施実績が0件でも、調査自体の存在は示す）
+/**
+ * 非パイロットの全セッションを渡す（ステータス問わず）。タスク成功率・満足度スコアは
+ * 画面の「結果サマリー」と同じ母集団（実測値は分析未完了でも含む）。
+ * ただし感情の傾向だけは画面のレーダーチャートに合わせ、ここで status === 'done' の
+ * セッションに絞り込む（分析系はdoneのみで算出する既存の慣習に揃える。
+ * 揃えないと同じ調査で画面とスライドの数字が食い違う）。
+ */
+export function computeSlideStats(sessions: SlideSession[]): SlideStats {
   const period = sessions.length > 0
     ? (() => {
         const { min, max } = sessions.reduce(
@@ -75,76 +76,116 @@ export function buildSlideSections(input: SlideDeckInput): SlideSection[] {
         return `${formatDate(new Date(min))} 〜 ${formatDate(new Date(max))}`
       })()
     : '実施実績なし'
-  sections.push({ kind: 'cover', title: input.title, period, participantCount: sessions.length })
-
-  if (input.commonInsights) {
-    sections.push({ kind: 'summary', text: input.commonInsights })
-  }
 
   const taskAgg = aggregateTasks(sessions)
   const overall = overallSuccess(taskAgg)
-  if (overall) {
-    const worst = hardestTask(taskAgg)
-    sections.push({
-      kind: 'task-success',
-      rate: overall.rate,
-      unaidedRate: overall.unaidedRate,
-      completed: overall.completed,
-      total: overall.total,
-      hardest: worst ? { text: worst.text, rate: worst.rate } : null,
-    })
-    sections.push({
-      kind: 'task-detail',
-      rows: taskAgg
+  const worst = overall ? hardestTask(taskAgg) : null
+  const taskSuccess = overall
+    ? {
+        rate: overall.rate,
+        unaidedRate: overall.unaidedRate,
+        completed: overall.completed,
+        total: overall.total,
+        hardest: worst ? { text: worst.text, rate: worst.rate } : null,
+      }
+    : null
+  const taskRows = overall
+    ? taskAgg
         .filter((t) => t.total > 0)
         .map((t) => ({
           text: t.text,
           rate: `${Math.round((t.completed / t.total) * 100)}%（${t.completed}/${t.total}）`,
           avgDuration: t.durations.length > 0 ? formatDuration(avg(t.durations)) : '—',
           hintRate: `${Math.round((t.hintUsed / t.total) * 100)}%`,
-        })),
-    })
-  }
+        }))
+    : []
 
   const scoreAgg = aggregateScores(sessions)
-  if (scoreAgg.length > 0) {
-    const rows = scoreAgg.slice(0, MAX_SCORE_ROWS).map((s) => {
-      const mean = avg(s.values)
-      const value = s.type === 'nps'
-        ? `NPS ${calcNps(s.values)}（平均 ${mean.toFixed(1)} / 10・n=${s.values.length}）`
-        : `平均 ${mean.toFixed(1)} / 5（n=${s.values.length}）`
-      return { label: s.text, value }
-    })
-    if (scoreAgg.length > MAX_SCORE_ROWS) {
-      rows.push({ label: `ほか ${scoreAgg.length - MAX_SCORE_ROWS}件`, value: '' })
-    }
-    sections.push({ kind: 'score', rows })
+  const scoreRows = scoreAgg.slice(0, MAX_SCORE_ROWS).map((s) => {
+    const mean = avg(s.values)
+    const value = s.type === 'nps'
+      ? `NPS ${calcNps(s.values)}（平均 ${mean.toFixed(1)} / 10・n=${s.values.length}）`
+      : `平均 ${mean.toFixed(1)} / 5（n=${s.values.length}）`
+    return { label: s.text, value }
+  })
+  if (scoreAgg.length > MAX_SCORE_ROWS) {
+    scoreRows.push({ label: `ほか ${scoreAgg.length - MAX_SCORE_ROWS}件`, value: '' })
   }
 
-  // 感情の傾向は画面のレーダーチャートと同じ母集団（分析済み=done のみ）に揃える。
-  // タスク成功率・満足度スコアと違い、感情は「分析系」として done のみで算出する慣習に合わせる
-  // （合わせないと同じ調査で画面とスライドの数字が食い違う）
   const emotionSessions = sessions.filter((s) => s.status === 'done' && s.emotions && s.emotions.length > 0)
-  if (emotionSessions.length > 0) {
-    const emotionAvg = (key: keyof SlideEmotion) =>
-      avg(emotionSessions.map((s) => avg(s.emotions!.map((e) => e[key]))))
-    sections.push({
-      kind: 'emotion',
-      rows: [
-        { label: '喜び', value: `${Math.round(emotionAvg('happy') * 100)}%` },
-        { label: '中立', value: `${Math.round(emotionAvg('neutral') * 100)}%` },
-        { label: '悲しみ', value: `${Math.round(emotionAvg('sad') * 100)}%` },
-        { label: '驚き', value: `${Math.round(emotionAvg('surprised') * 100)}%` },
-      ],
+  const emotionRows = emotionSessions.length > 0
+    ? (() => {
+        const emotionAvg = (key: keyof SlideEmotion) =>
+          avg(emotionSessions.map((s) => avg(s.emotions!.map((e) => e[key]))))
+        return [
+          { label: '喜び', value: `${Math.round(emotionAvg('happy') * 100)}%` },
+          { label: '中立', value: `${Math.round(emotionAvg('neutral') * 100)}%` },
+          { label: '悲しみ', value: `${Math.round(emotionAvg('sad') * 100)}%` },
+          { label: '驚き', value: `${Math.round(emotionAvg('surprised') * 100)}%` },
+        ]
+      })()
+    : []
+
+  return { participantCount: sessions.length, period, taskSuccess, taskRows, scoreRows, emotionRows }
+}
+
+/** AIにサマリーを書かせるための、定量データの読み上げテキスト表現 */
+export function renderStatsText(stats: SlideStats): string {
+  const lines: string[] = [`参加者数: ${stats.participantCount}人（実施期間: ${stats.period}）`]
+  if (stats.taskSuccess) {
+    lines.push(
+      `タスク成功率: 全体 ${stats.taskSuccess.rate}%（${stats.taskSuccess.completed}/${stats.taskSuccess.total}回）・自力 ${stats.taskSuccess.unaidedRate}%`
+    )
+    if (stats.taskSuccess.hardest) {
+      lines.push(`最も苦戦したタスク: ${stats.taskSuccess.hardest.text}（成功率 ${stats.taskSuccess.hardest.rate}%）`)
+    }
+    stats.taskRows.forEach((r) => {
+      lines.push(`- タスク「${r.text}」: 成功率 ${r.rate}・平均所要時間 ${r.avgDuration}・ヒント使用率 ${r.hintRate}`)
     })
   }
+  stats.scoreRows.forEach((r) => lines.push(`スコア「${r.label}」: ${r.value}`))
+  if (stats.emotionRows.length > 0) {
+    lines.push(`感情の傾向: ${stats.emotionRows.map((r) => `${r.label} ${r.value}`).join('・')}`)
+  }
+  return lines.join('\n')
+}
 
-  if (input.highlights.length > 0) {
+/**
+ * 集計済みの SlideStats と、既に生成済みのサマリー本文・ハイライトから、
+ * 表示できるセクションだけを積み上げる（データが無いセクションは省く）。
+ */
+export function buildSlideSections(
+  title: string,
+  stats: SlideStats,
+  summaryText: string | null,
+  highlights: { quote: string; note: string | null }[]
+): SlideSection[] {
+  const sections: SlideSection[] = []
+
+  // 表紙は常に出す（実施実績が0件でも、調査自体の存在は示す）
+  sections.push({ kind: 'cover', title, period: stats.period, participantCount: stats.participantCount })
+
+  if (summaryText) {
+    sections.push({ kind: 'summary', text: summaryText })
+  }
+
+  if (stats.taskSuccess) {
+    sections.push({ kind: 'task-success', ...stats.taskSuccess })
+    sections.push({ kind: 'task-detail', rows: stats.taskRows })
+  }
+
+  if (stats.scoreRows.length > 0) {
+    sections.push({ kind: 'score', rows: stats.scoreRows })
+  }
+
+  if (stats.emotionRows.length > 0) {
+    sections.push({ kind: 'emotion', rows: stats.emotionRows })
+  }
+
+  if (highlights.length > 0) {
     sections.push({
       kind: 'highlights',
-      quotes: input.highlights
-        .slice(0, MAX_HIGHLIGHTS)
-        .map((h) => (h.note ? `${h.quote}（${h.note}）` : h.quote)),
+      quotes: highlights.slice(0, MAX_HIGHLIGHTS).map((h) => (h.note ? `${h.quote}（${h.note}）` : h.quote)),
     })
   }
 
