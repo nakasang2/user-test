@@ -27,7 +27,9 @@ export interface SlideSession extends SessionLike {
 
 export type SlideSection =
   | { kind: 'cover'; title: string; period: string; participantCount: number }
-  | { kind: 'summary'; heading: string; items: string[] }
+  | { kind: 'intro'; objective: string | null; description: string | null }
+  | { kind: 'stimulus'; imageUrl: string | null; linkUrl: string | null; caption: string }
+  | { kind: 'summary'; heading: string; items: string[]; participantLinks?: Record<string, string> }
   | {
       kind: 'task-success'
       rate: number
@@ -37,8 +39,8 @@ export type SlideSection =
       hardest: { text: string; rate: number } | null
     }
   | { kind: 'task-detail'; rows: { text: string; rate: string; avgDuration: string; hintRate: string }[] }
-  | { kind: 'score'; rows: { label: string; value: string }[] }
-  | { kind: 'emotion'; rows: { label: string; value: string }[] }
+  | { kind: 'score'; rows: { label: string; value: string; percent: number }[] }
+  | { kind: 'emotion'; rows: { label: string; value: string; percent: number }[] }
   | { kind: 'highlights'; quotes: string[] }
 
 const MAX_HIGHLIGHTS = 8
@@ -53,8 +55,8 @@ export interface SlideStats {
   period: string
   taskSuccess: { rate: number; unaidedRate: number; completed: number; total: number; hardest: { text: string; rate: number } | null } | null
   taskRows: { text: string; rate: string; avgDuration: string; hintRate: string }[]
-  scoreRows: { label: string; value: string }[]
-  emotionRows: { label: string; value: string }[]
+  scoreRows: { label: string; value: string; percent: number }[]
+  emotionRows: { label: string; value: string; percent: number }[]
 }
 
 /**
@@ -104,13 +106,17 @@ export function computeSlideStats(sessions: SlideSession[]): SlideStats {
   const scoreAgg = aggregateScores(sessions)
   const scoreRows = scoreAgg.slice(0, MAX_SCORE_ROWS).map((s) => {
     const mean = avg(s.values)
+    // 棒グラフ用に「尺度に対する割合」に正規化する（NPSは0-10、5段階評価は1-5）
+    const percent = s.type === 'nps'
+      ? clampPercent((mean / 10) * 100)
+      : clampPercent(((mean - 1) / 4) * 100)
     const value = s.type === 'nps'
       ? `NPS ${calcNps(s.values)}（平均 ${mean.toFixed(1)} / 10・n=${s.values.length}）`
       : `平均 ${mean.toFixed(1)} / 5（n=${s.values.length}）`
-    return { label: s.text, value }
+    return { label: s.text, value, percent }
   })
   if (scoreAgg.length > MAX_SCORE_ROWS) {
-    scoreRows.push({ label: `ほか ${scoreAgg.length - MAX_SCORE_ROWS}件`, value: '' })
+    scoreRows.push({ label: `ほか ${scoreAgg.length - MAX_SCORE_ROWS}件`, value: '', percent: 0 })
   }
 
   const emotionSessions = sessions.filter((s) => s.status === 'done' && s.emotions && s.emotions.length > 0)
@@ -118,11 +124,15 @@ export function computeSlideStats(sessions: SlideSession[]): SlideStats {
     ? (() => {
         const emotionAvg = (key: keyof SlideEmotion) =>
           avg(emotionSessions.map((s) => avg(s.emotions!.map((e) => e[key]))))
+        const toRow = (label: string, key: keyof SlideEmotion) => {
+          const percent = clampPercent(emotionAvg(key) * 100)
+          return { label, value: `${Math.round(percent)}%`, percent }
+        }
         return [
-          { label: '喜び', value: `${Math.round(emotionAvg('happy') * 100)}%` },
-          { label: '中立', value: `${Math.round(emotionAvg('neutral') * 100)}%` },
-          { label: '悲しみ', value: `${Math.round(emotionAvg('sad') * 100)}%` },
-          { label: '驚き', value: `${Math.round(emotionAvg('surprised') * 100)}%` },
+          toRow('喜び', 'happy'),
+          toRow('中立', 'neutral'),
+          toRow('悲しみ', 'sad'),
+          toRow('驚き', 'surprised'),
         ]
       })()
     : []
@@ -151,27 +161,45 @@ export function renderStatsText(stats: SlideStats): string {
   return lines.join('\n')
 }
 
+export interface BuildSlideSectionsInput {
+  title: string
+  stats: SlideStats
+  /** 目的・説明。両方 null なら「目的・概要」スライド自体を出さない */
+  intro: { objective: string | null; description: string | null } | null
+  /** 印象テストの提示画像／ユーザビリティテストの対象サイト・プロトタイプ */
+  stimulus: { imageUrl: string | null; linkUrl: string | null; caption: string } | null
+  summary: SlideSummaryResult | null
+  /** 仮説の本文中の参加者名にリンクするための、参加者名→セッション詳細URLの対応 */
+  participantLinks: Record<string, string>
+  highlights: { quote: string; note: string | null }[]
+}
+
 /**
  * 集計済みの SlideStats と、既に生成済みのサマリー本文・ハイライトから、
  * 表示できるセクションだけを積み上げる（データが無いセクションは省く）。
  */
-export function buildSlideSections(
-  title: string,
-  stats: SlideStats,
-  summary: SlideSummaryResult | null,
-  highlights: { quote: string; note: string | null }[]
-): SlideSection[] {
+export function buildSlideSections(input: BuildSlideSectionsInput): SlideSection[] {
+  const { title, stats, intro, stimulus, summary, participantLinks, highlights } = input
   const sections: SlideSection[] = []
 
   // 表紙は常に出す（実施実績が0件でも、調査自体の存在は示す）
   sections.push({ kind: 'cover', title, period: stats.period, participantCount: stats.participantCount })
+
+  // 目的・概要はテスト対象の可視化より先、冒頭に出す
+  if (intro && (intro.objective || intro.description)) {
+    sections.push({ kind: 'intro', objective: intro.objective, description: intro.description })
+  }
+
+  if (stimulus && (stimulus.imageUrl || stimulus.linkUrl)) {
+    sections.push({ kind: 'stimulus', ...stimulus })
+  }
 
   // 事実・仮説・次のアクションは1ページずつ。データが乏しく空配列の項目は省く
   if (summary?.facts.length) {
     sections.push({ kind: 'summary', heading: '事実', items: summary.facts })
   }
   if (summary?.hypotheses.length) {
-    sections.push({ kind: 'summary', heading: '仮説', items: summary.hypotheses })
+    sections.push({ kind: 'summary', heading: '仮説', items: summary.hypotheses, participantLinks })
   }
   if (summary?.actions.length) {
     sections.push({ kind: 'summary', heading: '次のアクション', items: summary.actions })
@@ -203,6 +231,10 @@ export function buildSlideSections(
 function avg(nums: number[]): number {
   if (nums.length === 0) return 0
   return nums.reduce((a, b) => a + b, 0) / nums.length
+}
+
+function clampPercent(n: number): number {
+  return Math.max(0, Math.min(100, n))
 }
 
 function formatDate(d: Date): string {

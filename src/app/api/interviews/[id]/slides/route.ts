@@ -29,7 +29,10 @@ export async function POST(req: NextRequest, props: { params: Promise<{ id: stri
     const [interview, client] = await Promise.all([
       prisma.interview.findFirst({
         where: { id, organizationId: orgId },
-        select: { id: true, title: true, objective: true },
+        select: {
+          id: true, title: true, objective: true, description: true,
+          type: true, usabilityMode: true, stimulusUrl: true,
+        },
       }),
       getAuthorizedClientForUser(userId, origin),
     ])
@@ -106,7 +109,32 @@ export async function POST(req: NextRequest, props: { params: Promise<{ id: stri
         })
       : null
 
-    const sections = buildSlideSections(interview.title, stats, summary, highlightRows)
+    // 仮説の「（参加者: 〇〇）」という言及にリンクを張るための、参加者名→セッション詳細URLの対応。
+    // 同名の参加者が複数いる場合は最初のセッションを採用する（厳密な一意性までは求めない）
+    const appOrigin = (process.env.NEXT_PUBLIC_APP_URL ?? origin).replace(/\/+$/, '')
+    const participantLinks: Record<string, string> = {}
+    for (const s of sessions) {
+      const name = s.participant?.name
+      if (name && !(name in participantLinks)) {
+        participantLinks[name] = `${appOrigin}/dashboard/sessions/${s.id}`
+      }
+    }
+
+    const intro = (interview.objective || interview.description)
+      ? { objective: interview.objective, description: interview.description }
+      : null
+
+    const stimulus = await buildStimulusSection(interview)
+
+    const sections = buildSlideSections({
+      title: interview.title,
+      stats,
+      intro,
+      stimulus,
+      summary,
+      participantLinks,
+      highlights: highlightRows,
+    })
 
     try {
       const { url } = await createSlideDeck(client, interview.title, sections)
@@ -125,4 +153,41 @@ export async function POST(req: NextRequest, props: { params: Promise<{ id: stri
   } catch (err) {
     return handleApiError(err)
   }
+}
+
+/**
+ * テストで使われた画像・サイトを「テスト対象」スライドとして可視化するためのデータを組み立てる。
+ * - 印象テスト: 提示した画像をそのまま埋め込む
+ * - ユーザビリティテスト（実サービス）: 対象サイトのスクリーンショットを埋め込む
+ *   （WordPress.com の mshots — 無料・APIキー不要の公開スクリーンショットサービスを使う。
+ *   初回アクセスだと未生成のプレースホルダーが返ることがあるため、一度アクセスして
+ *   生成を促してから使う。失敗しても致命的ではないのでベストエフォートで無視する）
+ * - ユーザビリティテスト（プロトタイプ）: スクリーンショットはできないためリンクのみ
+ */
+async function buildStimulusSection(interview: {
+  type: string
+  usabilityMode: string | null
+  stimulusUrl: string | null
+}): Promise<{ imageUrl: string | null; linkUrl: string | null; caption: string } | null> {
+  if (!interview.stimulusUrl) return null
+
+  if (interview.type === 'impression') {
+    return { imageUrl: interview.stimulusUrl, linkUrl: null, caption: '提示した画像' }
+  }
+
+  if (interview.type === 'usability' && interview.usabilityMode === 'service') {
+    const shotUrl = `https://s.wordpress.com/mshots/v1/${encodeURIComponent(interview.stimulusUrl)}?w=1200`
+    try {
+      await fetch(shotUrl, { signal: AbortSignal.timeout(5000) })
+    } catch {
+      // 生成を促す試みが失敗しても、URL自体はそのまま使う（プレースホルダーが出るだけ）
+    }
+    return { imageUrl: shotUrl, linkUrl: interview.stimulusUrl, caption: `対象サービス: ${interview.stimulusUrl}` }
+  }
+
+  if (interview.type === 'usability' && interview.usabilityMode === 'prototype') {
+    return { imageUrl: null, linkUrl: interview.stimulusUrl, caption: `対象プロトタイプ: ${interview.stimulusUrl}` }
+  }
+
+  return null
 }
