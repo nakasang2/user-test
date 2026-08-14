@@ -500,13 +500,17 @@ export default function InterviewRoom({
   // 終わった時点で即座に出てしまい、この案内を読み終える前にタスク1が見えてしまう
   // 問題があった（ユーザー指摘）。案内と本文を分け、案内は小窓にもテキストで
   // 表示させ、参加者が小窓の「スタート」を押してから初めてタスク1を出す。
+  // 調査作成時の「説明（任意）」も、この「はじめに」の案内と合わせて読み上げ・
+  // 表示する（タスク1側の音声だけに含めると、小窓に対応するテキストが出ず
+  // 参加者が何を聞いたのか読み返せなかった。ユーザー指摘で「はじめに」に統合）。
   const speakGuidance = useCallback(() => {
-    widgetChannelRef.current?.postMessage({ type: 'guidance_text', text: USABILITY_GUIDANCE_TEXT })
-    speak(USABILITY_GUIDANCE_TEXT, undefined, {
+    const text = description?.trim() ? `${description.trim()} ${USABILITY_GUIDANCE_TEXT}` : USABILITY_GUIDANCE_TEXT
+    widgetChannelRef.current?.postMessage({ type: 'guidance_text', text })
+    speak(text, undefined, {
       log: false,
       failNotice: '音声を再生できませんでした。画面の案内をご覧ください。',
     })
-  }, [speak])
+  }, [speak, description])
 
   // ── タスクの読み上げ ────────────────────────────────
   // 事後インタビューの質問は読み上げるのに、タスクだけ無音だった。service モードの
@@ -516,15 +520,16 @@ export default function InterviewRoom({
   const speakTask = useCallback((idx: number) => {
     const t = tasks?.[idx]
     if (!t) return
-    // 調査作成時の「説明（任意）」は、タスク1の直前だけ読み上げに含める
-    // （guidance・screen-share 解決後に呼ばれるため、PiP/画面共有のユーザー操作起点を崩さない）
-    const prefix = idx === 0 && description?.trim() ? `${description.trim()}` : ''
+    // 調査作成時の「説明（任意）」は、serviceモードでは「はじめに」の案内（speakGuidance）で
+    // 読み上げ済みなのでここでは重複させない。案内ステップの無い経路（prototype等）だけ、
+    // 従来どおりタスク1の直前に含める
+    const prefix = idx === 0 && usabilityMode !== 'service' && description?.trim() ? `${description.trim()}` : ''
     speak(`${prefix}タスク${idx + 1}。${t.text}`, undefined, {
       // 文字起こしには残さない（結果記録側にタスク文言があるため二重になる）
       log: false,
       failNotice: '音声を再生できませんでした。画面のタスク文をご覧ください。',
     })
-  }, [tasks, speak, description])
+  }, [tasks, speak, description, usabilityMode])
 
   // 読み上げ済みの提示回。speak（＝showNotice）の識別子が変わって effect が
   // 再実行されても、同じ提示を二度読まないようにする
