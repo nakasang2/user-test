@@ -12,6 +12,7 @@
     "test:data": "node --env-file-if-exists=.env scripts/test-data-capture.mjs"
   },
   "dependencies": {
+    "@fontsource/noto-sans-jp": "^5.3.0",
     "@prisma/client": "^6.19.3",
     "@radix-ui/react-dialog": "^1.1.15",
     "@radix-ui/react-select": "^2.2.6",

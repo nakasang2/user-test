@@ -5,6 +5,12 @@ import { getAuthorizedClientForUser } from '@/lib/google-auth'
 import { createSlideDeck } from '@/lib/google-slides'
 import { computeSlideStats, renderStatsText, buildSlideSections, type SlideSession } from '@/lib/slide-deck-data'
 import { generateSlideSummary } from '@/lib/ai'
+import { renderSection, IMAGE_WIDTH, IMAGE_HEIGHT } from '@/lib/slide-image-templates'
+import { renderSlideImage } from '@/lib/render-slide-image'
+import { uploadSlideImage } from '@/lib/upload-slide-image'
+
+export const runtime = 'nodejs'
+export const maxDuration = 300
 
 /** Google側でトークンが失効/取り消されたときのエラー形状（gaxios）を判定する */
 function isInvalidGrantError(err: unknown): boolean {
@@ -132,12 +138,19 @@ export async function POST(req: NextRequest, props: { params: Promise<{ id: stri
       intro,
       stimulus,
       summary,
-      participantLinks,
       highlights: highlightRows,
     })
 
     try {
-      const { url } = await createSlideDeck(client, interview.title, sections)
+      // 各セクションをJSXからPNGへ描画し、公開Blobストアへ上げてSlidesから参照できるURLにする
+      // （相互に独立した描画・アップロードなので並行に行う）
+      const imageUrls = await Promise.all(
+        sections.map(async (section, i) => {
+          const buffer = await renderSlideImage(renderSection(section), IMAGE_WIDTH, IMAGE_HEIGHT)
+          return uploadSlideImage(buffer, `slides/${id}/${i}.png`)
+        })
+      )
+      const { url } = await createSlideDeck(client, interview.title, imageUrls, participantLinks)
       return NextResponse.json({ url })
     } catch (err) {
       if (isInvalidGrantError(err)) {
@@ -168,11 +181,11 @@ async function buildStimulusSection(interview: {
   type: string
   usabilityMode: string | null
   stimulusUrl: string | null
-}): Promise<{ imageUrl: string | null; linkUrl: string | null; caption: string } | null> {
+}): Promise<{ imageUrl: string | null; caption: string } | null> {
   if (!interview.stimulusUrl) return null
 
   if (interview.type === 'impression') {
-    return { imageUrl: interview.stimulusUrl, linkUrl: null, caption: '提示した画像' }
+    return { imageUrl: interview.stimulusUrl, caption: '提示した画像' }
   }
 
   if (interview.type === 'usability' && interview.usabilityMode === 'service') {
@@ -182,11 +195,11 @@ async function buildStimulusSection(interview: {
     } catch {
       // 生成を促す試みが失敗しても、URL自体はそのまま使う（プレースホルダーが出るだけ）
     }
-    return { imageUrl: shotUrl, linkUrl: interview.stimulusUrl, caption: `対象サービス: ${interview.stimulusUrl}` }
+    return { imageUrl: shotUrl, caption: `対象サービス: ${interview.stimulusUrl}` }
   }
 
   if (interview.type === 'usability' && interview.usabilityMode === 'prototype') {
-    return { imageUrl: null, linkUrl: interview.stimulusUrl, caption: `対象プロトタイプ: ${interview.stimulusUrl}` }
+    return { imageUrl: null, caption: `対象プロトタイプ: ${interview.stimulusUrl}` }
   }
 
   return null

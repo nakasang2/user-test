@@ -28,8 +28,8 @@ export interface SlideSession extends SessionLike {
 export type SlideSection =
   | { kind: 'cover'; title: string; period: string; participantCount: number }
   | { kind: 'intro'; objective: string | null; description: string | null }
-  | { kind: 'stimulus'; imageUrl: string | null; linkUrl: string | null; caption: string }
-  | { kind: 'summary'; heading: string; items: string[]; participantLinks?: Record<string, string> }
+  | { kind: 'stimulus'; imageUrl: string | null; caption: string }
+  | { kind: 'summary'; heading: string; items: string[] }
   | {
       kind: 'task-success'
       rate: number
@@ -45,6 +45,7 @@ export type SlideSection =
 
 const MAX_HIGHLIGHTS = 8
 const MAX_SCORE_ROWS = 12
+const MAX_TASK_ROWS = 12
 
 /**
  * セッションから集計した「素材」。AIへのサマリー生成プロンプトと、実際のスライドの
@@ -92,7 +93,7 @@ export function computeSlideStats(sessions: SlideSession[]): SlideStats {
         hardest: worst ? { text: worst.text, rate: worst.rate } : null,
       }
     : null
-  const taskRows = overall
+  const taskRowsAll = overall
     ? taskAgg
         .filter((t) => t.total > 0)
         .map((t) => ({
@@ -102,6 +103,12 @@ export function computeSlideStats(sessions: SlideSession[]): SlideStats {
           hintRate: `${Math.round((t.hintUsed / t.total) * 100)}%`,
         }))
     : []
+  // タスク数が多い調査でスライドが際限なく縦長にならないよう上限を設ける
+  // （超えた分は画面上でも確認できるので、スライドでは「ほか n件」だけ示せば十分）
+  const taskRows = taskRowsAll.slice(0, MAX_TASK_ROWS)
+  if (taskRowsAll.length > MAX_TASK_ROWS) {
+    taskRows.push({ text: `ほか ${taskRowsAll.length - MAX_TASK_ROWS}件`, rate: '', avgDuration: '', hintRate: '' })
+  }
 
   const scoreAgg = aggregateScores(sessions)
   const scoreRows = scoreAgg.slice(0, MAX_SCORE_ROWS).map((s) => {
@@ -167,10 +174,8 @@ export interface BuildSlideSectionsInput {
   /** 目的・説明。両方 null なら「目的・概要」スライド自体を出さない */
   intro: { objective: string | null; description: string | null } | null
   /** 印象テストの提示画像／ユーザビリティテストの対象サイト・プロトタイプ */
-  stimulus: { imageUrl: string | null; linkUrl: string | null; caption: string } | null
+  stimulus: { imageUrl: string | null; caption: string } | null
   summary: SlideSummaryResult | null
-  /** 仮説の本文中の参加者名にリンクするための、参加者名→セッション詳細URLの対応 */
-  participantLinks: Record<string, string>
   highlights: { quote: string; note: string | null }[]
 }
 
@@ -179,7 +184,7 @@ export interface BuildSlideSectionsInput {
  * 表示できるセクションだけを積み上げる（データが無いセクションは省く）。
  */
 export function buildSlideSections(input: BuildSlideSectionsInput): SlideSection[] {
-  const { title, stats, intro, stimulus, summary, participantLinks, highlights } = input
+  const { title, stats, intro, stimulus, summary, highlights } = input
   const sections: SlideSection[] = []
 
   // 表紙は常に出す（実施実績が0件でも、調査自体の存在は示す）
@@ -190,7 +195,7 @@ export function buildSlideSections(input: BuildSlideSectionsInput): SlideSection
     sections.push({ kind: 'intro', objective: intro.objective, description: intro.description })
   }
 
-  if (stimulus && (stimulus.imageUrl || stimulus.linkUrl)) {
+  if (stimulus) {
     sections.push({ kind: 'stimulus', ...stimulus })
   }
 
@@ -199,7 +204,7 @@ export function buildSlideSections(input: BuildSlideSectionsInput): SlideSection
     sections.push({ kind: 'summary', heading: '事実', items: summary.facts })
   }
   if (summary?.hypotheses.length) {
-    sections.push({ kind: 'summary', heading: '仮説', items: summary.hypotheses, participantLinks })
+    sections.push({ kind: 'summary', heading: '仮説', items: summary.hypotheses })
   }
   if (summary?.actions.length) {
     sections.push({ kind: 'summary', heading: '次のアクション', items: summary.actions })
