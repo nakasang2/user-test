@@ -78,15 +78,6 @@ function buildTextBoxRequests(
       },
     },
     { insertText: { objectId, text } },
-    // 長いタイトル・AI総括・質問数が多い満足度スコアなどでテキストが箱からはみ出さないよう、
-    // 自動縮小を全テキストボックス共通で付ける（v1では手動のはみ出しチェックをしない代わりに）
-    {
-      updateShapeProperties: {
-        objectId,
-        fields: 'autofit.autofitType',
-        shapeProperties: { autofit: { autofitType: 'SHRINK_TEXT_ON_OVERFLOW' } },
-      },
-    },
   ]
   if (opts.bold || opts.fontSize) {
     requests.push({
