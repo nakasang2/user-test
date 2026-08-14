@@ -217,6 +217,15 @@ export default function EditInterviewModal({
           </button>
         </div>
 
+        {/* フォーム内の下の方（スクロール領域）にだけ出すと、上の項目を編集して
+            すぐ保存したときに見えないまま保存が止まってしまうため、常に見える
+            ヘッダー直下に置く */}
+        {error && (
+          <div className="px-5 py-3 bg-red-50 border-b border-red-100">
+            <p className="text-xs text-red-600">{error}</p>
+          </div>
+        )}
+
         <div className="px-5 py-4 space-y-5 max-h-[65vh] overflow-y-auto">
           {sessionCount > 0 && (
             <div className="bg-amber-50 border border-amber-200 rounded-md p-3 text-xs text-amber-900 flex gap-2">
@@ -341,8 +350,6 @@ export default function EditInterviewModal({
               {removedCount}件を削除します。実施済みの回答は残りますが、その項目の集計は今後増えません。
             </p>
           )}
-
-          {error && <p className="text-xs text-red-600">{error}</p>}
         </div>
 
         <div className="flex justify-end gap-2 px-5 py-4 border-t border-gray-200">
