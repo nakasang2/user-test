@@ -137,6 +137,10 @@ export default function InterviewRoom({
   const streamRef = useRef<MediaStream | null>(null)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const speechRef = useRef<any>(null)
+  // true の間は「意図した停止」。onend が自動再開してよいかどうかの判定に使う
+  // （ブラウザが黙って認識を終了させることがあり、無条件に再開すると
+  // こちらが意図的に止めた場合まで復活してしまうため）
+  const recognitionStoppingRef = useRef(false)
   const silenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const startTimeRef = useRef<number>(nowMs())
   const transcriptRef = useRef<TranscriptEntry[]>([])
@@ -429,15 +433,27 @@ export default function InterviewRoom({
       setTranscript([...transcriptRef.current])
     }
 
-    fetch('/api/tts', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text }),
-    })
-      .then((res) => {
-        if (!res.ok) throw new Error(`TTS error: ${res.status}`)
-        return res.blob()
+    // OpenAIの一過性の失敗・瞬間的なネットワーク不調で読み上げが丸ごと落ちないよう、
+    // 1回だけ短い間隔を置いて自動再試行する（タスク1の案内など、無音で失われると
+    // 参加者がテキストしか見られない結果に気づかれにくい読み上げがあるため）。
+    const fetchTtsBlob = (attempt = 0): Promise<Blob> =>
+      fetch('/api/tts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text }),
       })
+        .then((res) => {
+          if (!res.ok) throw new Error(`TTS error: ${res.status}`)
+          return res.blob()
+        })
+        .catch((err) => {
+          if (attempt >= 1) throw err
+          return new Promise<Blob>((resolve, reject) => {
+            setTimeout(() => { fetchTtsBlob(attempt + 1).then(resolve, reject) }, 700)
+          })
+        })
+
+    fetchTtsBlob()
       .then((blob) => {
         if (version !== speakVersionRef.current) return // 後続の speak に上書きされた
         const url = URL.createObjectURL(blob)
@@ -643,6 +659,7 @@ export default function InterviewRoom({
     if (!text || !onAnswerCallbackRef.current) return
 
     if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current)
+    recognitionStoppingRef.current = true
     speechRef.current?.stop()
     setLiveText('')
     setIsListening(false)
@@ -680,13 +697,22 @@ export default function InterviewRoom({
     recognition.continuous = true
     recognition.interimResults = true
     speechRef.current = recognition
+    recognitionStoppingRef.current = false
 
     let finalText = ''
     const startTime = elapsedSec(startTimeRef.current)
+    // ブラウザが黙って（エラー無しで）認識を止めることがある。事後インタビューのような
+    // 長い回答ほど、ブラウザ側の内部的な連続認識の上限に達しやすい。意図した停止で
+    // なければ、同じ recognition インスタンスを自動的に再開する（finalText は
+    // クロージャ変数なのでそのまま引き継がれ、参加者の発話が失われない）
+    let restartAttempts = 0
+    const MAX_RESTART_ATTEMPTS = 5
+    let unrecoverableError = false
 
     // 沈黙タイムアウト開始（60秒）— 考える時間・沈黙して内省する時間を確保する
     if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current)
     silenceTimerRef.current = setTimeout(() => {
+      recognitionStoppingRef.current = true
       recognition.stop()
       setLiveText('')
       if (!silenceRetry) {
@@ -719,6 +745,7 @@ export default function InterviewRoom({
 
     recognition.onspeechend = () => {
       if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current)
+      recognitionStoppingRef.current = true
       recognition.stop()
       setLiveText('')
       setIsListening(false)
@@ -743,11 +770,31 @@ export default function InterviewRoom({
     recognition.onerror = (e: any) => {
       // no-speech / aborted は沈黙タイマーや通常停止で処理されるため無視
       if (e?.error === 'no-speech' || e?.error === 'aborted') return
-      if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current)
-      setLiveText('')
-      setIsListening(false)
-      // コールバックは残す（下のテキスト入力で回答を継続できる）
-      showNotice('音声認識が中断しました。もう一度話すか、下の入力欄にテキストで回答してください。')
+      // マイク権限が無い等、再試行しても直らないものは自動再開を諦める判断材料にする。
+      // 実際の再開処理は onend 側で行う（error 後は onend も必ず発火するため、
+      // ここで recognition.start() すると二重起動になりうる）
+      if (e?.error === 'not-allowed' || e?.error === 'service-not-allowed') {
+        unrecoverableError = true
+      }
+    }
+
+    recognition.onend = () => {
+      // 意図した停止（沈黙タイムアウト・onspeechend・手動操作・終了処理）なら何もしない
+      if (recognitionStoppingRef.current) return
+      if (unrecoverableError || restartAttempts >= MAX_RESTART_ATTEMPTS) {
+        if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current)
+        setLiveText('')
+        setIsListening(false)
+        // コールバックは残す（下のテキスト入力で回答を継続できる）
+        showNotice('音声認識が中断しました。もう一度話すか、下の入力欄にテキストで回答してください。')
+        return
+      }
+      restartAttempts++
+      try {
+        recognition.start()
+      } catch {
+        // 既に開始されている等はここに来うるが、実害はないので無視する
+      }
     }
 
     recognition.start()
@@ -1418,6 +1465,7 @@ export default function InterviewRoom({
   // ── 手動で次へ ────────────────────────────────────────
   function manualNext() {
     if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current)
+    recognitionStoppingRef.current = true
     speechRef.current?.stop()    // 音声認識停止
     speakVersionRef.current++    // 再生中の TTS をキャンセル
     currentAudioRef.current?.pause()
@@ -1475,6 +1523,7 @@ export default function InterviewRoom({
     pipWindowRef.current = null
     setPhase('ending')
     if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current)
+    recognitionStoppingRef.current = true
     speechRef.current?.stop()
     speak('ご回答いただきありがとうございました。本日のインタビューはこれで終了です。貴重なお時間をありがとうございました。', async () => {
       await submitResults()
