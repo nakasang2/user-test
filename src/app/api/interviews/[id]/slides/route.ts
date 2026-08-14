@@ -146,7 +146,7 @@ export async function POST(req: NextRequest, props: { params: Promise<{ id: stri
       // （相互に独立した描画・アップロードなので並行に行う）
       const imageUrls = await Promise.all(
         sections.map(async (section, i) => {
-          const buffer = await renderSlideImage(renderSection(section), IMAGE_WIDTH, IMAGE_HEIGHT)
+          const buffer = await renderSlideImage(renderSection(section, i + 1, sections.length), IMAGE_WIDTH, IMAGE_HEIGHT)
           return uploadSlideImage(buffer, `slides/${id}/${i}.png`)
         })
       )

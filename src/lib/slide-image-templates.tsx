@@ -5,25 +5,40 @@ import type { SlideSection } from './slide-deck-data'
  *
  * satori はブラウザではなく、flexbox のみをサポートする専用レンダラーなので、
  * すべての要素に `display: 'flex'` を明示する（暗黙のブロック表示は無い）。
- * grid・position:absolute の複雑な組み合わせは避け、flexDirection と gap だけで組む。
+ * grid の複雑な組み合わせは避け、flexDirection と gap だけで組む
+ * （装飾用の背景円だけ position:absolute を使う。satori はDOM順で描画するため、
+ * 装飾要素を子要素より先に置けば重なりは自然にコンテンツが手前になる）。
  */
 
 export const IMAGE_WIDTH = 1920
 export const IMAGE_HEIGHT = 1080
 
 const COLOR = {
-  bg: '#ffffff',
-  ink: '#202124',
-  sub: '#5f6368',
-  border: '#e2e5e9',
-  cardBg: '#f6f8fa',
-  track: '#e8eaed',
-  neutralAccent: '#5f6368',
-  facts: '#1a73e8',
-  hypothesis: '#e8710a',
-  hypothesisSoft: '#fef3e6',
-  action: '#1e8e3e',
+  page: '#f4f6f9',
+  ink: '#161a20',
+  sub: '#5b6472',
+  muted: '#8a93a1',
+  border: '#e3e6ea',
+  cardBg: '#ffffff',
+  track: '#eceff3',
+  neutralAccent: '#334155',
+  facts: '#2563eb',
+  hypothesis: '#ea580c',
+  hypothesisSoft: '#fff1e6',
+  action: '#16a34a',
+  coverFrom: '#0b1220',
+  coverTo: '#1e3a8a',
 } as const
+
+const CARD_SHADOW = '0 10px 30px rgba(15, 23, 42, 0.08)'
+
+function hexToRgba(hex: string, alpha: number): string {
+  const n = parseInt(hex.replace('#', ''), 16)
+  const r = (n >> 16) & 255
+  const g = (n >> 8) & 255
+  const b = n & 255
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`
+}
 
 function accentFor(section: SlideSection): string {
   if (section.kind === 'summary') {
@@ -48,20 +63,78 @@ function titleFor(section: SlideSection): string {
   }
 }
 
-/** 全スライド共通の外枠。上部に色付きのアクセントバー、内側にヘッダーとコンテンツ */
-function Frame({ accent, title, children }: { accent: string; title?: string; children: React.ReactNode }) {
+/** タイトルの上に添える短い分類ラベル（デッキ全体に一貫した文脈を持たせる） */
+function kickerFor(section: SlideSection): string {
+  switch (section.kind) {
+    case 'cover': return '調査結果レポート'
+    case 'intro': return '調査概要'
+    case 'stimulus': return '調査概要'
+    case 'summary': return `総括 ・ ${section.heading}`
+    case 'task-success':
+    case 'task-detail':
+      return 'タスク計測'
+    case 'score': return '定量データ'
+    case 'emotion': return '定量データ'
+    case 'highlights': return '定性データ'
+  }
+}
+
+/** 右上に添える控えめな装飾円。ページ全体の余白に質感を持たせる */
+function BackgroundBlob({ color }: { color: string }) {
+  return (
+    <div style={{
+      position: 'absolute', top: -220, right: -220, width: 620, height: 620,
+      borderRadius: 999, backgroundColor: hexToRgba(color, 0.06), display: 'flex',
+    }} />
+  )
+}
+
+function Kicker({ label, color }: { label: string; color: string }) {
+  return (
+    <div style={{
+      display: 'flex', alignSelf: 'flex-start', alignItems: 'center', gap: 10,
+      backgroundColor: hexToRgba(color, 0.12), borderRadius: 999, padding: '10px 22px',
+    }}>
+      <div style={{ width: 10, height: 10, borderRadius: 999, backgroundColor: color, display: 'flex' }} />
+      <div style={{ fontSize: 22, fontWeight: 700, color, display: 'flex' }}>{label}</div>
+    </div>
+  )
+}
+
+function PageFooter({ index, total, dark }: { index: number; total: number; dark?: boolean }) {
+  const color = dark ? 'rgba(255,255,255,0.55)' : COLOR.muted
+  const line = dark ? 'rgba(255,255,255,0.16)' : COLOR.border
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', width: '100%' }}>
+      <div style={{ height: 1, width: '100%', backgroundColor: line, display: 'flex' }} />
+      <div style={{ display: 'flex', flexDirection: 'row', justifyContent: 'space-between', padding: '20px 96px 0' }}>
+        <div style={{ fontSize: 20, color, display: 'flex' }}>User Interview Report</div>
+        <div style={{ fontSize: 20, color, display: 'flex' }}>{index} / {total}</div>
+      </div>
+    </div>
+  )
+}
+
+/** 全スライド共通の外枠。分類ラベル＋タイトル、装飾円、下部にページフッター */
+function Frame({
+  accent, title, kicker, index, total, children,
+}: {
+  accent: string; title?: string; kicker: string; index: number; total: number; children: React.ReactNode
+}) {
   return (
     <div style={{
       width: '100%', height: '100%', display: 'flex', flexDirection: 'column',
-      backgroundColor: COLOR.bg, fontFamily: 'Noto Sans JP',
+      backgroundColor: COLOR.page, fontFamily: 'Noto Sans JP', position: 'relative', overflow: 'hidden',
     }}>
-      <div style={{ height: 14, width: '100%', backgroundColor: accent, display: 'flex' }} />
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: '56px 96px', gap: 32 }}>
+      <BackgroundBlob color={accent} />
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: '64px 96px 0', gap: 28 }}>
+        <Kicker label={kicker} color={accent} />
         {title && (
-          <div style={{ fontSize: 50, fontWeight: 700, color: COLOR.ink, display: 'flex' }}>{title}</div>
+          <div style={{ fontSize: 48, fontWeight: 700, color: COLOR.ink, display: 'flex' }}>{title}</div>
         )}
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 24 }}>{children}</div>
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 24, paddingBottom: 8 }}>{children}</div>
       </div>
+      <PageFooter index={index} total={total} />
     </div>
   )
 }
@@ -70,7 +143,8 @@ function Card({ children, style }: { children: React.ReactNode; style?: React.CS
   return (
     <div style={{
       display: 'flex', flexDirection: 'column', backgroundColor: COLOR.cardBg,
-      borderRadius: 20, padding: '28px 36px', ...style,
+      borderRadius: 20, padding: '28px 36px', border: `1px solid ${COLOR.border}`,
+      boxShadow: CARD_SHADOW, ...style,
     }}>
       {children}
     </div>
@@ -83,9 +157,12 @@ function BulletList({ items, accent }: { items: string[]; accent: string }) {
       {items.map((text, i) => (
         <div key={i} style={{
           display: 'flex', flexDirection: 'row', backgroundColor: COLOR.cardBg,
-          borderRadius: 16, padding: '24px 32px', borderLeft: `8px solid ${accent}`,
+          borderRadius: 16, padding: '26px 34px',
+          borderTop: `1px solid ${COLOR.border}`, borderRight: `1px solid ${COLOR.border}`,
+          borderBottom: `1px solid ${COLOR.border}`, borderLeft: `6px solid ${accent}`,
+          boxShadow: CARD_SHADOW,
         }}>
-          <div style={{ fontSize: 30, color: COLOR.ink, lineHeight: 1.5, display: 'flex' }}>{text}</div>
+          <div style={{ fontSize: 29, color: COLOR.ink, lineHeight: 1.55, display: 'flex' }}>{text}</div>
         </div>
       ))}
     </div>
@@ -95,17 +172,30 @@ function BulletList({ items, accent }: { items: string[]; accent: string }) {
 function BarChart({ items, accent }: { items: { label: string; percent: number; displayValue: string }[]; accent: string }) {
   const shown = items.filter((item) => item.displayValue)
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 26, justifyContent: 'center', flex: 1 }}>
+    <div style={{
+      display: 'flex', flexDirection: 'column', gap: 24,
+      backgroundColor: COLOR.cardBg, borderRadius: 20, border: `1px solid ${COLOR.border}`,
+      boxShadow: CARD_SHADOW, padding: '40px 44px',
+    }}>
       {shown.map((item, i) => (
         <div key={i} style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 24 }}>
-          <div style={{ width: 320, fontSize: 28, color: COLOR.ink, display: 'flex' }}>{item.label}</div>
-          <div style={{ flex: 1, height: 40, backgroundColor: COLOR.track, borderRadius: 20, display: 'flex', alignItems: 'center' }}>
+          <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 12, width: 300 }}>
+            <div style={{ width: 8, height: 8, borderRadius: 999, backgroundColor: accent, display: 'flex' }} />
+            <div style={{ fontSize: 26, color: COLOR.ink, display: 'flex' }}>{item.label}</div>
+          </div>
+          <div style={{ flex: 1, height: 34, backgroundColor: COLOR.track, borderRadius: 17, display: 'flex', alignItems: 'center' }}>
             <div style={{
-              width: `${Math.max(2, Math.min(100, item.percent))}%`, height: 40, borderRadius: 20,
+              width: `${Math.max(2, Math.min(100, item.percent))}%`, height: 34, borderRadius: 17,
               backgroundColor: accent, display: 'flex',
             }} />
           </div>
-          <div style={{ width: 280, fontSize: 26, fontWeight: 700, color: COLOR.ink, display: 'flex' }}>{item.displayValue}</div>
+          <div style={{
+            display: 'flex', fontSize: 24, fontWeight: 700, color: accent,
+            backgroundColor: hexToRgba(accent, 0.1), borderRadius: 12, padding: '8px 18px',
+            minWidth: 220, justifyContent: 'flex-end',
+          }}>
+            {item.displayValue}
+          </div>
         </div>
       ))}
     </div>
@@ -114,52 +204,72 @@ function BarChart({ items, accent }: { items: { label: string; percent: number; 
 
 function StatPill({ label, value }: { label: string; value: string }) {
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
-      <div style={{ fontSize: 22, color: COLOR.sub, display: 'flex' }}>{label}</div>
-      <div style={{ fontSize: 34, fontWeight: 700, color: COLOR.ink, display: 'flex' }}>{value}</div>
+    <div style={{
+      display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10,
+      backgroundColor: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.16)',
+      borderRadius: 20, padding: '28px 48px',
+    }}>
+      <div style={{ fontSize: 22, color: 'rgba(255,255,255,0.6)', display: 'flex' }}>{label}</div>
+      <div style={{ fontSize: 36, fontWeight: 700, color: '#ffffff', display: 'flex' }}>{value}</div>
     </div>
   )
 }
 
-export function renderSection(section: SlideSection): React.ReactElement {
+export function renderSection(section: SlideSection, index: number, total: number): React.ReactElement {
   const accent = accentFor(section)
   const title = titleFor(section)
+  const kicker = kickerFor(section)
 
   switch (section.kind) {
     case 'cover':
       return (
         <div style={{
           width: '100%', height: '100%', display: 'flex', flexDirection: 'column',
-          backgroundColor: COLOR.bg, fontFamily: 'Noto Sans JP',
+          backgroundImage: `linear-gradient(135deg, ${COLOR.coverFrom} 0%, ${COLOR.coverTo} 100%)`,
+          fontFamily: 'Noto Sans JP', position: 'relative', overflow: 'hidden',
         }}>
-          <div style={{ height: 14, width: '100%', backgroundColor: COLOR.neutralAccent, display: 'flex' }} />
+          <div style={{
+            position: 'absolute', top: -240, right: -160, width: 700, height: 700,
+            borderRadius: 999, backgroundColor: 'rgba(255,255,255,0.05)', display: 'flex',
+          }} />
+          <div style={{
+            position: 'absolute', bottom: -260, left: -180, width: 560, height: 560,
+            borderRadius: 999, backgroundColor: 'rgba(37,99,235,0.18)', display: 'flex',
+          }} />
           <div style={{
             flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center',
-            justifyContent: 'center', gap: 48, padding: '0 140px',
+            justifyContent: 'center', gap: 44, padding: '0 140px',
           }}>
-            <div style={{ fontSize: 24, letterSpacing: 4, color: COLOR.sub, display: 'flex' }}>調査結果レポート</div>
-            <div style={{ fontSize: 68, fontWeight: 700, color: COLOR.ink, textAlign: 'center', display: 'flex' }}>{section.title}</div>
-            <div style={{ display: 'flex', flexDirection: 'row', gap: 80, marginTop: 20 }}>
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 10, backgroundColor: 'rgba(255,255,255,0.1)',
+              border: '1px solid rgba(255,255,255,0.18)', borderRadius: 999, padding: '10px 24px',
+            }}>
+              <div style={{ width: 10, height: 10, borderRadius: 999, backgroundColor: '#60a5fa', display: 'flex' }} />
+              <div style={{ fontSize: 22, letterSpacing: 2, color: 'rgba(255,255,255,0.75)', display: 'flex' }}>調査結果レポート</div>
+            </div>
+            <div style={{ fontSize: 66, fontWeight: 700, color: '#ffffff', textAlign: 'center', lineHeight: 1.3, display: 'flex' }}>{section.title}</div>
+            <div style={{ display: 'flex', flexDirection: 'row', gap: 28, marginTop: 12 }}>
               <StatPill label="実施期間" value={section.period} />
               <StatPill label="参加者数" value={`${section.participantCount}人`} />
             </div>
           </div>
+          <PageFooter index={index} total={total} dark />
         </div>
       )
 
     case 'intro':
       return (
-        <Frame accent={accent} title={title}>
+        <Frame accent={accent} title={title} kicker={kicker} index={index} total={total}>
           {section.objective && (
             <Card>
-              <div style={{ fontSize: 24, color: COLOR.sub, marginBottom: 12, display: 'flex' }}>目的</div>
-              <div style={{ fontSize: 30, color: COLOR.ink, lineHeight: 1.6, display: 'flex' }}>{section.objective}</div>
+              <div style={{ fontSize: 22, fontWeight: 700, color: COLOR.sub, marginBottom: 14, display: 'flex' }}>目的</div>
+              <div style={{ fontSize: 29, color: COLOR.ink, lineHeight: 1.65, display: 'flex' }}>{section.objective}</div>
             </Card>
           )}
           {section.description && (
             <Card>
-              <div style={{ fontSize: 24, color: COLOR.sub, marginBottom: 12, display: 'flex' }}>概要</div>
-              <div style={{ fontSize: 30, color: COLOR.ink, lineHeight: 1.6, display: 'flex' }}>{section.description}</div>
+              <div style={{ fontSize: 22, fontWeight: 700, color: COLOR.sub, marginBottom: 14, display: 'flex' }}>概要</div>
+              <div style={{ fontSize: 29, color: COLOR.ink, lineHeight: 1.65, display: 'flex' }}>{section.description}</div>
             </Card>
           )}
         </Frame>
@@ -167,20 +277,20 @@ export function renderSection(section: SlideSection): React.ReactElement {
 
     case 'stimulus':
       return (
-        <Frame accent={accent} title={title}>
+        <Frame accent={accent} title={title} kicker={kicker} index={index} total={total}>
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 28 }}>
             {section.imageUrl && (
               // eslint-disable-next-line @next/next/no-img-element
               <img
                 src={section.imageUrl}
                 alt={section.caption}
-                width={1400}
-                height={640}
-                style={{ objectFit: 'contain', borderRadius: 20, border: `1px solid ${COLOR.border}` }}
+                width={1360}
+                height={600}
+                style={{ objectFit: 'contain', borderRadius: 20, border: `1px solid ${COLOR.border}`, boxShadow: CARD_SHADOW }}
               />
             )}
             <div style={{
-              fontSize: 26, color: COLOR.sub, backgroundColor: COLOR.cardBg,
+              fontSize: 25, color: COLOR.sub, backgroundColor: COLOR.cardBg, border: `1px solid ${COLOR.border}`,
               borderRadius: 999, padding: '14px 32px', display: 'flex',
             }}>
               {section.caption}
@@ -191,7 +301,7 @@ export function renderSection(section: SlideSection): React.ReactElement {
 
     case 'summary':
       return (
-        <Frame accent={accent} title={title}>
+        <Frame accent={accent} title={title} kicker={kicker} index={index} total={total}>
           <BulletList items={section.items} accent={accent} />
         </Frame>
       )
@@ -202,12 +312,12 @@ export function renderSection(section: SlideSection): React.ReactElement {
         { label: '自力成功率', percent: section.unaidedRate, displayValue: `${section.unaidedRate}%` },
       ]
       return (
-        <Frame accent={accent} title={title}>
+        <Frame accent={accent} title={title} kicker={kicker} index={index} total={total}>
           <BarChart items={items} accent={COLOR.facts} />
           {section.hardest && (
             <div style={{
               display: 'flex', flexDirection: 'row', backgroundColor: COLOR.hypothesisSoft,
-              borderRadius: 16, padding: '20px 32px', gap: 12, alignItems: 'center',
+              borderRadius: 16, padding: '22px 32px', gap: 14, alignItems: 'center',
             }}>
               <div style={{ fontSize: 24, color: COLOR.hypothesis, fontWeight: 700, display: 'flex' }}>最も苦戦したタスク</div>
               <div style={{ fontSize: 24, color: COLOR.ink, display: 'flex' }}>
@@ -223,12 +333,15 @@ export function renderSection(section: SlideSection): React.ReactElement {
       const cols = ['タスク', '成功率', '平均所要時間', 'ヒント使用率']
       const widths = [0.44, 0.19, 0.19, 0.18]
       return (
-        <Frame accent={accent} title={title}>
-          <div style={{ display: 'flex', flexDirection: 'column', borderRadius: 16, overflow: 'hidden', border: `1px solid ${COLOR.border}` }}>
+        <Frame accent={accent} title={title} kicker={kicker} index={index} total={total}>
+          <div style={{
+            display: 'flex', flexDirection: 'column', borderRadius: 20, overflow: 'hidden',
+            border: `1px solid ${COLOR.border}`, boxShadow: CARD_SHADOW,
+          }}>
             <div style={{ display: 'flex', flexDirection: 'row', backgroundColor: COLOR.neutralAccent }}>
               {cols.map((c, i) => (
                 <div key={i} style={{
-                  width: `${widths[i] * 100}%`, padding: '18px 24px', fontSize: 22,
+                  width: `${widths[i] * 100}%`, padding: '20px 24px', fontSize: 22,
                   fontWeight: 700, color: '#ffffff', display: 'flex',
                 }}>
                   {c}
@@ -238,11 +351,11 @@ export function renderSection(section: SlideSection): React.ReactElement {
             {section.rows.map((r, i) => (
               <div key={i} style={{
                 display: 'flex', flexDirection: 'row',
-                backgroundColor: i % 2 === 0 ? COLOR.bg : COLOR.cardBg,
+                backgroundColor: i % 2 === 0 ? COLOR.cardBg : COLOR.page,
                 borderTop: `1px solid ${COLOR.border}`,
               }}>
                 {[r.text, r.rate, r.avgDuration, r.hintRate].map((v, j) => (
-                  <div key={j} style={{ width: `${widths[j] * 100}%`, padding: '18px 24px', fontSize: 22, color: COLOR.ink, display: 'flex' }}>
+                  <div key={j} style={{ width: `${widths[j] * 100}%`, padding: '20px 24px', fontSize: 22, color: COLOR.ink, display: 'flex' }}>
                     {v}
                   </div>
                 ))}
@@ -255,26 +368,27 @@ export function renderSection(section: SlideSection): React.ReactElement {
 
     case 'score':
       return (
-        <Frame accent={accent} title={title}>
+        <Frame accent={accent} title={title} kicker={kicker} index={index} total={total}>
           <BarChart items={section.rows.map((r) => ({ label: r.label, percent: r.percent, displayValue: r.value }))} accent={COLOR.facts} />
         </Frame>
       )
 
     case 'emotion':
       return (
-        <Frame accent={accent} title={title}>
+        <Frame accent={accent} title={title} kicker={kicker} index={index} total={total}>
           <BarChart items={section.rows.map((r) => ({ label: r.label, percent: r.percent, displayValue: r.value }))} accent={COLOR.hypothesis} />
         </Frame>
       )
 
     case 'highlights':
       return (
-        <Frame accent={accent} title={title}>
+        <Frame accent={accent} title={title} kicker={kicker} index={index} total={total}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
             {section.quotes.map((q, i) => (
               <div key={i} style={{
                 display: 'flex', flexDirection: 'row', backgroundColor: COLOR.cardBg,
-                borderRadius: 16, padding: '24px 32px', gap: 20, alignItems: 'flex-start',
+                borderRadius: 16, padding: '26px 34px', gap: 20, alignItems: 'flex-start',
+                border: `1px solid ${COLOR.border}`, boxShadow: CARD_SHADOW,
               }}>
                 <div style={{ fontSize: 44, color: accent, fontWeight: 700, display: 'flex' }}>&ldquo;</div>
                 <div style={{ fontSize: 26, color: COLOR.ink, lineHeight: 1.5, display: 'flex', flex: 1 }}>{q}</div>
