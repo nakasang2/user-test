@@ -13,6 +13,30 @@ const MARGIN = 0.5 // インチ
 // 超えた分は「ほか n件」の1行にまとめる（省略した事実が分かるようにする）
 const MAX_TABLE_ROWS = 12
 
+type Rgb = { red: number; green: number; blue: number }
+
+// 事実・仮説・次のアクションは意味を持たせて色分けし、他のスライドは中立色に統一する
+// （データ部分まで派手にすると散らかって見えるため、色は「気づき」の3枚だけに使う）
+const COLOR = {
+  neutralText: { red: 0.125, green: 0.129, blue: 0.141 }, // #202124
+  neutralBar: { red: 0.855, green: 0.863, blue: 0.878 },  // #dadce0
+  factsText: { red: 0.090, green: 0.306, blue: 0.651 },   // #174ea6
+  factsBar: { red: 0.259, green: 0.522, blue: 0.957 },    // #4285f4
+  hypothesisText: { red: 0.690, green: 0.376, blue: 0 },  // #b06000
+  hypothesisBar: { red: 0.984, green: 0.737, blue: 0.016 }, // #fbbc04
+  actionText: { red: 0.051, green: 0.396, blue: 0.176 },  // #0d652d
+  actionBar: { red: 0.204, green: 0.659, blue: 0.325 },   // #34a853
+} as const
+
+function sectionColors(section: SlideSection): { text: Rgb; bar: Rgb } {
+  if (section.kind === 'summary') {
+    if (section.heading === '事実') return { text: COLOR.factsText, bar: COLOR.factsBar }
+    if (section.heading === '仮説') return { text: COLOR.hypothesisText, bar: COLOR.hypothesisBar }
+    if (section.heading === '次のアクション') return { text: COLOR.actionText, bar: COLOR.actionBar }
+  }
+  return { text: COLOR.neutralText, bar: COLOR.neutralBar }
+}
+
 interface Renderable {
   title: string
   bullets?: string[]
@@ -58,12 +82,16 @@ function inch(n: number) {
   return { magnitude: n * 914400, unit: 'EMU' as const }
 }
 
+function rgbColor(c: Rgb) {
+  return { opaqueColor: { rgbColor: c } }
+}
+
 function buildTextBoxRequests(
   objectId: string,
   slideId: string,
   x: number, y: number, w: number, h: number,
   text: string,
-  opts: { bold?: boolean; fontSize?: number; bullets?: boolean } = {}
+  opts: { bold?: boolean; fontSize?: number; color?: Rgb; bullets?: boolean } = {}
 ): slides_v1.Schema$Request[] {
   const requests: slides_v1.Schema$Request[] = [
     {
@@ -79,13 +107,22 @@ function buildTextBoxRequests(
     },
     { insertText: { objectId, text } },
   ]
-  if (opts.bold || opts.fontSize) {
+  const styleFields = [
+    opts.bold ? 'bold' : null,
+    opts.fontSize ? 'fontSize' : null,
+    opts.color ? 'foregroundColor' : null,
+  ].filter(Boolean)
+  if (styleFields.length > 0) {
     requests.push({
       updateTextStyle: {
         objectId,
-        style: { bold: opts.bold, fontSize: opts.fontSize ? { magnitude: opts.fontSize, unit: 'PT' } : undefined },
+        style: {
+          bold: opts.bold,
+          fontSize: opts.fontSize ? { magnitude: opts.fontSize, unit: 'PT' } : undefined,
+          foregroundColor: opts.color ? rgbColor(opts.color) : undefined,
+        },
         textRange: { type: 'ALL' },
-        fields: [opts.bold ? 'bold' : null, opts.fontSize ? 'fontSize' : null].filter(Boolean).join(','),
+        fields: styleFields.join(','),
       },
     })
   }
@@ -101,11 +138,42 @@ function buildTextBoxRequests(
   return requests
 }
 
+/** タイトルの左に添える色付きの短いバー（アクセント） */
+function buildAccentBarRequests(objectId: string, slideId: string, x: number, y: number, h: number, color: Rgb): slides_v1.Schema$Request[] {
+  const barWidth = 0.08
+  return [
+    {
+      createShape: {
+        objectId,
+        shapeType: 'RECTANGLE',
+        elementProperties: {
+          pageObjectId: slideId,
+          size: { width: inch(barWidth), height: inch(h) },
+          transform: { scaleX: 1, scaleY: 1, translateX: x * 914400, translateY: y * 914400, unit: 'EMU' },
+        },
+      },
+    },
+    {
+      updateShapeProperties: {
+        objectId,
+        // outline.propertyState は「NOT_RENDERED にすると枠線なし」と型定義のコメントに
+        // 明記されている値なので、こちらは色を推測せずに枠線ごと消す
+        fields: 'shapeBackgroundFill.solidFill.color,outline.propertyState',
+        shapeProperties: {
+          shapeBackgroundFill: { solidFill: { color: { rgbColor: color } } },
+          outline: { propertyState: 'NOT_RENDERED' },
+        },
+      },
+    },
+  ]
+}
+
 function buildTableRequests(
   objectId: string,
   slideId: string,
   x: number, y: number, w: number, h: number,
-  table: { headers: string[]; rows: string[][] }
+  table: { headers: string[]; rows: string[][] },
+  headerBg: Rgb
 ): slides_v1.Schema$Request[] {
   const rowCount = table.rows.length + 1
   const columnCount = table.headers.length
@@ -120,6 +188,15 @@ function buildTableRequests(
           size: { width: inch(w), height: inch(h) },
           transform: { scaleX: 1, scaleY: 1, translateX: x * 914400, translateY: y * 914400, unit: 'EMU' },
         },
+      },
+    },
+    // ヘッダー行全体に背景色を一括で付ける（セルごとに指定するより1リクエストで済む）
+    {
+      updateTableCellProperties: {
+        objectId,
+        tableRange: { location: { rowIndex: 0, columnIndex: 0 }, rowSpan: 1, columnSpan: columnCount },
+        tableCellProperties: { tableCellBackgroundFill: { solidFill: { color: { rgbColor: headerBg } } } },
+        fields: 'tableCellBackgroundFill.solidFill.color',
       },
     },
   ]
@@ -157,19 +234,25 @@ function buildSlideRequests(
   heightIn: number
 ): slides_v1.Schema$Request[] {
   const r = toRenderable(section)
+  const { text: textColor, bar: barColor } = sectionColors(section)
   const contentX = MARGIN
   const contentW = widthIn - MARGIN * 2
-  const titleH = 0.8
-  const bodyY = MARGIN + titleH + 0.2
+  const titleH = 0.7
+  const titleTextX = contentX + 0.22 // アクセントバーの分だけ本文よりインデントする
+  const bodyY = MARGIN + titleH + 0.3
   const bodyH = heightIn - bodyY - MARGIN
 
-  const requests = buildTextBoxRequests(`${slideId}_title`, slideId, contentX, MARGIN, contentW, titleH, r.title, {
-    bold: true,
-    fontSize: 20,
-  })
+  const requests = buildAccentBarRequests(`${slideId}_bar`, slideId, contentX, MARGIN, titleH, barColor)
+  requests.push(
+    ...buildTextBoxRequests(`${slideId}_title`, slideId, titleTextX, MARGIN, contentW - (titleTextX - contentX), titleH, r.title, {
+      bold: true,
+      fontSize: 22,
+      color: textColor,
+    })
+  )
 
   if (r.table) {
-    requests.push(...buildTableRequests(`${slideId}_table`, slideId, contentX, bodyY, contentW, bodyH, r.table))
+    requests.push(...buildTableRequests(`${slideId}_table`, slideId, contentX, bodyY, contentW, bodyH, r.table, COLOR.neutralBar))
   } else if (r.bullets) {
     requests.push(
       ...buildTextBoxRequests(`${slideId}_body`, slideId, contentX, bodyY, contentW, bodyH, r.bullets.join('\n'), {
