@@ -52,13 +52,16 @@ function accentFor(section: SlideSection): string {
 function titleFor(section: SlideSection): string {
   switch (section.kind) {
     case 'cover': return section.title
+    case 'kpi': return '全体像'
     case 'intro': return '目的・概要'
     case 'stimulus': return 'テスト対象'
     case 'summary': return section.heading
     case 'task-success': return 'タスク成功率'
     case 'task-detail': return 'タスク別詳細'
     case 'score': return '満足度スコア'
+    case 'score-distribution': return section.questionText
     case 'emotion': return '感情・所感の傾向'
+    case 'participants': return '参加者別結果'
     case 'highlights': return '注目発言'
   }
 }
@@ -67,14 +70,18 @@ function titleFor(section: SlideSection): string {
 function kickerFor(section: SlideSection): string {
   switch (section.kind) {
     case 'cover': return '調査結果レポート'
+    case 'kpi': return '調査結果レポート'
     case 'intro': return '調査概要'
     case 'stimulus': return '調査概要'
     case 'summary': return `総括 ・ ${section.heading}`
     case 'task-success':
     case 'task-detail':
       return 'タスク計測'
-    case 'score': return '定量データ'
+    case 'score':
+    case 'score-distribution':
+      return '定量データ'
     case 'emotion': return '定量データ'
+    case 'participants': return '定量データ'
     case 'highlights': return '定性データ'
   }
 }
@@ -151,18 +158,29 @@ function Card({ children, style }: { children: React.ReactNode; style?: React.CS
   )
 }
 
+/**
+ * AIが根拠付きで長めの文章を返すようになった分、項目数が多い（4件以上）ときは
+ * 固定サイズの1080pxキャンバスからはみ出しうる。件数に応じて段階的に詰めて
+ * 収まりを優先する（真の自動収縮ではないが、事前に決め打ちした3段階で十分安全に運用できる）。
+ */
 function BulletList({ items, accent }: { items: string[]; accent: string }) {
+  const dense = items.length >= 6 ? 'tight' : items.length >= 4 ? 'compact' : 'normal'
+  const sizing = {
+    normal: { gap: 18, padding: '26px 34px', fontSize: 29, lineHeight: 1.55 },
+    compact: { gap: 14, padding: '20px 30px', fontSize: 25, lineHeight: 1.5 },
+    tight: { gap: 10, padding: '16px 26px', fontSize: 22, lineHeight: 1.45 },
+  }[dense]
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: sizing.gap }}>
       {items.map((text, i) => (
         <div key={i} style={{
           display: 'flex', flexDirection: 'row', backgroundColor: COLOR.cardBg,
-          borderRadius: 16, padding: '26px 34px',
+          borderRadius: 16, padding: sizing.padding,
           borderTop: `1px solid ${COLOR.border}`, borderRight: `1px solid ${COLOR.border}`,
           borderBottom: `1px solid ${COLOR.border}`, borderLeft: `6px solid ${accent}`,
           boxShadow: CARD_SHADOW,
         }}>
-          <div style={{ fontSize: 29, color: COLOR.ink, lineHeight: 1.55, display: 'flex' }}>{text}</div>
+          <div style={{ fontSize: sizing.fontSize, color: COLOR.ink, lineHeight: sizing.lineHeight, display: 'flex' }}>{text}</div>
         </div>
       ))}
     </div>
@@ -215,6 +233,20 @@ function StatPill({ label, value }: { label: string; value: string }) {
   )
 }
 
+/** KPIダッシュボード用の指標カード。白背景ページ上に置くので StatPill とは別の配色にする */
+function MetricCard({ label, value, accent, width }: { label: string; value: string; accent: string; width: number }) {
+  return (
+    <div style={{
+      display: 'flex', flexDirection: 'column', gap: 12, width,
+      backgroundColor: COLOR.cardBg, borderRadius: 20, border: `1px solid ${COLOR.border}`,
+      boxShadow: CARD_SHADOW, padding: '32px 36px',
+    }}>
+      <div style={{ fontSize: 24, color: COLOR.sub, display: 'flex' }}>{label}</div>
+      <div style={{ fontSize: 42, fontWeight: 700, color: accent, display: 'flex' }}>{value}</div>
+    </div>
+  )
+}
+
 export function renderSection(section: SlideSection, index: number, total: number): React.ReactElement {
   const accent = accentFor(section)
   const title = titleFor(section)
@@ -256,6 +288,22 @@ export function renderSection(section: SlideSection, index: number, total: numbe
           <PageFooter index={index} total={total} dark />
         </div>
       )
+
+    case 'kpi': {
+      const palette = [COLOR.facts, COLOR.action, COLOR.hypothesis, COLOR.neutralAccent]
+      // コンテンツ幅1728pxを3列（カード幅560px・gap24px）で並べる。flexの伸縮に任せると
+      // 最終行の余りカードだけ幅いっぱいに間延びするため、幅は固定値で揃える
+      const cardWidth = 560
+      return (
+        <Frame accent={accent} title={title} kicker={kicker} index={index} total={total}>
+          <div style={{ display: 'flex', flexDirection: 'row', flexWrap: 'wrap', gap: 24 }}>
+            {section.items.map((item, i) => (
+              <MetricCard key={i} label={item.label} value={item.value} accent={palette[i % palette.length]} width={cardWidth} />
+            ))}
+          </div>
+        </Frame>
+      )
+    }
 
     case 'intro':
       return (
@@ -373,12 +421,59 @@ export function renderSection(section: SlideSection, index: number, total: numbe
         </Frame>
       )
 
+    case 'score-distribution':
+      return (
+        <Frame accent={accent} title={title} kicker={kicker} index={index} total={total}>
+          <BarChart
+            items={section.buckets.map((b) => ({ label: b.label, percent: b.percent, displayValue: `${b.count}人（${Math.round(b.percent)}%）` }))}
+            accent={COLOR.facts}
+          />
+        </Frame>
+      )
+
     case 'emotion':
       return (
         <Frame accent={accent} title={title} kicker={kicker} index={index} total={total}>
           <BarChart items={section.rows.map((r) => ({ label: r.label, percent: r.percent, displayValue: r.value }))} accent={COLOR.hypothesis} />
         </Frame>
       )
+
+    case 'participants': {
+      const cols = ['参加者', 'ステータス', 'タスク成功', 'スコア']
+      const widths = [0.34, 0.22, 0.22, 0.22]
+      return (
+        <Frame accent={accent} title={title} kicker={kicker} index={index} total={total}>
+          <div style={{
+            display: 'flex', flexDirection: 'column', borderRadius: 20, overflow: 'hidden',
+            border: `1px solid ${COLOR.border}`, boxShadow: CARD_SHADOW,
+          }}>
+            <div style={{ display: 'flex', flexDirection: 'row', backgroundColor: COLOR.neutralAccent }}>
+              {cols.map((c, i) => (
+                <div key={i} style={{
+                  width: `${widths[i] * 100}%`, padding: '20px 24px', fontSize: 22,
+                  fontWeight: 700, color: '#ffffff', display: 'flex',
+                }}>
+                  {c}
+                </div>
+              ))}
+            </div>
+            {section.rows.map((r, i) => (
+              <div key={i} style={{
+                display: 'flex', flexDirection: 'row',
+                backgroundColor: i % 2 === 0 ? COLOR.cardBg : COLOR.page,
+                borderTop: `1px solid ${COLOR.border}`,
+              }}>
+                {[r.name, r.status, r.taskSummary, r.scoreSummary].map((v, j) => (
+                  <div key={j} style={{ width: `${widths[j] * 100}%`, padding: '20px 24px', fontSize: 22, color: COLOR.ink, display: 'flex' }}>
+                    {v}
+                  </div>
+                ))}
+              </div>
+            ))}
+          </div>
+        </Frame>
+      )
+    }
 
     case 'highlights':
       return (

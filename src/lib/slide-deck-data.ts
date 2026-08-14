@@ -1,6 +1,6 @@
 import {
   aggregateTasks, aggregateScores, overallSuccess, hardestTask,
-  calcNps, type SessionLike,
+  calcNps, avgSessionDuration, type SessionLike,
 } from './interview-aggregate'
 import type { SlideSummaryResult } from './ai'
 
@@ -27,6 +27,7 @@ export interface SlideSession extends SessionLike {
 
 export type SlideSection =
   | { kind: 'cover'; title: string; period: string; participantCount: number }
+  | { kind: 'kpi'; items: { label: string; value: string }[] }
   | { kind: 'intro'; objective: string | null; description: string | null }
   | { kind: 'stimulus'; imageUrl: string | null; caption: string }
   | { kind: 'summary'; heading: string; items: string[] }
@@ -40,12 +41,20 @@ export type SlideSection =
     }
   | { kind: 'task-detail'; rows: { text: string; rate: string; avgDuration: string; hintRate: string }[] }
   | { kind: 'score'; rows: { label: string; value: string; percent: number }[] }
+  | { kind: 'score-distribution'; questionText: string; buckets: { label: string; count: number; percent: number }[] }
   | { kind: 'emotion'; rows: { label: string; value: string; percent: number }[] }
+  | { kind: 'participants'; rows: { name: string; status: string; taskSummary: string; scoreSummary: string }[] }
   | { kind: 'highlights'; quotes: string[] }
 
 const MAX_HIGHLIGHTS = 8
 const MAX_SCORE_ROWS = 12
 const MAX_TASK_ROWS = 12
+const MAX_PARTICIPANT_ROWS = 14
+const MAX_DISTRIBUTION_QUESTIONS = 3
+
+const STATUS_LABEL: Record<string, string> = {
+  pending: '待機中', active: '進行中', processing: '分析中', done: '分析済み', completed: '完了',
+}
 
 /**
  * セッションから集計した「素材」。AIへのサマリー生成プロンプトと、実際のスライドの
@@ -54,10 +63,13 @@ const MAX_TASK_ROWS = 12
 export interface SlideStats {
   participantCount: number
   period: string
+  avgDuration: string | null
   taskSuccess: { rate: number; unaidedRate: number; completed: number; total: number; hardest: { text: string; rate: number } | null } | null
   taskRows: { text: string; rate: string; avgDuration: string; hintRate: string }[]
   scoreRows: { label: string; value: string; percent: number }[]
+  scoreDistributions: { questionText: string; buckets: { label: string; count: number; percent: number }[] }[]
   emotionRows: { label: string; value: string; percent: number }[]
+  participantRows: { name: string; status: string; taskSummary: string; scoreSummary: string }[]
 }
 
 /**
@@ -126,6 +138,35 @@ export function computeSlideStats(sessions: SlideSession[]): SlideStats {
     scoreRows.push({ label: `ほか ${scoreAgg.length - MAX_SCORE_ROWS}件`, value: '', percent: 0 })
   }
 
+  // 平均だけでは「何人が高評価/低評価だったか」が分からないため、代表的な質問だけ内訳も出す
+  // （質問数が多い調査でスライドが際限なく増えないよう上限を設ける）
+  const scoreDistributions = scoreAgg
+    .slice(0, MAX_DISTRIBUTION_QUESTIONS)
+    .map((s) => {
+      const total = s.values.length
+      const buckets = s.type === 'nps'
+        ? (() => {
+            const counts = [0, 0, 0]
+            s.values.forEach((v) => {
+              if (v <= 6) counts[0] += 1
+              else if (v <= 8) counts[1] += 1
+              else counts[2] += 1
+            })
+            const labels = ['批判者（0-6点）', '中立（7-8点）', '推奨者（9-10点）']
+            return labels.map((label, i) => ({ label, count: counts[i], percent: clampPercent((counts[i] / total) * 100) }))
+          })()
+        : (() => {
+            const counts = [0, 0, 0, 0, 0]
+            s.values.forEach((v) => {
+              const idx = Math.round(v) - 1
+              if (idx >= 0 && idx < counts.length) counts[idx] += 1
+            })
+            return counts.map((count, i) => ({ label: `${i + 1}点`, count, percent: clampPercent((count / total) * 100) }))
+          })()
+      return { questionText: s.text, buckets }
+    })
+    .filter((d) => d.buckets.some((b) => b.count > 0))
+
   const emotionSessions = sessions.filter((s) => s.status === 'done' && s.emotions && s.emotions.length > 0)
   const emotionRows = emotionSessions.length > 0
     ? (() => {
@@ -144,12 +185,40 @@ export function computeSlideStats(sessions: SlideSession[]): SlideStats {
       })()
     : []
 
-  return { participantCount: sessions.length, period, taskSuccess, taskRows, scoreRows, emotionRows }
+  const duration = avgSessionDuration(sessions)
+  const avgDuration = duration ? formatDuration(duration.mean) : null
+
+  const participantRows = sessions.map((s) => {
+    const tasks = (s.taskResults ?? []).filter((t) => !t.excludedAt && t.outcome !== 'not_attempted')
+    const taskSummary = tasks.length > 0
+      ? `${tasks.filter((t) => t.outcome === 'completed').length}/${tasks.length}件成功`
+      : '—'
+    const scoreValues = (s.answers ?? [])
+      .filter((a): a is typeof a & { valueNum: number } =>
+        !a.excludedAt && (a.type === 'rating' || a.type === 'nps') && typeof a.valueNum === 'number'
+      )
+      .map((a) => a.valueNum)
+    const scoreSummary = scoreValues.length > 0 ? `平均 ${avg(scoreValues).toFixed(1)}` : '—'
+    return {
+      name: s.participantName,
+      status: STATUS_LABEL[s.status ?? ''] ?? (s.status ?? '—'),
+      taskSummary,
+      scoreSummary,
+    }
+  })
+
+  return {
+    participantCount: sessions.length, period, avgDuration, taskSuccess, taskRows,
+    scoreRows, scoreDistributions, emotionRows, participantRows,
+  }
 }
 
 /** AIにサマリーを書かせるための、定量データの読み上げテキスト表現 */
 export function renderStatsText(stats: SlideStats): string {
   const lines: string[] = [`参加者数: ${stats.participantCount}人（実施期間: ${stats.period}）`]
+  if (stats.avgDuration) {
+    lines.push(`平均所要時間: ${stats.avgDuration}`)
+  }
   if (stats.taskSuccess) {
     lines.push(
       `タスク成功率: 全体 ${stats.taskSuccess.rate}%（${stats.taskSuccess.completed}/${stats.taskSuccess.total}回）・自力 ${stats.taskSuccess.unaidedRate}%`
@@ -190,6 +259,32 @@ export function buildSlideSections(input: BuildSlideSectionsInput): SlideSection
   // 表紙は常に出す（実施実績が0件でも、調査自体の存在は示す）
   sections.push({ kind: 'cover', title, period: stats.period, participantCount: stats.participantCount })
 
+  // 表紙の直後に、主要な数値だけを1枚にまとめた「全体像」を置く（詳細は後続のスライドで）
+  const kpiItems: { label: string; value: string }[] = []
+  if (stats.taskSuccess) {
+    kpiItems.push({ label: 'タスク成功率', value: `${stats.taskSuccess.rate}%` })
+    kpiItems.push({ label: '自力成功率', value: `${stats.taskSuccess.unaidedRate}%` })
+  }
+  if (stats.scoreRows[0]) {
+    // KPIカードは数値だけを大きく見せる場所なので、内訳（n数など）を含む長い文字列ではなく
+    // 先頭の短い表記（「NPS 12」「平均 4.2 / 5」）だけを使う
+    const shortValue = stats.scoreRows[0].value.split('（')[0].trim()
+    kpiItems.push({ label: stats.scoreRows[0].label, value: shortValue })
+  }
+  const positiveEmotion = stats.emotionRows.find((r) => r.label === '喜び')
+  if (positiveEmotion) {
+    kpiItems.push({ label: 'ポジティブ感情の割合', value: positiveEmotion.value })
+  }
+  if (stats.avgDuration) {
+    kpiItems.push({ label: '平均所要時間', value: stats.avgDuration })
+  }
+  if (highlights.length > 0) {
+    kpiItems.push({ label: '注目発言', value: `${highlights.length}件` })
+  }
+  if (kpiItems.length > 0) {
+    sections.push({ kind: 'kpi', items: kpiItems })
+  }
+
   // 目的・概要はテスト対象の可視化より先、冒頭に出す
   if (intro && (intro.objective || intro.description)) {
     sections.push({ kind: 'intro', objective: intro.objective, description: intro.description })
@@ -219,8 +314,25 @@ export function buildSlideSections(input: BuildSlideSectionsInput): SlideSection
     sections.push({ kind: 'score', rows: stats.scoreRows })
   }
 
+  // 平均だけでなく「何人が高評価/低評価だったか」の内訳（代表的な質問のみ、上限あり）
+  stats.scoreDistributions.forEach((d) => {
+    sections.push({ kind: 'score-distribution', questionText: d.questionText, buckets: d.buckets })
+  })
+
   if (stats.emotionRows.length > 0) {
     sections.push({ kind: 'emotion', rows: stats.emotionRows })
+  }
+
+  // 参加者ごとの結果一覧（誰がどのタスクで詰まったか等を個別に追える一覧）
+  if (stats.participantRows.length > 0) {
+    const rows = stats.participantRows.slice(0, MAX_PARTICIPANT_ROWS)
+    if (stats.participantRows.length > MAX_PARTICIPANT_ROWS) {
+      rows.push({
+        name: `ほか ${stats.participantRows.length - MAX_PARTICIPANT_ROWS}件`,
+        status: '', taskSummary: '', scoreSummary: '',
+      })
+    }
+    sections.push({ kind: 'participants', rows })
   }
 
   if (highlights.length > 0) {

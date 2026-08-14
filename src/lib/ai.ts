@@ -404,7 +404,7 @@ export async function generateSlideSummary(input: {
   try {
     const response = await getOpenAI().chat.completions.create({
       model: 'gpt-4o',
-      max_tokens: 1536,
+      max_tokens: 4096,
       response_format: { type: 'json_object' },
       messages: [
         {
@@ -412,14 +412,20 @@ export async function generateSlideSummary(input: {
           content: `${UNTRUSTED_DATA_GUARD}
 以下は「${clampText(input.title, LIMITS.topic)}」というテストの結果です。
 ${input.objective ? `このテストで明らかにしたいことは次の通りです。これを踏まえて総括してください:\n${wrapUntrusted(clampText(input.objective, LIMITS.topic), LIMITS.topic)}\n` : ''}
-社内向け資料に使う総括を、次のJSON形式で作成してください（キーはこの3つのみ、各値は文字列の配列。各配列1〜3件、簡潔な日本語の箇条書き）。
+社内向け資料に使う総括を、次のJSON形式で作成してください（キーはこの3つのみ、各値は文字列の配列）。
 {
   "facts": ["数字や傾向から読み取れる事実"],
   "hypotheses": ["なぜそうなったと考えられるかの仮説"],
   "actions": ["改善の示唆・次に検証すべきこと"]
 }
 
-hypotheses（仮説）は、根拠にした参加者名を文末に「（参加者: 〇〇）」の形で必ず明記してください。
+根拠が十分にある限り、各配列は3〜5件を目安に、読み手が納得できるだけの厚みを持たせてください
+（データが薄い調査で無理に件数を埋める必要はありません。1件も無理なく作れない配列は空配列のままにしてください）。
+各項目は一文で終わらせず、「何が起きているか」に加えて「その根拠となる数字や発言」を同じ項目内に含め、
+読むだけで背景まで伝わるようにしてください（目安2文程度）。
+
+hypotheses（仮説）は、根拠にした参加者名を文末に「（参加者: 〇〇）」の形で必ず明記し、
+その参加者が実際に何と言ったか（発言の要旨や具体的な引用）を項目本文に含めてください。
 複数人の発言が根拠なら「（参加者: 〇〇、△△）」のように列挙してください。
 発言の裏付けが無く定量データのみから導いた仮説には参加者名を付けないでください。
 データが少なく確度の低い推測になる場合は断定せず「〜の可能性がある」にとどめてください。参加者数が少ない場合はそれを踏まえた慎重な書き方にしてください。
@@ -434,6 +440,11 @@ ${wrapUntrusted(input.qualitativeText || 'なし', LIMITS.context)}`,
       ],
     })
     const text = response.choices[0].message.content ?? '{}'
+    // 項目数・文章量を増やした分、出力が max_tokens で打ち切られると JSON ごと壊れて
+    // 全カテゴリが失われる。原因を追えるようログに残す。
+    if (response.choices[0].finish_reason === 'length') {
+      console.error('[generateSlideSummary] 出力が max_tokens で打ち切られました（データ量が多すぎる可能性）')
+    }
     const parsed = JSON.parse(text)
     const toArray = (v: unknown): string[] =>
       Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []
