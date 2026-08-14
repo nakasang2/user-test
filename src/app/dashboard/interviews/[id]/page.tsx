@@ -3,7 +3,7 @@
 import { useState, useEffect, use, useMemo } from 'react'
 import Link from 'next/link'
 import { RadarChart, Radar, PolarGrid, PolarAngleAxis, ResponsiveContainer, Tooltip } from 'recharts'
-import { Search, X, Pencil, Download, FlaskConical, RefreshCw, Trash2, SlidersHorizontal } from 'lucide-react'
+import { Search, X, Pencil, Download, FlaskConical, RefreshCw, Trash2, SlidersHorizontal, Presentation } from 'lucide-react'
 import { hasPermission } from '@/lib/permissions'
 import EditInterviewModal from '@/components/EditInterviewModal'
 import FloatingAgentChat from '@/components/FloatingAgentChat'
@@ -97,6 +97,7 @@ export default function InterviewComparePage(props: { params: Promise<{ id: stri
   const [search, setSearch] = useState('')
   const [editing, setEditing] = useState(false)
   const [pilotStarting, setPilotStarting] = useState(false)
+  const [generatingSlides, setGeneratingSlides] = useState(false)
   const [backfilling, setBackfilling] = useState(false)
   const [reanalyzing, setReanalyzing] = useState(false)
   const [reanalyzeMsg, setReanalyzeMsg] = useState('')
@@ -240,6 +241,29 @@ export default function InterviewComparePage(props: { params: Promise<{ id: stri
       alert('パイロットの開始に失敗しました')
     } finally {
       setPilotStarting(false)
+    }
+  }
+  async function generateSlides() {
+    setGeneratingSlides(true)
+    try {
+      const res = await fetch(`/api/interviews/${id}/slides`, { method: 'POST' })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        if (data.error === 'google_not_connected') {
+          if (confirm('スライド資料の生成には、ご自身のGoogleアカウントの接続が必要です。接続画面を開きますか？')) {
+            window.location.href = '/dashboard/settings/google'
+          }
+          return
+        }
+        alert('スライド資料の生成に失敗しました')
+        return
+      }
+      // 新しいタブで開く（この結果画面からは離れない）
+      window.open(data.url, '_blank')
+    } catch {
+      alert('スライド資料の生成に失敗しました')
+    } finally {
+      setGeneratingSlides(false)
     }
   }
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
@@ -421,6 +445,15 @@ export default function InterviewComparePage(props: { params: Promise<{ id: stri
               <Download className="w-3.5 h-3.5" strokeWidth={2} />
               CSV出力
             </a>
+            <button
+              onClick={generateSlides}
+              disabled={generatingSlides}
+              className="inline-flex items-center gap-1.5 border border-gray-300 hover:border-gray-400 disabled:opacity-50 text-gray-700 hover:text-gray-900 px-3 py-1.5 rounded-md text-sm transition-colors"
+              title="現在の集計結果からGoogleスライドの資料を自動生成します（ご自身のGoogle Driveに保存されます）"
+            >
+              <Presentation className="w-3.5 h-3.5" strokeWidth={2} />
+              {generatingSlides ? '生成中…' : 'スライド資料を生成'}
+            </button>
             <button
               onClick={reanalyzeAll}
               disabled={reanalyzing}
