@@ -500,11 +500,11 @@ export default function InterviewRoom({
   // 終わった時点で即座に出てしまい、この案内を読み終える前にタスク1が見えてしまう
   // 問題があった（ユーザー指摘）。案内と本文を分け、案内は小窓にもテキストで
   // 表示させ、参加者が小窓の「スタート」を押してから初めてタスク1を出す。
-  // 調査作成時の「説明（任意）」も、この「はじめに」の案内と合わせて読み上げ・
-  // 表示する（タスク1側の音声だけに含めると、小窓に対応するテキストが出ず
-  // 参加者が何を聞いたのか読み返せなかった。ユーザー指摘で「はじめに」に統合）。
+  // 調査作成時の「説明（任意）」がある場合は、この「はじめに」でその説明文だけを
+  // 表示・読み上げする（定型の思考発話案内とは統合しない。説明文が無い調査だけ
+  // 定型案内を使う。ユーザー指摘: 「入力した内容のみ、表示・朗読されるように」）。
   const speakGuidance = useCallback(() => {
-    const text = description?.trim() ? `${description.trim()} ${USABILITY_GUIDANCE_TEXT}` : USABILITY_GUIDANCE_TEXT
+    const text = description?.trim() || USABILITY_GUIDANCE_TEXT
     widgetChannelRef.current?.postMessage({ type: 'guidance_text', text })
     speak(text, undefined, {
       log: false,
