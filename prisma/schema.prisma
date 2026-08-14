@@ -57,6 +57,13 @@ model User {
   createdInvites Invite[]     @relation("InviteCreatedBy")
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
+  // Google連携（スライド資料の自動生成用）。本人のGoogleアカウントにOAuthで接続する。
+  // googleRefreshToken はこの値だけで本人のGoogle Driveに書き込める極めて機密性の高い値なので、
+  // API レスポンスで絶対に select/include しない（passwordHash と同格の扱い）
+  googleRefreshToken String?
+  // 表示用（設定画面に「〇〇@gmail.com として接続中」と出すため）。トークンではないので害はない
+  googleEmail        String?
+  googleConnectedAt  DateTime?
 }
 
 // 組織×ユーザーの多対多（将来の複数組織対応も見据えた junction table）

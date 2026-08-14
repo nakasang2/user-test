@@ -17,6 +17,7 @@ import {
   Check,
   Trash2,
   FileText,
+  Link2,
 } from 'lucide-react'
 
 interface Question {
@@ -237,6 +238,13 @@ export default function Dashboard() {
           >
             <FileText className="w-3.5 h-3.5" strokeWidth={2} />
             テンプレート
+          </Link>
+          <Link
+            href="/dashboard/settings/google"
+            className="inline-flex items-center gap-1.5 border border-gray-300 hover:border-gray-400 px-3 py-1.5 rounded-md text-xs text-gray-600 hover:text-gray-900 transition-colors"
+          >
+            <Link2 className="w-3.5 h-3.5" strokeWidth={2} />
+            Google連携
           </Link>
           <Link
             href="/dashboard/settings/members"

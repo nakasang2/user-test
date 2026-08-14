@@ -19,7 +19,11 @@ export async function POST(req: NextRequest) {
     }
     const { email, password } = parsed.data
 
-    const user = await prisma.user.findUnique({ where: { email } })
+    // 認証に不要な列（google連携のトークン等）をそもそもメモリに載せない
+    const user = await prisma.user.findUnique({
+      where: { email },
+      select: { id: true, email: true, passwordHash: true, organizationId: true, role: true },
+    })
     if (!user) {
       // タイミング攻撃対策：ユーザーが存在しない場合もハッシュ比較時間を消費
       await bcrypt.compare(password, '$2a$12$dummyhashfortiminng000000000000000000000000')

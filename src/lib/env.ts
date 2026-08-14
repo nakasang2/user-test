@@ -15,6 +15,12 @@ const schema = z.object({
   UPSTASH_REDIS_REST_URL: z.string().optional(),
   UPSTASH_REDIS_REST_TOKEN: z.string().optional(),
   NEXT_PUBLIC_APP_URL: z.string().optional(),
+  // スライド資料の自動生成（Googleアカウント連携）用。未設定なら接続ボタンは出るが失敗する
+  GOOGLE_OAUTH_CLIENT_ID: z.string().optional(),
+  GOOGLE_OAUTH_CLIENT_SECRET: z.string().optional(),
+  // Googleの refresh token を暗号化してDBに保存するための鍵（base64・32バイト）。
+  // 未設定だと Google 連携機能自体を無効化する（平文保存はしない）
+  TOKEN_ENCRYPTION_KEY: z.string().optional(),
 })
 
 type Env = z.infer<typeof schema>
@@ -43,6 +49,12 @@ export function validateEnv(): void {
   if (!process.env.PUBLIC_IMAGES_READ_WRITE_TOKEN) missing.push('PUBLIC_IMAGES_READ_WRITE_TOKEN（質問画像のアップロードが無効）')
   if (!process.env.UPSTASH_REDIS_REST_URL || !process.env.UPSTASH_REDIS_REST_TOKEN) {
     missing.push('UPSTASH_REDIS_REST_URL/TOKEN（レート制限がインメモリ＝サーバーレスでは不完全）')
+  }
+  if (!process.env.GOOGLE_OAUTH_CLIENT_ID || !process.env.GOOGLE_OAUTH_CLIENT_SECRET) {
+    missing.push('GOOGLE_OAUTH_CLIENT_ID/SECRET（スライド資料生成のGoogleアカウント連携が無効）')
+  }
+  if (!process.env.TOKEN_ENCRYPTION_KEY) {
+    missing.push('TOKEN_ENCRYPTION_KEY（Google連携のトークン暗号化ができないため機能を無効化）')
   }
   if (missing.length) console.warn('[env] 任意の環境変数が未設定:', missing.join(' / '))
 }
