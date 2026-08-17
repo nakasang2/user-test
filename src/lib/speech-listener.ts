@@ -48,8 +48,13 @@ export type SpeechListenerOptions = {
   onFinal: (text: string) => void
   /** 何も聞き取れないまま沈黙が続いた。1回だけ呼ばれる */
   onSilence: () => void
-  /** 認識を続けられなくなった。partial には聞き取れていた分が入る。1回だけ呼ばれる */
-  onGiveUp: (partial: string) => void
+  /**
+   * 認識を続けられなくなった。1回だけ呼ばれる。
+   * partial には聞き取れていた分、reason には原因（ブラウザのエラー種別、または
+   * 一度も開始できなかったことを示す 'not-started'）が入る。
+   * 原因が分からないと現場で手の打ちようがないため、必ず表に出せるようにしておく。
+   */
+  onGiveUp: (partial: string, reason: string) => void
 }
 
 function getSpeechRecognitionCtor(): (new () => any) | undefined {
@@ -87,6 +92,10 @@ export function startSpeechListener(opts: SpeechListenerOptions): SpeechListener
   let restartAttempts = 0
   let current: any = null
   let silenceTimer: ReturnType<typeof setTimeout> | null = null
+  /** 直近の失敗理由（諦めるときに呼び出し側へ渡す） */
+  let lastErrorCode = ''
+  /** 一度でも認識が実際に始まったか。始まってすらいないなら環境側で塞がれている */
+  let everStarted = false
 
   function clearSilenceTimer() {
     if (silenceTimer) {
@@ -131,6 +140,12 @@ export function startSpeechListener(opts: SpeechListenerOptions): SpeechListener
     }, silenceMs)
   }
 
+  /** 諦めた原因。現場から報告してもらうために、そのまま画面へ出せる短い文字列にする */
+  function giveUpReason(): string {
+    if (!everStarted) return lastErrorCode ? `not-started:${lastErrorCode}` : 'not-started'
+    return lastErrorCode || 'unknown'
+  }
+
   /** 結果を1つだけ通知して終了する */
   function finish(notify: () => void) {
     if (finished) return
@@ -152,8 +167,9 @@ export function startSpeechListener(opts: SpeechListenerOptions): SpeechListener
         // start() が例外を投げた場合、このインスタンスは onend も onerror も出さない。
         // ここで面倒を見ないと、再試行も通知も無いまま無音で完全に止まる
         restartAttempts++
+        lastErrorCode = lastErrorCode || 'start-failed'
         if (restartAttempts > MAX_RESTART_ATTEMPTS) {
-          finish(() => opts.onGiveUp(finalText.trim()))
+          finish(() => opts.onGiveUp(finalText.trim(), giveUpReason()))
         } else {
           scheduleRestart(500)
         }
@@ -174,6 +190,7 @@ export function startSpeechListener(opts: SpeechListenerOptions): SpeechListener
 
     recognition.onstart = () => {
       startedAt = Date.now()
+      everStarted = true
     }
 
     recognition.onresult = (event: any) => {
@@ -212,7 +229,8 @@ export function startSpeechListener(opts: SpeechListenerOptions): SpeechListener
       // 再開処理はここに書かない（error のあとは onend も必ず発火するため、
       // ここで start() すると二重起動になる）
       errored = true
-      console.warn('[UserVoice] 音声認識エラー', e?.error)
+      lastErrorCode = String(e?.error ?? 'unknown')
+      console.warn('[UserVoice] 音声認識エラー', lastErrorCode)
     }
 
     recognition.onend = () => {
@@ -231,7 +249,7 @@ export function startSpeechListener(opts: SpeechListenerOptions): SpeechListener
         // ここで止まると参加者は話しても進めない状態で固まるので聞き取りを続ける
         restartAttempts++
         if (restartAttempts > MAX_RESTART_ATTEMPTS) {
-          finish(() => opts.onGiveUp(finalText.trim()))
+          finish(() => opts.onGiveUp(finalText.trim(), giveUpReason()))
           return
         }
         armSilenceTimer()
@@ -248,7 +266,7 @@ export function startSpeechListener(opts: SpeechListenerOptions): SpeechListener
       else restartAttempts++
 
       if (restartAttempts > MAX_RESTART_ATTEMPTS) {
-        finish(() => opts.onGiveUp(finalText.trim()))
+        finish(() => opts.onGiveUp(finalText.trim(), giveUpReason()))
         return
       }
       scheduleRestart(healthy ? 0 : 500)

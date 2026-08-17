@@ -1279,6 +1279,10 @@ export default function InterviewRoom({
         pipWindow.document.body.style.cssText = 'margin:0;padding:0;overflow:hidden;background:#ffffff;height:100%;'
         const iframe = pipWindow.document.createElement('iframe')
         iframe.src = url
+        // 小窓は「PiP ウィンドウの中の iframe」という入れ子構造。マイク・カメラは
+        // 明示的に許可しないと、入れ子の中で使えないことがある。事後質問の聞き取りは
+        // この中で行うため、ここが塞がると参加者は声で答えられなくなる
+        iframe.allow = 'camera; microphone; display-capture; autoplay'
         iframe.style.cssText = 'width:100%;height:100%;border:none;display:block;'
         pipWindow.document.body.appendChild(iframe)
         pipWindowRef.current = pipWindow

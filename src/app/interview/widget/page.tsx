@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useRef, useMemo, Suspense } from 'react'
 import { useSearchParams } from 'next/navigation'
-import { Monitor, Check, X, AlertTriangle, CheckCircle2, Globe, Volume2 } from 'lucide-react'
+import { Monitor, Check, X, AlertTriangle, CheckCircle2, Globe, Volume2, Mic } from 'lucide-react'
 import SeqScale from '@/components/SeqScale'
 import StuckHelp from '@/components/StuckHelp'
 import TaskRecovery, { TaskRecoveryActions } from '@/components/TaskRecovery'
@@ -92,6 +92,10 @@ function WidgetContent() {
   const [aiThinking, setAiThinking]             = useState(false)
   const [answerInput, setAnswerInput]           = useState('')
   const [listenNotice, setListenNotice]         = useState('')
+  // 聞き取りを諦めた原因（ブラウザのエラー種別）。原因の切り分けに使う
+  const [listenReason, setListenReason]         = useState('')
+  // 最後に受け取った listen_start の再試行フラグ（「もう一度話す」で使う）
+  const listenRetryRef                          = useRef(false)
   const listenerRef                             = useRef<SpeechListener | null>(null)
   // ヒントを見たタスク番号（0始まり）。結果送信時に添えて集計で自力達成と分ける
   const usedHintIdxRef                          = useRef<Set<number>>(new Set())
@@ -148,6 +152,7 @@ function WidgetContent() {
           setLiveText('')
           setAnswerInput('')
           setListenNotice('')
+          setListenReason('')
         } else if (type === 'answer_ack') {
           if (e.data.accepted === true) {
             // 受け取られた分だけ入力欄から消す（そのあと打ち足した分は残す）
@@ -326,7 +331,9 @@ function WidgetContent() {
 
   function beginListening(silenceRetry: boolean) {
     stopListening()
+    listenRetryRef.current = silenceRetry
     setListenNotice('')
+    setListenReason('')
     const listener = startSpeechListener({
       onLiveText: setLiveText,
       onListeningChange: setIsListening,
@@ -340,18 +347,22 @@ function WidgetContent() {
         setLiveText('')
         channelRef.current?.postMessage({ type: 'answer_silence', retry: silenceRetry })
       },
-      onGiveUp: (partial) => {
+      onGiveUp: (partial, reason) => {
         listenerRef.current = null
         setLiveText('')
         // 聞き取れていた分は捨てず、そのまま送れるよう入力欄へ移す
         if (partial) setAnswerInput((prev) => (prev.trim() ? prev : partial))
-        setListenNotice('音声がうまく認識できませんでした。下の欄に入力して送信してください。')
+        // 原因を画面に出す。これが分からないと、現場で何が塞がれているのか
+        // 突き止めようがない（マイク権限・ネットワーク・入れ子の許可などで挙動が違う）
+        setListenNotice('音声がうまく認識できませんでした。')
+        setListenReason(reason)
       },
     })
     listenerRef.current = listener
     if (!listener) {
       setIsListening(false)
       setListenNotice('この環境では音声認識を使えません。下の欄に入力して送信してください。')
+      setListenReason('unsupported')
     }
   }
 
@@ -361,6 +372,7 @@ function WidgetContent() {
     if (!text) return
     stopListening()
     setListenNotice('')
+    setListenReason('')
     // 入力欄はまだ空にしない。メインが受け取れたかどうか（answer_ack）を見てから
     // 消す。先に消すと、次の質問へ進んだ直後などに送った言葉が黙って消える
     channelRef.current?.postMessage({ type: 'answer_text', text })
@@ -661,9 +673,21 @@ function WidgetContent() {
                 </p>
               )}
               {listenNotice && (
-                <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2 py-1.5 leading-snug">
-                  {listenNotice}
-                </p>
+                <div className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded-md px-2 py-1.5 leading-snug space-y-1.5">
+                  <p>{listenNotice}下の欄に入力して送信することもできます。</p>
+                  {listenReason && (
+                    <p className="text-[10px] text-amber-700/80">（参考情報: {listenReason}）</p>
+                  )}
+                  {/* クリックで start し直すと、ブラウザが要求する「利用者の操作」の
+                      文脈に戻るため、自動再開では通らなかった場合でも通ることがある */}
+                  <button
+                    onClick={() => beginListening(listenRetryRef.current)}
+                    className="w-full inline-flex items-center justify-center gap-1.5 bg-white border border-amber-300 hover:border-amber-500 text-amber-900 rounded-md py-1.5 text-[11px] font-medium transition-colors"
+                  >
+                    <Mic className="w-3 h-3" strokeWidth={2} />
+                    もう一度話す
+                  </button>
+                </div>
               )}
               <div className="flex gap-1.5">
                 <input
