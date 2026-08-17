@@ -6,7 +6,7 @@ import { track } from '@/lib/analytics'
 // 参加者に感情を見せなくなったため、グラフ描画（recharts）は読み込まない。
 // 被験者側の画面が軽くなり、テストの妨げになる要素も減る。
 import { useEmotionDetection } from '@/hooks/useEmotionDetection'
-import { startSpeechListener, type SpeechListener } from '@/lib/speech-listener'
+import { startAnswerRecorder, type AnswerRecorder } from '@/lib/answer-recorder'
 import RatingQuestion from '@/components/RatingQuestion'
 import NpsQuestion from '@/components/NpsQuestion'
 import {
@@ -138,8 +138,8 @@ export default function InterviewRoom({
 }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const streamRef = useRef<MediaStream | null>(null)
-  // 動いている聞き取り（src/lib/speech-listener.ts）。同時に1つだけ持つ
-  const listenerRef = useRef<SpeechListener | null>(null)
+  // 動いている聞き取り（src/lib/answer-recorder.ts）。同時に1つだけ持つ
+  const listenerRef = useRef<AnswerRecorder | null>(null)
   // 小窓が開いているか。開いている間は聞き取りを小窓に任せる（メイン画面は裏側に
   // 回っており、裏側のタブではブラウザが音声認識を止めてしまうため）
   const widgetOpenRef = useRef(false)
@@ -222,6 +222,8 @@ export default function InterviewRoom({
   const [speechSupported, setSpeechSupported] = useState<boolean | null>(null)
   const [textOnlyMode, setTextOnlyMode] = useState(false) // 非対応でも続行する場合
   const [isListening, setIsListening] = useState(false)
+  // 参加者が話し出したことを検知したか（「話し終えました」を出す目安）
+  const [speechHeard, setSpeechHeard] = useState(false)
   const [recordingDownloadUrl, setRecordingDownloadUrl] = useState<string | null>(null)
   // 回答送信の状態（完了画面の表示・beforeunload ガード・再送に使う）
   const [submitState, setSubmitState] = useState<'idle' | 'saving' | 'saved' | 'failed'>('idle')
@@ -380,11 +382,18 @@ export default function InterviewRoom({
   // サーバーとクライアントで結果が変わりハイドレーションのズレになるため、
   // マウント後に確定させる必要がある。規則を個別に外す。
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition // eslint-disable-line @typescript-eslint/no-explicit-any
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setSpeechSupported(!!SR)
-    }
+    if (typeof window === 'undefined') return
+    // 回答の聞き取りは「録音してサーバー（Whisper）で文字起こし」に変えたため、
+    // ブラウザ内蔵の音声認識には依存しない。必要なのは録音できることだけ。
+    //
+    // 以前はここで SpeechRecognition の有無を見て Brave などを門前払いしていたが、
+    // (1) Brave は API 自体は存在するので判定をすり抜け、実行時に必ず network
+    // エラーになる（＝門番として機能していなかった）、(2) 録音方式ではそもそも
+    // 不要、という二重の理由で廃止した。
+    const canRecord =
+      typeof MediaRecorder !== 'undefined' && !!navigator.mediaDevices?.getUserMedia
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setSpeechSupported(canRecord)
   }, [])
 
   // ── 一時通知トースト ──────────────────────────────────
@@ -741,12 +750,13 @@ export default function InterviewRoom({
   /**
    * 進行中の聞き取りを完全に終わらせる（次の質問へ進む・面談を終える等）。
    *
-   * 聞き取りの実装は src/lib/speech-listener.ts に集約してある。ここは
+   * 聞き取りの実装は src/lib/answer-recorder.ts に集約してある。ここは
    * 「今どのリスナーが動いているか」を1つだけ持ち、確実に止める役目だけを負う。
    */
   function endCurrentListening() {
     listenerRef.current?.stop()
     listenerRef.current = null
+    setSpeechHeard(false)
     if (widgetWatchRef.current) {
       clearInterval(widgetWatchRef.current)
       widgetWatchRef.current = null
@@ -828,9 +838,21 @@ export default function InterviewRoom({
       return
     }
 
-    const listener = startSpeechListener({
-      onLiveText: setLiveText,
-      onListeningChange: setIsListening,
+    const stream = streamRef.current
+    if (!stream) {
+      // マイクが無ければテキスト入力で続行する（コールバックは残してある）
+      setIsListening(false)
+      showNotice('マイクを使えませんでした。下の入力欄からお答えください。')
+      return
+    }
+    const recorder = startAnswerRecorder({
+      stream,
+      onRecordingChange: setIsListening,
+      onSpeechDetected: () => setSpeechHeard(true),
+      onTranscribing: () => {
+        setSpeechHeard(false)
+        setLiveText('聞き取っています…')
+      },
       onFinal: (text) => {
         listenerRef.current = null
         setLiveText('')
@@ -841,15 +863,17 @@ export default function InterviewRoom({
         setLiveText('')
         handleSilenceTimeout(onAnswer, silenceRetry)
       },
-      onGiveUp: (partial) => {
+      onGiveUp: (reason) => {
         listenerRef.current = null
         setLiveText('')
-        handleListeningGaveUp(partial)
+        handleListeningGaveUp(reason)
       },
     })
-    listenerRef.current = listener
-    // 音声認識が使えない環境ではテキスト入力で続行する（コールバックは残してある）
-    if (!listener) setIsListening(false)
+    listenerRef.current = recorder
+    if (!recorder) {
+      setIsListening(false)
+      showNotice('マイクを使えませんでした。下の入力欄からお答えください。')
+    }
   }
 
   /** 小窓に聞き取りを任せるか（service モードで小窓が開いている間） */
@@ -905,12 +929,10 @@ export default function InterviewRoom({
     }
   }
 
-  /** 認識を続けられなくなった。聞き取れていた分は捨てずに入力欄へ移す */
-  function handleListeningGaveUp(partial: string) {
-    if (partial.trim()) {
-      setTextInput((prev) => (prev.trim() ? prev : partial.trim()))
-    }
-    showNotice('音声認識が中断しました。下の入力欄に、聞き取れたところまでを残しました。続きを入力して送信してください。')
+  /** 音声を取り込めなかった。テキスト入力へ誘導する（進行は止めない） */
+  function handleListeningGaveUp(reason: string) {
+    console.warn('[UserVoice] 回答の取り込みに失敗しました', reason)
+    showNotice('音声をうまく取り込めませんでした。下の入力欄からお答えください。')
   }
 
 
@@ -1893,10 +1915,10 @@ export default function InterviewRoom({
           </div>
           <h1 className="text-lg font-semibold text-gray-900 mb-2 tracking-tight">推奨ブラウザでアクセスしてください</h1>
           <p className="text-gray-600 text-sm mb-6 leading-relaxed">
-            このインタビューは音声認識を使用します。<br />
-            現在のブラウザ（Brave など）では音声認識がブロックされているため、
-            <span className="text-gray-900 font-medium"> Google Chrome または Microsoft Edge </span>
-            で開いてください。
+            このインタビューは音声の録音を使用します。<br />
+            現在のブラウザでは録音を利用できないため、
+            <span className="text-gray-900 font-medium"> Google Chrome / Microsoft Edge / Safari </span>
+            など最新のブラウザで開いてください。
           </p>
 
           {/* URL コピーボタン */}
@@ -2686,7 +2708,7 @@ export default function InterviewRoom({
 
           {liveText && (
             <div className="p-3 border-b border-gray-200 bg-emerald-50/50 flex-shrink-0">
-              <div className="text-[10px] text-emerald-700 mb-1 font-medium uppercase tracking-wide">音声認識中</div>
+              <div className="text-[10px] text-emerald-700 mb-1 font-medium uppercase tracking-wide">聞き取り</div>
               <p className="text-sm text-gray-900">{liveText}</p>
             </div>
           )}
@@ -2694,13 +2716,21 @@ export default function InterviewRoom({
           {phase === 'interview' && !isSpeaking && !aiThinking && liveQuestionType === 'open' && (
             <div className="p-3 border-b border-gray-200 space-y-2 flex-shrink-0 bg-white">
               {isListening && (
-                <div className="flex items-center gap-2 text-[10px] text-emerald-700 font-medium">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                  音声認識中
-                </div>
-              )}
-              {!speechSupported && (
-                <p className="text-[10px] text-amber-700">音声認識不可 — テキストで入力してください</p>
+                <>
+                  <div className="flex items-center gap-2 text-[10px] text-emerald-700 font-medium">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                    {speechHeard ? 'お話しどうぞ' : 'どうぞお話しください'}
+                  </div>
+                  {/* 録音方式では「話し終えた」をブラウザが教えてくれない。静かになれば
+                      自動で締めるが、参加者が自分で終えられる手段も必ず出しておく */}
+                  <button
+                    onClick={() => listenerRef.current?.finishNow()}
+                    className="w-full inline-flex items-center justify-center gap-1 bg-gray-900 hover:bg-gray-800 text-white py-1.5 rounded-md text-xs font-medium transition-colors"
+                  >
+                    <Check className="w-3 h-3" strokeWidth={2} />
+                    話し終えました
+                  </button>
+                </>
               )}
               <div className="flex gap-2">
                 <input

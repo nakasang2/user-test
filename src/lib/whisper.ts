@@ -13,6 +13,34 @@ export interface TranscriptSegment {
 const UNKNOWN_SPEAKER = 'Unknown'
 
 /**
+ * 面談中の1回の回答（短い音声）を文字起こしする。
+ *
+ * ブラウザ内蔵の音声認識（Web Speech API）は使える環境が限られる。Brave のように
+ * Google の音声サービスを無効化しているブラウザでは必ず network エラーになり、
+ * 社内ネットワークで遮断されることもある。参加者のブラウザも回線もこちらでは
+ * 選べないため、回答の聞き取りはサーバー側の Whisper に寄せる。
+ *
+ * 会話を止めないよう、タイムスタンプは取らずテキストだけを速く返す。
+ */
+export async function transcribeAnswerAudio(
+  audio: Buffer,
+  contentType: string,
+): Promise<string> {
+  // 拡張子は Whisper 側の判定に使われるため、実際の形式に合わせる
+  const ext = contentType.includes('mp4') ? 'mp4' : contentType.includes('ogg') ? 'ogg' : 'webm'
+  const file = await toFile(audio, `answer.${ext}`, { type: contentType })
+  const transcription = await getOpenAI().audio.transcriptions.create({
+    file,
+    model: 'whisper-1',
+    // 日本語だと明示すると、短い発話での言語推定の揺れが減る
+    language: 'ja',
+    response_format: 'text',
+  })
+  // response_format: 'text' の戻りは文字列
+  return String(transcription).trim()
+}
+
+/**
  * 録画 URL（署名付き）から Whisper で文字起こしする。
  * verbose_json でセグメント単位のタイムスタンプを取得する。
  */

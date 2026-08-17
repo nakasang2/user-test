@@ -11,7 +11,7 @@ import { blockedAfter, needsRecovery } from '@/lib/task-flow'
 import { useSilenceNudge } from '@/hooks/useSilenceNudge'
 import RatingQuestion from '@/components/RatingQuestion'
 import NpsQuestion from '@/components/NpsQuestion'
-import { startSpeechListener, type SpeechListener } from '@/lib/speech-listener'
+import { startAnswerRecorder, type AnswerRecorder } from '@/lib/answer-recorder'
 
 interface Task {
   text: string
@@ -96,7 +96,11 @@ function WidgetContent() {
   const [listenReason, setListenReason]         = useState('')
   // 最後に受け取った listen_start の再試行フラグ（「もう一度話す」で使う）
   const listenRetryRef                          = useRef(false)
-  const listenerRef                             = useRef<SpeechListener | null>(null)
+  const listenerRef                             = useRef<AnswerRecorder | null>(null)
+  // 文字起こし中（送信して返事を待っている）
+  const [transcribing, setTranscribing]         = useState(false)
+  // 参加者が話し出したことを検知したか（「話し終えました」を出す目安）
+  const [speechHeard, setSpeechHeard]           = useState(false)
   // ヒントを見たタスク番号（0始まり）。結果送信時に添えて集計で自力達成と分ける
   const usedHintIdxRef                          = useRef<Set<number>>(new Set())
 
@@ -320,12 +324,15 @@ function WidgetContent() {
   }
 
   /* ── 事後質問の聞き取り ───────────────────────────────────── */
-  // 聞き取りはこの小窓で行う。メイン画面は裏側にあり、裏側のタブでは
-  // ブラウザが音声認識を止めてしまうため（実装は src/lib/speech-listener.ts）。
+  // 聞き取りはこの小窓で行う（実装は src/lib/answer-recorder.ts）。
+  // メイン画面は裏側にあり、裏側のタブでは録音・マイクの扱いが制限されうるうえ、
+  // 案内も入力欄も参加者から見えないため。
   function stopListening() {
     listenerRef.current?.stop()
     listenerRef.current = null
     setIsListening(false)
+    setSpeechHeard(false)
+    setTranscribing(false)
     setLiveText('')
   }
 
@@ -334,35 +341,42 @@ function WidgetContent() {
     listenRetryRef.current = silenceRetry
     setListenNotice('')
     setListenReason('')
-    const listener = startSpeechListener({
-      onLiveText: setLiveText,
-      onListeningChange: setIsListening,
+    const stream = webcamStreamRef.current
+    if (!stream) {
+      setListenNotice('マイクを使えませんでした。下の欄に入力して送信してください。')
+      setListenReason('no-mic')
+      return
+    }
+    const recorder = startAnswerRecorder({
+      stream,
+      onRecordingChange: setIsListening,
+      onSpeechDetected: () => setSpeechHeard(true),
+      onTranscribing: () => setTranscribing(true),
       onFinal: (text) => {
         listenerRef.current = null
-        setLiveText('')
+        setTranscribing(false)
+        setSpeechHeard(false)
         channelRef.current?.postMessage({ type: 'answer_text', text })
       },
       onSilence: () => {
         listenerRef.current = null
-        setLiveText('')
+        setTranscribing(false)
+        setSpeechHeard(false)
         channelRef.current?.postMessage({ type: 'answer_silence', retry: silenceRetry })
       },
-      onGiveUp: (partial, reason) => {
+      onGiveUp: (reason) => {
         listenerRef.current = null
-        setLiveText('')
-        // 聞き取れていた分は捨てず、そのまま送れるよう入力欄へ移す
-        if (partial) setAnswerInput((prev) => (prev.trim() ? prev : partial))
-        // 原因を画面に出す。これが分からないと、現場で何が塞がれているのか
-        // 突き止めようがない（マイク権限・ネットワーク・入れ子の許可などで挙動が違う）
-        setListenNotice('音声がうまく認識できませんでした。')
+        setTranscribing(false)
+        setSpeechHeard(false)
+        setListenNotice('音声をうまく取り込めませんでした。')
         setListenReason(reason)
       },
     })
-    listenerRef.current = listener
-    if (!listener) {
+    listenerRef.current = recorder
+    if (!recorder) {
       setIsListening(false)
-      setListenNotice('この環境では音声認識を使えません。下の欄に入力して送信してください。')
-      setListenReason('unsupported')
+      setListenNotice('マイクを使えませんでした。下の欄に入力して送信してください。')
+      setListenReason('recorder-unavailable')
     }
   }
 
@@ -621,7 +635,7 @@ function WidgetContent() {
           {isListening && (
             <div className="absolute bottom-2 left-2 flex items-center gap-1.5 bg-gray-950/70 text-white px-2 py-1 rounded-md">
               <span className="w-1.5 h-1.5 rounded-full bg-red-400 animate-pulse" />
-              <span className="text-[10px]">聞き取り中</span>
+              <span className="text-[10px]">{speechHeard ? 'お話しどうぞ' : 'どうぞお話しください'}</span>
             </div>
           )}
           {ttsSpeaking && (
@@ -667,6 +681,22 @@ function WidgetContent() {
           {/* 自由回答: 聞き取り中の文字と、テキストでの入力欄 */}
           {questionType === 'open' && (
             <>
+              {transcribing && (
+                <p className="text-[11px] text-gray-600 bg-gray-50 border border-gray-200 rounded-md px-2 py-1.5">
+                  聞き取っています…
+                </p>
+              )}
+              {/* 録音方式では「話し終えた」をブラウザが教えてくれない。静かになれば
+                  自動で締めるが、参加者が自分で終えられる手段も必ず出しておく */}
+              {isListening && !transcribing && (
+                <button
+                  onClick={() => listenerRef.current?.finishNow()}
+                  className="w-full inline-flex items-center justify-center gap-1.5 bg-gray-900 hover:bg-gray-800 text-white rounded-lg py-2 text-xs font-medium transition-colors"
+                >
+                  <Check className="w-3.5 h-3.5" strokeWidth={2} />
+                  話し終えました
+                </button>
+              )}
               {liveText && (
                 <p className="text-xs text-gray-700 leading-relaxed bg-blue-50 border border-blue-100 rounded-lg p-2.5">
                   {liveText}
@@ -685,7 +715,7 @@ function WidgetContent() {
                     className="w-full inline-flex items-center justify-center gap-1.5 bg-white border border-amber-300 hover:border-amber-500 text-amber-900 rounded-md py-1.5 text-[11px] font-medium transition-colors"
                   >
                     <Mic className="w-3 h-3" strokeWidth={2} />
-                    もう一度話す
+                    もう一度録音する
                   </button>
                 </div>
               )}
