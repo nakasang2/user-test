@@ -642,6 +642,11 @@ export default function InterviewRoom({
       speakVersionRef.current++ // 再生中の speak を無効化
       currentAudioRef.current?.pause()
       currentAudioRef.current = null
+      // 進行中の聞き取りと、予約済みの再開を無効化してから止める。
+      // ここで止めないと、離脱後もマイクを掴んだまま再開し続ける
+      listenVersionRef.current++
+      recognitionStoppingRef.current = true
+      stopCurrentRecognition()
       if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current)
       stopDetection()
       if (screenMediaRecorderRef.current?.state !== 'inactive') {
@@ -733,11 +738,37 @@ export default function InterviewRoom({
     callback(text)
   }
 
+  /**
+   * 現在の音声認識インスタンスを確実に止める。
+   *
+   * 止め損ねたインスタンスが残るとマイクを奪い合い、前の質問用の聞き取りが次の質問の
+   * 発話を拾って、回答が入れ替わったり二重に記録されたりする。abort() は保留中の結果も
+   * 捨てるので、「この聞き取りはもう要らない」ときはこちらを使う。
+   */
+  function stopCurrentRecognition() {
+    const recognition = speechRef.current
+    speechRef.current = null
+    if (!recognition) return
+    try {
+      recognition.abort()
+    } catch {
+      try {
+        recognition.stop()
+      } catch {
+        // 既に停止している場合はここに来る。実害は無い
+      }
+    }
+  }
+
   // ── Feature 1: 沈黙タイムアウト付き音声認識 ──────────
   function listenForAnswer(onAnswer: (answer: string) => void, silenceRetry = false) {
     // テキスト入力フォールバック用にコールバックを保存
     onAnswerCallbackRef.current = onAnswer
+    // 先に世代を進めてから前のインスタンスを止める。こうすると、停止で発火する
+    // onend / onspeechend は「古い世代」として無視され、今から始める聞き取りに
+    // 干渉しない（前の世代が生き残るとマイクを奪い合い、回答が入れ替わる）
     const myVersion = ++listenVersionRef.current
+    stopCurrentRecognition()
 
     if (typeof window === 'undefined') return
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -752,28 +783,107 @@ export default function InterviewRoom({
     // 長い回答ほど、ブラウザ側の内部的な連続認識の上限に達しやすい。意図した停止で
     // なければ自動的に再開する（finalText はクロージャ変数なのでそのまま引き継がれ、
     // 参加者の発話が失われない）
+    //
+    // 再試行の上限は「そもそも起動できないまま空回りし続ける」のを防ぐためのもので、
+    // 上のような正常な終了を数えてはいけない。数えてしまうと、長く話す参加者ほど
+    // 発話の途中で上限に達し、無関係な中断メッセージが出る（実際にそうなっていた）。
+    // そこで「動けないまま終わった再試行」だけを連続で数える
     let restartAttempts = 0
     const MAX_RESTART_ATTEMPTS = 5
-    let unrecoverableError = false
+    /** この時間以上動いていた認識インスタンスは「正常に動いていた」と見なす */
+    const HEALTHY_RUN_MS = 3000
+    /** 現在のインスタンスが実際に開始した時刻。0 は「まだ開始できていない」 */
+    let instanceStartedAt = 0
+    let stoppingFromSpeechEnd = false
+    /** この聞き取りで回答を送信済みか（「送るものが無い」と区別するために持つ） */
+    let answerSubmitted = false
 
-    // 沈黙タイムアウト開始（60秒）— 考える時間・沈黙して内省する時間を確保する
-    if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current)
-    silenceTimerRef.current = setTimeout(() => {
-      recognitionStoppingRef.current = true
-      speechRef.current?.stop()
-      setLiveText('')
-      if (!silenceRetry) {
-        // 1回目のタイムアウト：促す
-        speak('もう少し聞かせていただけますか？', () => {
-          listenForAnswer(onAnswer, true)
-        })
-      } else {
-        // 2回目のタイムアウト：次の質問へ
-        speak('ありがとうございます。次の質問に移ります。', () => {
-          onAnswer('')
-        })
+    /**
+     * 聞き取れた回答を確定して次へ進める。送信できたら true。
+     * テキスト送信と二重に発火しないよう、コールバックを一度だけ消費する。
+     */
+    function submitFinalAnswer(): boolean {
+      if (!finalText.trim() || !onAnswerCallbackRef.current) return false
+      onAnswerCallbackRef.current = null
+      answerSubmitted = true
+      const entry: TranscriptEntry = {
+        speaker: 'Participant',
+        text: finalText.trim(),
+        start: startTime,
+        end: elapsedSec(startTimeRef.current),
       }
-    }, 60000)
+      transcriptRef.current = [...transcriptRef.current, entry]
+      setTranscript([...transcriptRef.current])
+      appendConversation(`\n参加者: ${finalText.trim()}`)
+      saveProgress()
+      onAnswer(finalText.trim())
+      return true
+    }
+
+    /** 認識を諦めて案内する。テキスト入力での回答は引き続きできる */
+    function giveUpListening() {
+      if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current)
+      stopCurrentRecognition()
+      setLiveText('')
+      setIsListening(false)
+      // ここまでに聞き取れていた分を捨てない。入力欄に移し、続きを打つか
+      // そのまま送るだけで済むようにする（既に入力中なら邪魔しない）
+      if (finalText.trim()) {
+        setTextInput((prev) => (prev.trim() ? prev : finalText.trim()))
+      }
+      // コールバックは残す（下のテキスト入力で回答を継続できる）
+      showNotice('音声認識が中断しました。下の入力欄に、聞き取れたところまでを残しました。続きを入力して送信してください。')
+    }
+
+    /** 新しい認識インスタンスで聞き取りを再開する */
+    function scheduleRestart(delayMs: number) {
+      setTimeout(() => {
+        if (myVersion !== listenVersionRef.current) return // 別の listenForAnswer に上書きされた
+        if (recognitionStoppingRef.current) return
+        try {
+          instanceStartedAt = 0 // 起動できなければ 0 のままになり、次の判定で「異常」と分かる
+          stopCurrentRecognition() // 念のため：前のインスタンスを残さない
+          speechRef.current = createRecognition()
+          speechRef.current.start()
+        } catch {
+          // start() が例外を投げた場合、このインスタンスは onend も onerror も発火しない。
+          // ここで面倒を見ないと、再試行も通知も無いまま無音で完全に止まってしまう
+          restartAttempts++
+          if (restartAttempts > MAX_RESTART_ATTEMPTS) giveUpListening()
+          else scheduleRestart(500)
+        }
+      }, delayMs)
+    }
+
+    /**
+     * 沈黙タイムアウト（60秒）を張り直す。考える時間・沈黙して内省する時間を確保しつつ、
+     * 参加者が完全に詰まったまま放置されないようにする最後の安全網。
+     *
+     * 発話のたびに「解除」ではなく「張り直し」にするのが要点。解除だけだと、
+     * 一度何か声を出した時点で安全網が永久に外れ、そのあと認識が空回りしても
+     * 促しも自動送りも起きず、画面が「音声認識中」のまま止まってしまう。
+     */
+    function armSilenceTimer() {
+      if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current)
+      silenceTimerRef.current = setTimeout(() => {
+        recognitionStoppingRef.current = true
+        speechRef.current?.stop()
+        setLiveText('')
+        if (!silenceRetry) {
+          // 1回目のタイムアウト：促す
+          speak('もう少し聞かせていただけますか？', () => {
+            listenForAnswer(onAnswer, true)
+          })
+        } else {
+          // 2回目のタイムアウト：次の質問へ
+          speak('ありがとうございます。次の質問に移ります。', () => {
+            onAnswer('')
+          })
+        }
+      }, 60000)
+    }
+
+    armSilenceTimer()
 
     // 認識インスタンスを毎回新規に作る。onend 後に同じインスタンスへ start() を
     // 呼び直すと、ブラウザ側の後始末が終わっていないタイミングで
@@ -786,10 +896,16 @@ export default function InterviewRoom({
       recognition.continuous = true
       recognition.interimResults = true
 
+      recognition.onstart = () => {
+        instanceStartedAt = Date.now()
+      }
+
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       recognition.onresult = (event: any) => {
-        // 何か話し始めたらタイマーリセット
-        if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current)
+        // 何か話し始めたらタイマーを張り直す（解除ではなく延長）
+        armSilenceTimer()
+        // 実際に聞き取れている＝認識は正常に動いている。連続失敗のカウントを戻す
+        restartAttempts = 0
         let interim = ''
         for (let i = event.resultIndex; i < event.results.length; i++) {
           if (event.results[i].isFinal) {
@@ -802,78 +918,89 @@ export default function InterviewRoom({
       }
 
       recognition.onspeechend = () => {
+        // 古い世代のインスタンスがここを通ると、次の質問用のコールバックを消費して
+        // 「前の回答」を次の質問の答えとして送ってしまう。onend と同じく先に弾く
+        if (myVersion !== listenVersionRef.current) return
         if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current)
         recognitionStoppingRef.current = true
+        stoppingFromSpeechEnd = true
         recognition.stop()
         setLiveText('')
         setIsListening(false)
-        // テキスト送信と二重発火しないよう、コールバックを一度だけ消費する
-        if (finalText.trim() && onAnswerCallbackRef.current) {
-          onAnswerCallbackRef.current = null
-          const entry: TranscriptEntry = {
-            speaker: 'Participant',
-            text: finalText.trim(),
-            start: startTime,
-            end: elapsedSec(startTimeRef.current),
-          }
-          transcriptRef.current = [...transcriptRef.current, entry]
-          setTranscript([...transcriptRef.current])
-          appendConversation(`\n参加者: ${finalText.trim()}`)
-          saveProgress()
-          onAnswer(finalText.trim())
-        }
+        submitFinalAnswer()
       }
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       recognition.onerror = (e: any) => {
         // no-speech / aborted は沈黙タイマーや通常停止で処理されるため無視
         if (e?.error === 'no-speech' || e?.error === 'aborted') return
-        // マイク権限が無い等、再試行しても直らないものは自動再開を諦める判断材料にする。
-        // 実際の再開処理は onend 側で行う（error 後は onend も必ず発火するため、
-        // ここで recognition.start() すると二重起動になりうる）
-        if (e?.error === 'not-allowed' || e?.error === 'service-not-allowed') {
-          unrecoverableError = true
-        }
+        // それ以外（not-allowed / service-not-allowed / network 等）はここでは何もせず、
+        // onend 側の再試行に任せる。エラーの種類で「もう直らない」と即断すると、
+        // service モードでタブが背面のまま事後質問に移った瞬間の一過性のブロックまで
+        // 恒久的な失敗として扱ってしまう（実際にそれで中断案内が出ていた）。
+        // 本当に権限が無い場合は数回の短い再試行が空振りしたあと同じ案内に行き着く。
+        // 再開処理をここに書かないのは、error のあとは onend も必ず発火するため
+        // （ここで start() すると二重起動になる）
+        console.warn('[UserVoice] 音声認識エラー', e?.error)
       }
 
       recognition.onend = () => {
-        // 意図した停止（沈黙タイムアウト・onspeechend・手動操作・終了処理）なら何もしない
-        if (recognitionStoppingRef.current) return
-        // 別の listenForAnswer（次の質問など）に上書きされた後に、この古い
-        // インスタンスの onend が遅れて発火したケース。recognitionStoppingRef は
-        // 全 listenForAnswer 呼び出しで共有されており、新しい呼び出しが始まると
-        // false に戻ってしまうため、上のチェックだけでは古い世代のインスタンスを
-        // 区別できない。ここで弾かないと、今聞き取れている最中の質問と無関係な
-        // 「音声認識が中断しました」が表示されてしまう
+        // 別の listenForAnswer（次の質問など）に上書きされた後に、この古いインスタンスの
+        // onend が遅れて発火したケース。何より先に弾く。ここを通すと、古い世代が
+        // 次の質問用のコールバックを消費して前の回答を二重送信したり、今聞き取れている
+        // 最中の質問と無関係な「音声認識が中断しました」を出したりしてしまう。
+        // recognitionStoppingRef は全 listenForAnswer 呼び出しで共有されており、
+        // 新しい呼び出しが始まると false に戻るため、それだけでは新旧を区別できない
         if (myVersion !== listenVersionRef.current) return
-        if (unrecoverableError || restartAttempts >= MAX_RESTART_ATTEMPTS) {
-          if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current)
-          setLiveText('')
-          setIsListening(false)
-          // コールバックは残す（下のテキスト入力で回答を継続できる）
-          showNotice('音声認識が中断しました。もう一度話すか、下の入力欄にテキストで回答してください。')
+        // 発話終了で止めた場合、確定結果が onspeechend の後に届くことがある。
+        // ここで拾い直さないと、聞き取れているのに次へ進まず面談が止まる
+        if (stoppingFromSpeechEnd) {
+          stoppingFromSpeechEnd = false
+          // 正常系：onspeechend で既に送信済み。ここで再開してはいけない
+          // （再開すると、回答のたびに誰も止めない認識インスタンスが増えていく）
+          if (answerSubmitted) return
+          if (submitFinalAnswer()) return
+          // テキスト入力・手動操作・終了処理など別経路でコールバックが消費済みなら、
+          // この聞き取りの役目はもう終わっている
+          if (!onAnswerCallbackRef.current) return
+          // 発話の終わりと判定されたのに確定結果が何も無かった（物音だけ拾った等）。
+          // ここで何もしないと参加者は話しても入力しても進めない状態で固まるため、
+          // 聞き取りを再開する。空振りが続く場合に備え、通常の再試行と同じ上限の対象にする
+          restartAttempts++
+          if (restartAttempts > MAX_RESTART_ATTEMPTS) {
+            giveUpListening()
+            return
+          }
+          recognitionStoppingRef.current = false
+          setIsListening(true)
+          armSilenceTimer()
+          scheduleRestart(0)
           return
         }
-        restartAttempts++
-        // 間を置かず即座に再試行すると、タブがまだ背面（service モードでは
-        // 操作対象のタブ・小窓に注目が移っている）で認識がブロックされている
-        // 一過性の状態を、上限回数の間にすべて使い切ってしまう。少し待って
-        // フォーカスが戻る／ブロックが解けるのを期待してから再試行する
-        setTimeout(() => {
-          if (myVersion !== listenVersionRef.current) return // 別の listenForAnswer に上書きされた
-          if (recognitionStoppingRef.current) return
-          try {
-            speechRef.current = createRecognition()
-            speechRef.current.start()
-          } catch {
-            // 既に開始されている等はここに来うるが、実害はないので無視する
-          }
-        }, 500)
+        // 意図した停止（沈黙タイムアウト・手動操作・終了処理）なら何もしない
+        if (recognitionStoppingRef.current) return
+
+        // ブラウザは長い発話の途中でも認識を区切って終了する。しばらく動けていたなら
+        // 異常ではないので連続失敗に数えず、待たずに再開する（待つとその間の発話が
+        // まるごと失われる）。動けないまま終わったときだけ回数を数え、猶予を置く
+        const ranMs = instanceStartedAt ? Date.now() - instanceStartedAt : 0
+        const healthy = ranMs >= HEALTHY_RUN_MS
+        if (healthy) restartAttempts = 0
+        else restartAttempts++
+
+        if (restartAttempts > MAX_RESTART_ATTEMPTS) {
+          giveUpListening()
+          return
+        }
+        // 起動できていない場合だけ、タブが背面（service モードでは操作対象のタブ・
+        // 小窓に注目が移っている）でブロックされている状態が解けるのを少し待つ
+        scheduleRestart(healthy ? 0 : 500)
       }
 
       return recognition
     }
 
+    instanceStartedAt = 0
     speechRef.current = createRecognition()
     speechRef.current.start()
     setIsListening(true)
