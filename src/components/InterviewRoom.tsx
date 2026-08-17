@@ -744,20 +744,14 @@ export default function InterviewRoom({
     const SR = ((window as any).SpeechRecognition || (window as any).webkitSpeechRecognition) as (new () => any) | undefined
     if (!SR) return // テキスト入力フォールバックで対応
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const recognition: any = new SR()
-    recognition.lang = 'ja-JP'
-    recognition.continuous = true
-    recognition.interimResults = true
-    speechRef.current = recognition
     recognitionStoppingRef.current = false
 
     let finalText = ''
     const startTime = elapsedSec(startTimeRef.current)
     // ブラウザが黙って（エラー無しで）認識を止めることがある。事後インタビューのような
     // 長い回答ほど、ブラウザ側の内部的な連続認識の上限に達しやすい。意図した停止で
-    // なければ、同じ recognition インスタンスを自動的に再開する（finalText は
-    // クロージャ変数なのでそのまま引き継がれ、参加者の発話が失われない）
+    // なければ自動的に再開する（finalText はクロージャ変数なのでそのまま引き継がれ、
+    // 参加者の発話が失われない）
     let restartAttempts = 0
     const MAX_RESTART_ATTEMPTS = 5
     let unrecoverableError = false
@@ -766,7 +760,7 @@ export default function InterviewRoom({
     if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current)
     silenceTimerRef.current = setTimeout(() => {
       recognitionStoppingRef.current = true
-      recognition.stop()
+      speechRef.current?.stop()
       setLiveText('')
       if (!silenceRetry) {
         // 1回目のタイムアウト：促す
@@ -781,84 +775,107 @@ export default function InterviewRoom({
       }
     }, 60000)
 
+    // 認識インスタンスを毎回新規に作る。onend 後に同じインスタンスへ start() を
+    // 呼び直すと、ブラウザ側の後始末が終わっていないタイミングで
+    // InvalidStateError が投げられ、リトライが黙って死ぬことがあるため。
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    recognition.onresult = (event: any) => {
-      // 何か話し始めたらタイマーリセット
-      if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current)
-      let interim = ''
-      for (let i = event.resultIndex; i < event.results.length; i++) {
-        if (event.results[i].isFinal) {
-          finalText += event.results[i][0].transcript
-        } else {
-          interim = event.results[i][0].transcript
-        }
-      }
-      setLiveText(finalText + interim)
-    }
+    function createRecognition(): any {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const recognition: any = new SR!()
+      recognition.lang = 'ja-JP'
+      recognition.continuous = true
+      recognition.interimResults = true
 
-    recognition.onspeechend = () => {
-      if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current)
-      recognitionStoppingRef.current = true
-      recognition.stop()
-      setLiveText('')
-      setIsListening(false)
-      // テキスト送信と二重発火しないよう、コールバックを一度だけ消費する
-      if (finalText.trim() && onAnswerCallbackRef.current) {
-        onAnswerCallbackRef.current = null
-        const entry: TranscriptEntry = {
-          speaker: 'Participant',
-          text: finalText.trim(),
-          start: startTime,
-          end: elapsedSec(startTimeRef.current),
-        }
-        transcriptRef.current = [...transcriptRef.current, entry]
-        setTranscript([...transcriptRef.current])
-        appendConversation(`\n参加者: ${finalText.trim()}`)
-        saveProgress()
-        onAnswer(finalText.trim())
-      }
-    }
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    recognition.onerror = (e: any) => {
-      // no-speech / aborted は沈黙タイマーや通常停止で処理されるため無視
-      if (e?.error === 'no-speech' || e?.error === 'aborted') return
-      // マイク権限が無い等、再試行しても直らないものは自動再開を諦める判断材料にする。
-      // 実際の再開処理は onend 側で行う（error 後は onend も必ず発火するため、
-      // ここで recognition.start() すると二重起動になりうる）
-      if (e?.error === 'not-allowed' || e?.error === 'service-not-allowed') {
-        unrecoverableError = true
-      }
-    }
-
-    recognition.onend = () => {
-      // 意図した停止（沈黙タイムアウト・onspeechend・手動操作・終了処理）なら何もしない
-      if (recognitionStoppingRef.current) return
-      if (unrecoverableError || restartAttempts >= MAX_RESTART_ATTEMPTS) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      recognition.onresult = (event: any) => {
+        // 何か話し始めたらタイマーリセット
         if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current)
+        let interim = ''
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          if (event.results[i].isFinal) {
+            finalText += event.results[i][0].transcript
+          } else {
+            interim = event.results[i][0].transcript
+          }
+        }
+        setLiveText(finalText + interim)
+      }
+
+      recognition.onspeechend = () => {
+        if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current)
+        recognitionStoppingRef.current = true
+        recognition.stop()
         setLiveText('')
         setIsListening(false)
-        // コールバックは残す（下のテキスト入力で回答を継続できる）
-        showNotice('音声認識が中断しました。もう一度話すか、下の入力欄にテキストで回答してください。')
-        return
-      }
-      restartAttempts++
-      // 間を置かず即座に再試行すると、タブがまだ背面（service モードでは
-      // 操作対象のタブ・小窓に注目が移っている）で認識がブロックされている
-      // 一過性の状態を、上限回数の間にすべて使い切ってしまう。少し待って
-      // フォーカスが戻る／ブロックが解けるのを期待してから再試行する
-      setTimeout(() => {
-        if (myVersion !== listenVersionRef.current) return // 別の listenForAnswer に上書きされた
-        if (recognitionStoppingRef.current) return
-        try {
-          recognition.start()
-        } catch {
-          // 既に開始されている等はここに来うるが、実害はないので無視する
+        // テキスト送信と二重発火しないよう、コールバックを一度だけ消費する
+        if (finalText.trim() && onAnswerCallbackRef.current) {
+          onAnswerCallbackRef.current = null
+          const entry: TranscriptEntry = {
+            speaker: 'Participant',
+            text: finalText.trim(),
+            start: startTime,
+            end: elapsedSec(startTimeRef.current),
+          }
+          transcriptRef.current = [...transcriptRef.current, entry]
+          setTranscript([...transcriptRef.current])
+          appendConversation(`\n参加者: ${finalText.trim()}`)
+          saveProgress()
+          onAnswer(finalText.trim())
         }
-      }, 500)
+      }
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      recognition.onerror = (e: any) => {
+        // no-speech / aborted は沈黙タイマーや通常停止で処理されるため無視
+        if (e?.error === 'no-speech' || e?.error === 'aborted') return
+        // マイク権限が無い等、再試行しても直らないものは自動再開を諦める判断材料にする。
+        // 実際の再開処理は onend 側で行う（error 後は onend も必ず発火するため、
+        // ここで recognition.start() すると二重起動になりうる）
+        if (e?.error === 'not-allowed' || e?.error === 'service-not-allowed') {
+          unrecoverableError = true
+        }
+      }
+
+      recognition.onend = () => {
+        // 意図した停止（沈黙タイムアウト・onspeechend・手動操作・終了処理）なら何もしない
+        if (recognitionStoppingRef.current) return
+        // 別の listenForAnswer（次の質問など）に上書きされた後に、この古い
+        // インスタンスの onend が遅れて発火したケース。recognitionStoppingRef は
+        // 全 listenForAnswer 呼び出しで共有されており、新しい呼び出しが始まると
+        // false に戻ってしまうため、上のチェックだけでは古い世代のインスタンスを
+        // 区別できない。ここで弾かないと、今聞き取れている最中の質問と無関係な
+        // 「音声認識が中断しました」が表示されてしまう
+        if (myVersion !== listenVersionRef.current) return
+        if (unrecoverableError || restartAttempts >= MAX_RESTART_ATTEMPTS) {
+          if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current)
+          setLiveText('')
+          setIsListening(false)
+          // コールバックは残す（下のテキスト入力で回答を継続できる）
+          showNotice('音声認識が中断しました。もう一度話すか、下の入力欄にテキストで回答してください。')
+          return
+        }
+        restartAttempts++
+        // 間を置かず即座に再試行すると、タブがまだ背面（service モードでは
+        // 操作対象のタブ・小窓に注目が移っている）で認識がブロックされている
+        // 一過性の状態を、上限回数の間にすべて使い切ってしまう。少し待って
+        // フォーカスが戻る／ブロックが解けるのを期待してから再試行する
+        setTimeout(() => {
+          if (myVersion !== listenVersionRef.current) return // 別の listenForAnswer に上書きされた
+          if (recognitionStoppingRef.current) return
+          try {
+            speechRef.current = createRecognition()
+            speechRef.current.start()
+          } catch {
+            // 既に開始されている等はここに来うるが、実害はないので無視する
+          }
+        }, 500)
+      }
+
+      return recognition
     }
 
-    recognition.start()
+    speechRef.current = createRecognition()
+    speechRef.current.start()
     setIsListening(true)
   }
 
