@@ -550,12 +550,12 @@ function WidgetContent() {
       {/* タスク内容（上詰め。長文はここだけスクロールし、下のボタンは常に見える。vh非依存で px 上限）。
           事前手続き（録画・サービス起動）が終わるまでは、タスク文言ではなく準備の案内を出す。
           タスク1の直前は、案内の読み上げ→「スタート」を挟む（showGuidance）。 */}
-      <div className="px-3 py-3 max-h-64 overflow-y-auto">
+      <div className="px-3 py-3 max-h-80 overflow-y-auto">
         {showGuidance ? (
           <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 space-y-2.5">
             <p className="text-[10px] text-gray-500 uppercase tracking-wide font-medium">はじめに</p>
             <p className="text-sm text-gray-900 leading-relaxed">
-              {ttsSpeaking && revealedText ? revealedText : (guidanceText || '案内を読み上げています…')}
+              {(ttsSpeaking ? revealedText : guidanceText) || '案内を読み上げています…'}
             </p>
             <button
               type="button"
@@ -572,19 +572,34 @@ function WidgetContent() {
               <div className="bg-gray-50 border border-gray-200 rounded-lg p-3">
                 <div className="flex items-start justify-between gap-2 mb-1.5">
                   <p className="text-[10px] text-gray-500 uppercase tracking-wide font-medium">現在のタスク</p>
-                  {/* 読み上げの聞き直し。音声はメイン画面側で鳴らす（TTS の持ち主がそちらなので、
-                      小窓を開き直しても再生が二重にならない）。自動再生が止められた場合の再試行にもなる */}
-                  <button
-                    type="button"
-                    onClick={() => channelRef.current?.postMessage({ type: 'speak_task' })}
-                    className="inline-flex items-center gap-1 text-[10px] text-gray-500 hover:text-gray-900 transition-colors flex-shrink-0"
-                  >
-                    <Volume2 className="w-3 h-3" strokeWidth={2} />
-                    もう一度聞く
-                  </button>
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    {/* サービスを閉じてしまった場合の再オープン導線。常時の状態表示は
+                        タスク文の領域を広く取るため撤去し、ここに小さくまとめた */}
+                    {stimulusUrl && (
+                      <a
+                        href={stimulusUrl}
+                        target="uservoice-service"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 text-[10px] text-gray-500 hover:text-gray-900 transition-colors"
+                      >
+                        <Globe className="w-3 h-3" strokeWidth={2} />
+                        開き直す
+                      </a>
+                    )}
+                    {/* 読み上げの聞き直し。音声はメイン画面側で鳴らす（TTS の持ち主がそちらなので、
+                        小窓を開き直しても再生が二重にならない）。自動再生が止められた場合の再試行にもなる */}
+                    <button
+                      type="button"
+                      onClick={() => channelRef.current?.postMessage({ type: 'speak_task' })}
+                      className="inline-flex items-center gap-1 text-[10px] text-gray-500 hover:text-gray-900 transition-colors"
+                    >
+                      <Volume2 className="w-3 h-3" strokeWidth={2} />
+                      もう一度聞く
+                    </button>
+                  </div>
                 </div>
                 <p className="text-sm text-gray-900 leading-relaxed">
-                  {ttsSpeaking && revealedText ? revealedText : currentTask.text}
+                  {ttsSpeaking ? revealedText : currentTask.text}
                 </p>
               </div>
               {/* 思考発話の促し（沈黙が続いたときだけ・自動で消える） */}
@@ -632,8 +647,9 @@ function WidgetContent() {
           特に「うまくいかないときは『できなかった』で次へ」と案内しながら、その
           「できなかった」自体が見えなくなるのは、救済のつもりが詰みを作ることになる。 */}
       <div className="px-3 pb-3 pt-2 space-y-2 sticky bottom-0 bg-white border-t border-gray-100">
-        {/* 録画状態: 未開始なら開始ボタン、開始後は「画面録画中」インジケータ（常に単一表示） */}
-        {!isScreenRecording ? (
+        {/* 録画開始ボタン。開始後は何も表示しない（タスク文の領域を広く取るため。
+            録画中であること自体はブラウザ側の共有インジケータで分かる） */}
+        {!isScreenRecording && (
           <div className="space-y-1">
             <button
               onClick={startScreenRecording}
@@ -646,11 +662,6 @@ function WidgetContent() {
             <p className="text-[10px] text-gray-500 text-center leading-snug">
               表示されるダイアログで<span className="font-semibold text-gray-700">「画面全体」</span>を選んで共有してください
             </p>
-          </div>
-        ) : (
-          <div className="flex items-center justify-center gap-1.5 py-2 text-xs text-red-600">
-            <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
-            画面録画中
           </div>
         )}
 
@@ -674,24 +685,11 @@ function WidgetContent() {
         )}
 
         {/* 結果ボタン: サービスを開いた後（サービス URL 未設定なら録画開始後）に初めて表示。
-            タスク1の直前は案内の「スタート」を押すまでは出さない（taskVisible） */}
+            タスク1の直前は案内の「スタート」を押すまでは出さない（taskVisible）。
+            「サービスを開いています／開き直す」の状態表示は、タスク文の領域を広く
+            取るためタスクヘッダー側（もう一度聞くの隣）に移した */}
         {taskVisible && (
           <>
-            {stimulusUrl && (
-              <div className="flex items-center justify-center gap-1.5 text-xs text-emerald-700">
-                <CheckCircle2 className="w-3.5 h-3.5" strokeWidth={2} />
-                <span>サービスを開いています</span>
-                <a
-                  href={stimulusUrl}
-                  target="uservoice-service"
-                  rel="noopener noreferrer"
-                  className="text-gray-500 hover:text-gray-800 underline underline-offset-2"
-                >
-                  開き直す
-                </a>
-              </div>
-            )}
-
             {/* 録画未開始の警告（録画が途中で止まった等の保険） */}
             {warnNoRecord && (
               <div className="bg-amber-50 border border-amber-300 rounded-lg p-3 text-xs text-amber-900 space-y-2">

@@ -2174,7 +2174,7 @@ export default function InterviewRoom({
                       タスク {currentTaskIndex + 1} / {tasks.length}
                     </p>
                     <p className="text-sm text-gray-900 font-medium leading-relaxed">
-                      {isSpeaking && revealedSpeechText ? revealedSpeechText : tasks[currentTaskIndex]?.text}
+                      {isSpeaking ? revealedSpeechText : tasks[currentTaskIndex]?.text}
                     </p>
                     {/* 読み上げの聞き直し。自動再生が止められた場合の再試行にもなる */}
                     <button
@@ -2563,7 +2563,7 @@ export default function InterviewRoom({
                 <div className="h-full bg-gray-900 rounded-full transition-all duration-500" style={{ width: `${progress}%` }} />
               </div>
               <p className={`text-sm font-medium leading-relaxed ${isFollowUp ? 'text-amber-700' : 'text-gray-900'}`}>
-                {isSpeaking && revealedSpeechText ? revealedSpeechText : (displayedQuestion || currentQ?.text)}
+                {isSpeaking ? revealedSpeechText : (displayedQuestion || currentQ?.text)}
               </p>
               {aiThinking && (
                 <div className="mt-3 flex items-center gap-2 text-xs text-amber-700">
