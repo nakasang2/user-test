@@ -141,6 +141,10 @@ export default function InterviewRoom({
   // （ブラウザが黙って認識を終了させることがあり、無条件に再開すると
   // こちらが意図的に止めた場合まで復活してしまうため）
   const recognitionStoppingRef = useRef(false)
+  // listenForAnswer が呼ばれるたびに増える世代番号。再開を遅延実行する際、
+  // 待っている間に新しい listenForAnswer（＝別の recognition インスタンス）が
+  // 始まっていたら、古い世代からの遅延再開を無視するために使う
+  const listenVersionRef = useRef(0)
   const silenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const startTimeRef = useRef<number>(nowMs())
   const transcriptRef = useRef<TranscriptEntry[]>([])
@@ -733,6 +737,7 @@ export default function InterviewRoom({
   function listenForAnswer(onAnswer: (answer: string) => void, silenceRetry = false) {
     // テキスト入力フォールバック用にコールバックを保存
     onAnswerCallbackRef.current = onAnswer
+    const myVersion = ++listenVersionRef.current
 
     if (typeof window === 'undefined') return
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -838,11 +843,19 @@ export default function InterviewRoom({
         return
       }
       restartAttempts++
-      try {
-        recognition.start()
-      } catch {
-        // 既に開始されている等はここに来うるが、実害はないので無視する
-      }
+      // 間を置かず即座に再試行すると、タブがまだ背面（service モードでは
+      // 操作対象のタブ・小窓に注目が移っている）で認識がブロックされている
+      // 一過性の状態を、上限回数の間にすべて使い切ってしまう。少し待って
+      // フォーカスが戻る／ブロックが解けるのを期待してから再試行する
+      setTimeout(() => {
+        if (myVersion !== listenVersionRef.current) return // 別の listenForAnswer に上書きされた
+        if (recognitionStoppingRef.current) return
+        try {
+          recognition.start()
+        } catch {
+          // 既に開始されている等はここに来うるが、実害はないので無視する
+        }
+      }, 500)
     }
 
     recognition.start()
@@ -1355,6 +1368,11 @@ export default function InterviewRoom({
     widgetChannelRef.current?.postMessage({ type: 'session_ended' })
     try { pipWindowRef.current?.close() } catch { /* ignore */ }
     pipWindowRef.current = null
+    // service モードは操作対象のサービスタブ・小窓に注目していたため、このタブは
+    // 背面のままになっている。背面タブのままだと音声認識（SpeechRecognition）が
+    // ブラウザ側で止められることがあるため、事後インタビューを聞き取る前に
+    // このタブへフォーカスを戻す（ブラウザによっては効かないこともあるが無害）
+    try { window.focus() } catch { /* ignore */ }
     if (questions.length === 0) {
       endInterview()
       return
@@ -1760,10 +1778,14 @@ export default function InterviewRoom({
 
   // 画像を出している間はカメラを小窓に退避させる（ユーザビリティ時と同じ扱い）。
   // 全画面のままだと画像が自分の顔に隠れる。
+  // ユーザビリティテストは task/intro/waiting（タスク中・準備段階）の間だけ小型化する。
+  // 事後インタビュー（interview/thinking）はタスク関連の表示が何も無く、通常の
+  // インタビューと同じ全画面のはずが、以前はここに含まれていたため、事後質問に
+  // 移っても顔が小さいまま・背景が暗いままになっていた（ユーザー指摘で修正）
   const cameraIsPip =
     questionImageVisible ||
     (interviewType === 'usability' &&
-      (phase === 'task' || phase === 'interview' || phase === 'thinking' || phase === 'intro' || phase === 'waiting'))
+      (phase === 'task' || phase === 'intro' || phase === 'waiting'))
 
   // 前提タスクを断念した直後の立て直し待ち。この間は達成/できなかったの操作を出さず、
   // 「次のタスクの開始地点まで到達できたか」だけを聞く。
