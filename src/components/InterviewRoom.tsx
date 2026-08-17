@@ -6,6 +6,9 @@ import { track } from '@/lib/analytics'
 // 参加者に感情を見せなくなったため、グラフ描画（recharts）は読み込まない。
 // 被験者側の画面が軽くなり、テストの妨げになる要素も減る。
 import { useEmotionDetection } from '@/hooks/useEmotionDetection'
+import { startSpeechListener, type SpeechListener } from '@/lib/speech-listener'
+import RatingQuestion from '@/components/RatingQuestion'
+import NpsQuestion from '@/components/NpsQuestion'
 import {
   Mic,
   Monitor,
@@ -135,17 +138,17 @@ export default function InterviewRoom({
 }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const streamRef = useRef<MediaStream | null>(null)
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const speechRef = useRef<any>(null)
-  // true の間は「意図した停止」。onend が自動再開してよいかどうかの判定に使う
-  // （ブラウザが黙って認識を終了させることがあり、無条件に再開すると
-  // こちらが意図的に止めた場合まで復活してしまうため）
-  const recognitionStoppingRef = useRef(false)
-  // listenForAnswer が呼ばれるたびに増える世代番号。再開を遅延実行する際、
-  // 待っている間に新しい listenForAnswer（＝別の recognition インスタンス）が
-  // 始まっていたら、古い世代からの遅延再開を無視するために使う
-  const listenVersionRef = useRef(0)
-  const silenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // 動いている聞き取り（src/lib/speech-listener.ts）。同時に1つだけ持つ
+  const listenerRef = useRef<SpeechListener | null>(null)
+  // 小窓が開いているか。開いている間は聞き取りを小窓に任せる（メイン画面は裏側に
+  // 回っており、裏側のタブではブラウザが音声認識を止めてしまうため）
+  const widgetOpenRef = useRef(false)
+  // 今の回答を聞き始めた時刻（文字起こしの開始位置に使う）
+  const answerStartedAtRef = useRef(0)
+  // 小窓からの録画到着を待っている終了処理を起こすための解決関数
+  const widgetBlobResolveRef = useRef<(() => void) | null>(null)
+  // 小窓が閉じられていないかの見張り（閉じられたら聞き取りをこちらへ引き取る）
+  const widgetWatchRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const startTimeRef = useRef<number>(nowMs())
   const transcriptRef = useRef<TranscriptEntry[]>([])
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
@@ -642,12 +645,11 @@ export default function InterviewRoom({
       speakVersionRef.current++ // 再生中の speak を無効化
       currentAudioRef.current?.pause()
       currentAudioRef.current = null
-      // 進行中の聞き取りと、予約済みの再開を無効化してから止める。
-      // ここで止めないと、離脱後もマイクを掴んだまま再開し続ける
-      listenVersionRef.current++
-      recognitionStoppingRef.current = true
-      stopCurrentRecognition()
-      if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current)
+      // 進行中の聞き取りを止める。ここで止めないと、離脱後もマイクを掴んだまま
+      // 再開し続ける
+      listenerRef.current?.stop()
+      listenerRef.current = null
+      if (widgetWatchRef.current) clearInterval(widgetWatchRef.current)
       stopDetection()
       if (screenMediaRecorderRef.current?.state !== 'inactive') {
         screenMediaRecorderRef.current?.stop()
@@ -737,312 +739,184 @@ export default function InterviewRoom({
   }
 
   /**
-   * 現在の音声認識インスタンスを確実に止める。
+   * 進行中の聞き取りを完全に終わらせる（次の質問へ進む・面談を終える等）。
    *
-   * 止め損ねたインスタンスが残るとマイクを奪い合い、前の質問用の聞き取りが次の質問の
-   * 発話を拾って、回答が入れ替わったり二重に記録されたりする。abort() は保留中の結果も
-   * 捨てるので、「この聞き取りはもう要らない」ときはこちらを使う。
+   * 聞き取りの実装は src/lib/speech-listener.ts に集約してある。ここは
+   * 「今どのリスナーが動いているか」を1つだけ持ち、確実に止める役目だけを負う。
    */
-  function stopCurrentRecognition() {
-    const recognition = speechRef.current
-    speechRef.current = null
-    if (!recognition) return
-    try {
-      recognition.abort()
-    } catch {
-      try {
-        recognition.stop()
-      } catch {
-        // 既に停止している場合はここに来る。実害は無い
-      }
+  function endCurrentListening() {
+    listenerRef.current?.stop()
+    listenerRef.current = null
+    if (widgetWatchRef.current) {
+      clearInterval(widgetWatchRef.current)
+      widgetWatchRef.current = null
     }
+    if (widgetOpenRef.current) widgetChannelRef.current?.postMessage({ type: 'listen_stop' })
+    setIsListening(false)
+  }
+
+  /** 事後質問の内容を小窓へ渡す（service モードでは参加者が見ているのは小窓side） */
+  function broadcastQuestion(text: string, type: 'open' | 'rating' | 'nps') {
+    if (!widgetOpenRef.current) return
+    widgetChannelRef.current?.postMessage({ type: 'interview_question', text, questionType: type })
+  }
+
+  /** 小窓のウィンドウを閉じる（録画を受け取り終わってから呼ぶこと） */
+  function closeWidgetWindow() {
+    widgetOpenRef.current = false
+    try { pipWindowRef.current?.close() } catch { /* ignore */ }
+    pipWindowRef.current = null
   }
 
   /**
-   * 進行中の聞き取りを完全に終わらせる（次の質問へ進む・面談を終える等）。
+   * 小窓が録画を書き出して送ってくるのを待つ。
    *
-   * 世代を進めてから止めるのが要点。停止しただけでは、ブラウザが遅れて配信する
-   * 末尾の確定結果や onend が「今の世代」として処理され、終わったはずの聞き取りが
-   * 沈黙タイマーごと復活してしまう（完了画面や評価質問の最中に読み上げが始まる）。
+   * 待たずにウィンドウを閉じると、録画が丸ごと失われる。ただし小窓が既に閉じている・
+   * 応答しない場合に面談が終われなくなるのは困るので、上限を設けて必ず先へ進む。
    */
-  function endCurrentListening() {
-    if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current)
-    listenVersionRef.current++
-    recognitionStoppingRef.current = true
-    stopCurrentRecognition()
+  function waitForWidgetRecording(): Promise<void> {
+    if (!widgetOpenRef.current) return Promise.resolve()
+    // 参加者が小窓を手で閉じていた場合、待っても誰も答えない
+    if (pipWindowRef.current?.closed) return Promise.resolve()
+    // 既に録画を受け取っている（小窓が先に書き出していた）なら待たない
+    if (screenBlobRef.current) return Promise.resolve()
+    return new Promise<void>((resolve) => {
+      let settled = false
+      const done = () => {
+        if (settled) return
+        settled = true
+        resolve()
+      }
+      widgetBlobResolveRef.current = done
+      setTimeout(() => {
+        if (!settled) console.warn('[UserVoice] 小窓からの録画が届きませんでした（待ち時間切れ）')
+        done()
+      }, 20000)
+    })
   }
 
-  // ── Feature 1: 沈黙タイムアウト付き音声認識 ──────────
+  /**
+   * 参加者の回答を聞き取る。
+   *
+   * service モードのユーザビリティテストでは、参加者が見ているのは常に手前にある
+   * 小窓で、このメイン画面は裏側にある。ブラウザは裏側のタブの音声認識を止めるため、
+   * ここで聞き取ろうとしても黙って止まる（しかも「中断しました」の案内も入力欄も
+   * 裏側にあるので参加者からは何も見えない）。そのため小窓が開いている間は、
+   * 聞き取りそのものを小窓に任せ、結果だけを受け取る。
+   */
   function listenForAnswer(onAnswer: (answer: string) => void, silenceRetry = false) {
     // テキスト入力フォールバック用にコールバックを保存
     onAnswerCallbackRef.current = onAnswer
-    // 先に世代を進めてから前のインスタンスを止める。こうすると、停止で発火する
-    // onend / onspeechend は「古い世代」として無視され、今から始める聞き取りに
-    // 干渉しない（前の世代が生き残るとマイクを奪い合い、回答が入れ替わる）
-    const myVersion = ++listenVersionRef.current
-    stopCurrentRecognition()
+    endCurrentListening()
+    if (!silenceRetry) answerStartedAtRef.current = elapsedSec(startTimeRef.current)
 
-    if (typeof window === 'undefined') return
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const SR = ((window as any).SpeechRecognition || (window as any).webkitSpeechRecognition) as (new () => any) | undefined
-    if (!SR) return // テキスト入力フォールバックで対応
-
-    recognitionStoppingRef.current = false
-
-    let finalText = ''
-    const startTime = elapsedSec(startTimeRef.current)
-    // ブラウザが黙って（エラー無しで）認識を止めることがある。事後インタビューのような
-    // 長い回答ほど、ブラウザ側の内部的な連続認識の上限に達しやすい。意図した停止で
-    // なければ自動的に再開する（finalText はクロージャ変数なのでそのまま引き継がれ、
-    // 参加者の発話が失われない）
-    //
-    // 再試行の上限は「そもそも起動できないまま空回りし続ける」のを防ぐためのもので、
-    // 上のような正常な終了を数えてはいけない。数えてしまうと、長く話す参加者ほど
-    // 発話の途中で上限に達し、無関係な中断メッセージが出る（実際にそうなっていた）。
-    // そこで「動けないまま終わった再試行」だけを連続で数える
-    let restartAttempts = 0
-    const MAX_RESTART_ATTEMPTS = 5
-    /** この時間以上動いていた認識インスタンスは「正常に動いていた」と見なす */
-    const HEALTHY_RUN_MS = 3000
-    let stoppingFromSpeechEnd = false
-    /** この聞き取りで回答を送信済みか（「送るものが無い」と区別するために持つ） */
-    let answerSubmitted = false
-
-    /**
-     * 聞き取れた回答を確定して次へ進める。送信できたら true。
-     * テキスト送信と二重に発火しないよう、コールバックを一度だけ消費する。
-     */
-    function submitFinalAnswer(): boolean {
-      if (!finalText.trim() || !onAnswerCallbackRef.current) return false
-      onAnswerCallbackRef.current = null
-      answerSubmitted = true
-      const entry: TranscriptEntry = {
-        speaker: 'Participant',
-        text: finalText.trim(),
-        start: startTime,
-        end: elapsedSec(startTimeRef.current),
-      }
-      transcriptRef.current = [...transcriptRef.current, entry]
-      setTranscript([...transcriptRef.current])
-      appendConversation(`\n参加者: ${finalText.trim()}`)
-      saveProgress()
-      onAnswer(finalText.trim())
-      return true
+    if (delegateListeningToWidget()) {
+      widgetChannelRef.current?.postMessage({ type: 'listen_start', silenceRetry })
+      setIsListening(true)
+      // 小窓が閉じられたら、こちらで聞き取りを引き取る。見張っていないと、
+      // 参加者が小窓を閉じた瞬間に「誰も聞いていない」状態のまま止まる
+      // （沈黙タイマーも小窓側にあるため、時間切れすら起きない）
+      if (widgetWatchRef.current) clearInterval(widgetWatchRef.current)
+      widgetWatchRef.current = setInterval(() => {
+        if (!pipWindowRef.current?.closed) return
+        widgetOpenRef.current = false
+        if (widgetWatchRef.current) clearInterval(widgetWatchRef.current)
+        widgetWatchRef.current = null
+        const pending = onAnswerCallbackRef.current
+        if (pending) listenForAnswer(pending, silenceRetry)
+      }, 1500)
+      return
     }
 
-    /** 認識を諦めて案内する。テキスト入力での回答は引き続きできる */
-    function giveUpListening() {
-      if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current)
-      stopCurrentRecognition()
-      setLiveText('')
-      setIsListening(false)
-      // ここまでに聞き取れていた分を捨てない。入力欄に移し、続きを打つか
-      // そのまま送るだけで済むようにする（既に入力中なら邪魔しない）
-      if (finalText.trim()) {
-        setTextInput((prev) => (prev.trim() ? prev : finalText.trim()))
-      }
-      // コールバックは残す（下のテキスト入力で回答を継続できる）
-      showNotice('音声認識が中断しました。下の入力欄に、聞き取れたところまでを残しました。続きを入力して送信してください。')
-    }
-
-    /** 新しい認識インスタンスで聞き取りを再開する */
-    function scheduleRestart(delayMs: number) {
-      setTimeout(() => {
-        if (myVersion !== listenVersionRef.current) return // 別の listenForAnswer に上書きされた
-        if (recognitionStoppingRef.current) return
-        try {
-          stopCurrentRecognition() // 念のため：前のインスタンスを残さない
-          speechRef.current = createRecognition()
-          speechRef.current.start()
-        } catch {
-          // start() が例外を投げた場合、このインスタンスは onend も onerror も発火しない。
-          // ここで面倒を見ないと、再試行も通知も無いまま無音で完全に止まってしまう
-          restartAttempts++
-          if (restartAttempts > MAX_RESTART_ATTEMPTS) giveUpListening()
-          else scheduleRestart(500)
-        }
-      }, delayMs)
-    }
-
-    /**
-     * 沈黙タイムアウト（60秒）を張り直す。考える時間・沈黙して内省する時間を確保しつつ、
-     * 参加者が完全に詰まったまま放置されないようにする最後の安全網。
-     *
-     * 発話のたびに「解除」ではなく「張り直し」にするのが要点。解除だけだと、
-     * 一度何か声を出した時点で安全網が永久に外れ、そのあと認識が空回りしても
-     * 促しも自動送りも起きず、画面が「音声認識中」のまま止まってしまう。
-     */
-    function armSilenceTimer() {
-      if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current)
-      silenceTimerRef.current = setTimeout(() => {
-        recognitionStoppingRef.current = true
-        speechRef.current?.stop()
+    const listener = startSpeechListener({
+      onLiveText: setLiveText,
+      onListeningChange: setIsListening,
+      onFinal: (text) => {
+        listenerRef.current = null
         setLiveText('')
-        // 既に聞き取れている分があるなら、それを回答として確定する。
-        // 捨てて「もう少し聞かせて」と促すと、話した内容がまるごと消える
-        // （聞き取り直しの listenForAnswer は finalText を空から始めるため）
-        if (submitFinalAnswer()) {
-          setIsListening(false)
-          return
-        }
-        if (!silenceRetry) {
-          // 1回目のタイムアウト：促す
-          speak('もう少し聞かせていただけますか？', () => {
-            listenForAnswer(onAnswer, true)
-          })
-        } else {
-          // 2回目のタイムアウト：次の質問へ
-          speak('ありがとうございます。次の質問に移ります。', () => {
-            onAnswer('')
-          })
-        }
-      }, 60000)
-    }
-
-    armSilenceTimer()
-
-    // 認識インスタンスを毎回新規に作る。onend 後に同じインスタンスへ start() を
-    // 呼び直すと、ブラウザ側の後始末が終わっていないタイミングで
-    // InvalidStateError が投げられ、リトライが黙って死ぬことがあるため。
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    function createRecognition(): any {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const recognition: any = new SR!()
-      recognition.lang = 'ja-JP'
-      recognition.continuous = true
-      recognition.interimResults = true
-
-      // 以下2つはこのインスタンス固有の状態。listenForAnswer 側に置くと、
-      // 前のインスタンスの値が次の判定に混ざる
-      /** 実際に開始した時刻。0 は「まだ開始できていない」 */
-      let startedAt = 0
-      /** no-speech / aborted 以外のエラーが起きたか（＝正常な終了ではない） */
-      let errored = false
-
-      recognition.onstart = () => {
-        startedAt = Date.now()
-      }
-
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      recognition.onresult = (event: any) => {
-        // 結果の取り込みは常に行う。stop() のあとに末尾の確定結果が届くことがあり、
-        // ここで捨てると参加者の言い終わりが文字起こしから欠ける
-        let interim = ''
-        for (let i = event.resultIndex; i < event.results.length; i++) {
-          if (event.results[i].isFinal) {
-            finalText += event.results[i][0].transcript
-          } else {
-            interim = event.results[i][0].transcript
-          }
-        }
-        // ただし、この聞き取りが既に終わっている場合は画面表示も安全網の張り直しも
-        // しない。終了後に届いた末尾の結果で 60 秒タイマーが復活すると、完了画面や
-        // 次の評価質問の最中に「もう少し聞かせていただけますか？」が読み上げられる
-        if (myVersion !== listenVersionRef.current) return
-        if (answerSubmitted || recognitionStoppingRef.current) return
-        if (!onAnswerCallbackRef.current) return
-        // 何か話し始めたらタイマーを張り直す（解除ではなく延長）
-        armSilenceTimer()
-        // 実際に聞き取れている＝認識は正常に動いている。連続失敗のカウントを戻す
-        restartAttempts = 0
-        setLiveText(finalText + interim)
-      }
-
-      recognition.onspeechend = () => {
-        // 古い世代のインスタンスがここを通ると、次の質問用のコールバックを消費して
-        // 「前の回答」を次の質問の答えとして送ってしまう。onend と同じく先に弾く
-        if (myVersion !== listenVersionRef.current) return
-        if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current)
-        recognitionStoppingRef.current = true
-        stoppingFromSpeechEnd = true
-        recognition.stop()
+        acceptSpokenAnswer(text)
+      },
+      onSilence: () => {
+        listenerRef.current = null
         setLiveText('')
-        setIsListening(false)
-        submitFinalAnswer()
-      }
-
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      recognition.onerror = (e: any) => {
-        // no-speech / aborted は沈黙タイマーや通常停止で処理されるため無視
-        if (e?.error === 'no-speech' || e?.error === 'aborted') return
-        // それ以外（not-allowed / service-not-allowed / network 等）はここでは何もせず、
-        // onend 側の再試行に任せる。エラーの種類で「もう直らない」と即断すると、
-        // service モードでタブが背面のまま事後質問に移った瞬間の一過性のブロックまで
-        // 恒久的な失敗として扱ってしまう（実際にそれで中断案内が出ていた）。
-        // 本当に権限が無い場合は数回の短い再試行が空振りしたあと同じ案内に行き着く。
-        // 再開処理をここに書かないのは、error のあとは onend も必ず発火するため
-        // （ここで start() すると二重起動になる）
-        errored = true
-        console.warn('[UserVoice] 音声認識エラー', e?.error)
-      }
-
-      recognition.onend = () => {
-        // 別の listenForAnswer（次の質問など）に上書きされた後に、この古いインスタンスの
-        // onend が遅れて発火したケース。何より先に弾く。ここを通すと、古い世代が
-        // 次の質問用のコールバックを消費して前の回答を二重送信したり、今聞き取れている
-        // 最中の質問と無関係な「音声認識が中断しました」を出したりしてしまう。
-        // recognitionStoppingRef は全 listenForAnswer 呼び出しで共有されており、
-        // 新しい呼び出しが始まると false に戻るため、それだけでは新旧を区別できない
-        if (myVersion !== listenVersionRef.current) return
-        // 発話終了で止めた場合、確定結果が onspeechend の後に届くことがある。
-        // ここで拾い直さないと、聞き取れているのに次へ進まず面談が止まる
-        if (stoppingFromSpeechEnd) {
-          stoppingFromSpeechEnd = false
-          // 正常系：onspeechend で既に送信済み。ここで再開してはいけない
-          // （再開すると、回答のたびに誰も止めない認識インスタンスが増えていく）
-          if (answerSubmitted) return
-          if (submitFinalAnswer()) return
-          // テキスト入力・手動操作・終了処理など別経路でコールバックが消費済みなら、
-          // この聞き取りの役目はもう終わっている
-          if (!onAnswerCallbackRef.current) return
-          // 発話の終わりと判定されたのに確定結果が何も無かった（物音だけ拾った等）。
-          // ここで何もしないと参加者は話しても入力しても進めない状態で固まるため、
-          // 聞き取りを再開する。空振りが続く場合に備え、通常の再試行と同じ上限の対象にする
-          restartAttempts++
-          if (restartAttempts > MAX_RESTART_ATTEMPTS) {
-            giveUpListening()
-            return
-          }
-          recognitionStoppingRef.current = false
-          setIsListening(true)
-          armSilenceTimer()
-          scheduleRestart(0)
-          return
-        }
-        // 意図した停止（沈黙タイムアウト・手動操作・終了処理）なら何もしない
-        if (recognitionStoppingRef.current) return
-
-        // ブラウザは長い発話の途中でも認識を区切って終了する。しばらく動けていたなら
-        // 異常ではないので連続失敗に数えず、待たずに再開する（待つとその間の発話が
-        // まるごと失われる）。動けないまま終わったときだけ回数を数え、猶予を置く。
-        // エラーで終わった場合は、何秒動いていても「正常」に数えない。数えてしまうと、
-        // 数秒後に毎回 network エラーで落ちるような状態で予算が永久に減らず、
-        // 案内も出ないまま再開を延々繰り返して参加者が置き去りになる
-        const ranMs = startedAt ? Date.now() - startedAt : 0
-        const healthy = ranMs >= HEALTHY_RUN_MS && !errored
-        if (healthy) restartAttempts = 0
-        else restartAttempts++
-
-        if (restartAttempts > MAX_RESTART_ATTEMPTS) {
-          giveUpListening()
-          return
-        }
-        // 起動できていない場合だけ、タブが背面（service モードでは操作対象のタブ・
-        // 小窓に注目が移っている）でブロックされている状態が解けるのを少し待つ
-        scheduleRestart(healthy ? 0 : 500)
-      }
-
-      return recognition
-    }
-
-    speechRef.current = createRecognition()
-    speechRef.current.start()
-    setIsListening(true)
+        handleSilenceTimeout(onAnswer, silenceRetry)
+      },
+      onGiveUp: (partial) => {
+        listenerRef.current = null
+        setLiveText('')
+        handleListeningGaveUp(partial)
+      },
+    })
+    listenerRef.current = listener
+    // 音声認識が使えない環境ではテキスト入力で続行する（コールバックは残してある）
+    if (!listener) setIsListening(false)
   }
+
+  /** 小窓に聞き取りを任せるか（service モードで小窓が開いている間） */
+  function delegateListeningToWidget() {
+    return interviewType === 'usability' && usabilityMode === 'service' && widgetOpenRef.current
+  }
+
+  /**
+   * 聞き取れた回答を記録して次へ進める。
+   * 小窓から届いた回答とメイン画面で聞き取った回答の入口を1つにまとめる。
+   */
+  function acceptSpokenAnswer(text: string): boolean {
+    const answer = text.trim()
+    if (!answer) return false
+    // テキスト送信と二重に発火しないよう、コールバックを一度だけ消費する
+    const callback = onAnswerCallbackRef.current
+    if (!callback) return false
+    onAnswerCallbackRef.current = null
+    const entry: TranscriptEntry = {
+      speaker: 'Participant',
+      text: answer,
+      start: answerStartedAtRef.current,
+      end: elapsedSec(startTimeRef.current),
+    }
+    transcriptRef.current = [...transcriptRef.current, entry]
+    setTranscript([...transcriptRef.current])
+    appendConversation(`\n参加者: ${answer}`)
+    saveProgress()
+    callback(answer)
+    return true
+  }
+
+  /** 何も聞き取れないまま沈黙が続いた */
+  function handleSilenceTimeout(onAnswer: (answer: string) => void, silenceRetry: boolean) {
+    if (!onAnswerCallbackRef.current) return
+    if (!silenceRetry) {
+      // 1回目：もう一度促す。
+      // 促している最中に参加者が入力欄から回答することがある。その場合コールバックは
+      // 既に消費されているので、聞き直しを始めてはいけない（同じ質問に2つ回答が付き、
+      // 深掘り判断が二重に走って質問が2問飛ぶ）
+      speak('もう少し聞かせていただけますか？', () => {
+        if (!onAnswerCallbackRef.current) return
+        listenForAnswer(onAnswer, true)
+      })
+    } else {
+      // 2回目：次の質問へ
+      speak('ありがとうございます。次の質問に移ります。', () => {
+        const callback = onAnswerCallbackRef.current
+        if (!callback) return
+        onAnswerCallbackRef.current = null
+        callback('')
+      })
+    }
+  }
+
+  /** 認識を続けられなくなった。聞き取れていた分は捨てずに入力欄へ移す */
+  function handleListeningGaveUp(partial: string) {
+    if (partial.trim()) {
+      setTextInput((prev) => (prev.trim() ? prev : partial.trim()))
+    }
+    showNotice('音声認識が中断しました。下の入力欄に、聞き取れたところまでを残しました。続きを入力して送信してください。')
+  }
+
 
   // ── Feature 5: 評価質問の回答送信 ────────────────────
   function submitRating(value: number, label: string) {
-    if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current)
+    endCurrentListening()
     const q = questions[currentQuestionIndexRef.current]
     const answerText = `${value}（${label}）`
     const entry: TranscriptEntry = {
@@ -1123,6 +997,7 @@ export default function InterviewRoom({
     }
     setAiThinking(true)
     setPhase('thinking')
+    if (widgetOpenRef.current) widgetChannelRef.current?.postMessage({ type: 'ai_thinking', thinking: true })
     try {
       const res = await fetch('/api/interviewer', {
         method: 'POST',
@@ -1144,6 +1019,7 @@ export default function InterviewRoom({
       })
       setAiThinking(false)
       setPhase('interview')
+      if (widgetOpenRef.current) widgetChannelRef.current?.postMessage({ type: 'ai_thinking', thinking: false })
       // HTTP エラー（レート制限 429 など）を「深掘り不要」と取り違えない。
       // 本文は {error} なので action が undefined になり、黙って次へ進んでしまう。
       // 進行自体は止めない（参加者を詰ませない）が、握りつぶさず記録に残す。
@@ -1160,6 +1036,7 @@ export default function InterviewRoom({
         appendConversation(`\nAI: ${decision.question}`)
         setIsFollowUp(true)
         setDisplayedQuestion(decision.question)
+        broadcastQuestion(decision.question, 'open')
         speak(decision.question, () => listenForAnswer(decideNext))
       } else {
         moveToNextPlannedQuestion()
@@ -1167,6 +1044,7 @@ export default function InterviewRoom({
     } catch {
       setAiThinking(false)
       setPhase('interview')
+      if (widgetOpenRef.current) widgetChannelRef.current?.postMessage({ type: 'ai_thinking', thinking: false })
       showNotice('通信エラーのため、次の質問に進みます。')
       // HTTP エラーと同じく、深掘りできなかったことを記録に残す
       noteFollowUpFailure('通信エラー')
@@ -1306,6 +1184,7 @@ export default function InterviewRoom({
     setCurrentQuestionIndex(index)
     setIsFollowUp(false)
     setDisplayedQuestion(q.text)
+    broadcastQuestion(q.text, q.naturalCapture ? 'open' : q.type)
     // 1問分のバッファは差し替える（この質問への回答を切り出す単位）が、
     // 面談全体の履歴には追記する（AI に渡す文脈を途切れさせない）
     conversationBufferRef.current = `AI: ${q.text}`
@@ -1403,6 +1282,7 @@ export default function InterviewRoom({
         iframe.style.cssText = 'width:100%;height:100%;border:none;display:block;'
         pipWindow.document.body.appendChild(iframe)
         pipWindowRef.current = pipWindow
+        widgetOpenRef.current = true
         setWidgetBlocked(false)
         console.info('[UserVoice] Document PiP ウィジェット: 常時最前面で起動しました')
         return
@@ -1417,7 +1297,10 @@ export default function InterviewRoom({
       'uservoice-widget',
       `popup,width=${WIDGET_WINDOW_SIZE.width},height=${WIDGET_WINDOW_SIZE.height},top=40,left=40`
     )
-    if (popup) pipWindowRef.current = popup
+    if (popup) {
+      pipWindowRef.current = popup
+      widgetOpenRef.current = true
+    }
     setWidgetBlocked(!popup)
   }
 
@@ -1542,15 +1425,16 @@ export default function InterviewRoom({
 
   // ── タスク完了 → 事後インタビュー開始 ─────────────────
   function completeTasksAndStartInterview() {
-    // ウィジェットを閉じる（BroadcastChannel 経由 + 直接 close）
-    widgetChannelRef.current?.postMessage({ type: 'session_ended' })
-    try { pipWindowRef.current?.close() } catch { /* ignore */ }
-    pipWindowRef.current = null
-    // service モードは操作対象のサービスタブ・小窓に注目していたため、このタブは
-    // 背面のままになっている。背面タブのままだと音声認識（SpeechRecognition）が
-    // ブラウザ側で止められることがあるため、事後インタビューを聞き取る前に
-    // このタブへフォーカスを戻す（ブラウザによっては効かないこともあるが無害）
-    try { window.focus() } catch { /* ignore */ }
+    // 小窓はここでは閉じない。
+    //
+    // 理由は2つある。(1) 画面録画は小窓が持っているので、閉じると事後質問のやり取りが
+    // 映像も音声もまったく記録されなくなる（実際にそうなっていた）。(2) 参加者が見て
+    // いるのは常に手前にある小窓で、このメイン画面は裏側にある。裏側のタブでは
+    // ブラウザが音声認識を止めるため、メイン画面で聞き取ろうとしても黙って止まる。
+    // そこで事後質問も小窓の中で行い、全部終わってからメイン画面に戻して保存する。
+    if (widgetOpenRef.current) {
+      widgetChannelRef.current?.postMessage({ type: 'post_interview_start' })
+    }
     if (questions.length === 0) {
       endInterview()
       return
@@ -1662,6 +1546,26 @@ export default function InterviewRoom({
             screenBlobRef.current = blob
             setScreenRecordingDownloadUrl(URL.createObjectURL(blob))
           }
+          // 録画の到着を待っている終了処理があれば起こす
+          widgetBlobResolveRef.current?.()
+          widgetBlobResolveRef.current = null
+        }
+        // 小窓で聞き取った回答。メイン画面は裏側にいて自分では聞き取れないため、
+        // service モードではここが回答の入口になる
+        else if (e.data.type === 'answer_text' && typeof e.data.text === 'string') {
+          const accepted = acceptSpokenAnswer(e.data.text)
+          // 受け取れなかった（既に次へ進んでいた等）ことを必ず返す。返さないと、
+          // 小窓は送れたつもりで入力欄を空にし、参加者の言葉が黙って消える
+          widgetChannelRef.current?.postMessage({ type: 'answer_ack', accepted, text: e.data.text })
+        }
+        // 小窓側で聞き取りが続けられなくなった／無音のまま時間切れになった
+        else if (e.data.type === 'answer_silence') {
+          const callback = onAnswerCallbackRef.current
+          if (callback) handleSilenceTimeout(callback, e.data.retry === true)
+        }
+        // 小窓の評価ボタン（5段階評価 / NPS）で回答した
+        else if (e.data.type === 'rating_answer' && typeof e.data.value === 'number') {
+          submitRating(e.data.value, String(e.data.label ?? e.data.value))
         }
       }
       // ① ウィジェット（PiP or ポップアップ）を「最初に」開く
@@ -1759,13 +1663,15 @@ export default function InterviewRoom({
     }
     recordOpenAnswerIfAny()  // 回答途中で終了した場合も取りこぼさない
     saveResults()            // 測定結果の最終フラッシュ（送信失敗していた分の再送を兼ねる）
-    // ウィジェットを閉じる（BroadcastChannel 経由 + 直接 close）
+    // 小窓へ終了を伝える。小窓はここで録画を止めて blob を送ってくるので、
+    // 受け取るまでウィンドウを閉じない（閉じると録画が丸ごと失われる）
+    const recordingArrived = waitForWidgetRecording()
     widgetChannelRef.current?.postMessage({ type: 'session_ended' })
-    try { pipWindowRef.current?.close() } catch { /* ignore */ }
-    pipWindowRef.current = null
     setPhase('ending')
     endCurrentListening()
     speak('ご回答いただきありがとうございました。本日のインタビューはこれで終了です。貴重なお時間をありがとうございました。', async () => {
+      await recordingArrived
+      closeWidgetWindow()
       await submitResults()
       setPhase('done')
     })
@@ -2839,69 +2745,6 @@ export default function InterviewRoom({
             </div>
           </div>
         </div>
-      </div>
-    </div>
-  )
-}
-
-// Feature 5: 5段階評価コンポーネント
-function RatingQuestion({ question, onSubmit }: { question: string; onSubmit: (v: number) => void }) {
-  const [hovered, setHovered] = useState<number | null>(null)
-  const labels = ['全く思わない', 'あまり思わない', '普通', 'そう思う', '非常にそう思う']
-  return (
-    <div className="text-center max-w-sm w-full">
-      <p className="text-sm text-gray-700 mb-5 leading-relaxed">{question}</p>
-      <div className="flex gap-2.5 justify-center mb-3">
-        {[1, 2, 3, 4, 5].map((v) => (
-          <button
-            key={v}
-            onMouseEnter={() => setHovered(v)}
-            onMouseLeave={() => setHovered(null)}
-            onClick={() => onSubmit(v)}
-            className={`w-11 h-11 rounded-md font-semibold text-base transition-all border ${
-              (hovered ?? 0) >= v
-                ? 'bg-gray-900 text-white border-gray-900 scale-110'
-                : 'bg-white text-gray-600 border-gray-300 hover:border-gray-500'
-            }`}
-          >
-            {v}
-          </button>
-        ))}
-      </div>
-      <p className="text-xs text-gray-500 h-4">
-        {hovered ? labels[hovered - 1] : ''}
-      </p>
-    </div>
-  )
-}
-
-// Feature 5: NPS（0〜10）コンポーネント
-function NpsQuestion({ question, onSubmit }: { question: string; onSubmit: (v: number) => void }) {
-  const [hovered, setHovered] = useState<number | null>(null)
-  return (
-    <div className="text-center max-w-lg w-full">
-      <p className="text-sm text-gray-700 mb-5 leading-relaxed">{question}</p>
-      <div className="flex gap-1 justify-center mb-2.5 flex-wrap">
-        {[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((v) => {
-          const color = v <= 6 ? 'border-red-200 text-red-700 hover:bg-red-50'
-            : v <= 8 ? 'border-amber-200 text-amber-700 hover:bg-amber-50'
-            : 'border-emerald-200 text-emerald-700 hover:bg-emerald-50'
-          return (
-            <button
-              key={v}
-              onMouseEnter={() => setHovered(v)}
-              onMouseLeave={() => setHovered(null)}
-              onClick={() => onSubmit(v)}
-              className={`w-9 h-9 rounded-md font-medium text-sm transition-all bg-white border ${color} ${hovered === v ? 'scale-110' : ''}`}
-            >
-              {v}
-            </button>
-          )
-        })}
-      </div>
-      <div className="flex justify-between text-xs text-gray-500 max-w-sm mx-auto">
-        <span>全く勧めない</span>
-        <span>非常に勧めたい</span>
       </div>
     </div>
   )

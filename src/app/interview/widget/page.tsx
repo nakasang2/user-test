@@ -9,6 +9,9 @@ import TaskRecovery, { TaskRecoveryActions } from '@/components/TaskRecovery'
 import ThinkAloudNudge from '@/components/ThinkAloudNudge'
 import { blockedAfter, needsRecovery } from '@/lib/task-flow'
 import { useSilenceNudge } from '@/hooks/useSilenceNudge'
+import RatingQuestion from '@/components/RatingQuestion'
+import NpsQuestion from '@/components/NpsQuestion'
+import { startSpeechListener, type SpeechListener } from '@/lib/speech-listener'
 
 interface Task {
   text: string
@@ -22,7 +25,11 @@ interface Task {
   isPrerequisite?: boolean | null
 }
 
-type WidgetPhase = 'task' | 'done'
+// 'interview' = タスクが全部終わったあとの事後質問。
+// メイン画面ではなく小窓で行う。理由は2つで、(1) 画面録画は小窓が持っているため
+// 小窓を閉じると事後質問がまったく記録されない、(2) 参加者が見ているのは常に手前に
+// ある小窓で、裏側になったメイン画面ではブラウザが音声認識を止めてしまう。
+type WidgetPhase = 'task' | 'interview' | 'done'
 
 function WidgetContent() {
   const searchParams = useSearchParams()
@@ -77,6 +84,15 @@ function WidgetContent() {
   // 案内の「スタート」を押したか。押すまではタスク1の文言・結果ボタンを出さない
   // （案内を読み終える前にタスクが見えてしまう不具合の修正）
   const [guidanceDismissed, setGuidanceDismissed] = useState(false)
+  // ── 事後質問（widgetPhase === 'interview'）の状態 ──
+  const [question, setQuestion]                 = useState('')
+  const [questionType, setQuestionType]         = useState<'open' | 'rating' | 'nps'>('open')
+  const [liveText, setLiveText]                 = useState('')
+  const [isListening, setIsListening]           = useState(false)
+  const [aiThinking, setAiThinking]             = useState(false)
+  const [answerInput, setAnswerInput]           = useState('')
+  const [listenNotice, setListenNotice]         = useState('')
+  const listenerRef                             = useRef<SpeechListener | null>(null)
   // ヒントを見たタスク番号（0始まり）。結果送信時に添えて集計で自力達成と分ける
   const usedHintIdxRef                          = useRef<Set<number>>(new Set())
 
@@ -116,10 +132,46 @@ function WidgetContent() {
           // メイン画面側で前提タスクの断念が記録された（フォールバック操作時）。
           // 小窓でも同じ立て直し画面を出し、操作の起点が割れないようにする
           setRecoveryAtIdx(e.data.index)
+        } else if (type === 'post_interview_start') {
+          // タスクは全部終わった。ここから事後質問を小窓の中で行う。
+          // 録画はまだ止めない（事後質問のやり取りも記録に残す）
+          stopListening()
+          setWidgetPhase('interview')
+          setQuestion('')
+          setLiveText('')
+          setAnswerInput('')
+          setListenNotice('')
+        } else if (type === 'interview_question') {
+          setQuestion(typeof e.data.text === 'string' ? e.data.text : '')
+          const qt = e.data.questionType
+          setQuestionType(qt === 'rating' || qt === 'nps' ? qt : 'open')
+          setLiveText('')
+          setAnswerInput('')
+          setListenNotice('')
+        } else if (type === 'answer_ack') {
+          if (e.data.accepted === true) {
+            // 受け取られた分だけ入力欄から消す（そのあと打ち足した分は残す）
+            setAnswerInput((prev) => (prev.trim() === String(e.data.text ?? '').trim() ? '' : prev))
+          } else {
+            setListenNotice('前の質問に進んでいたため送れませんでした。次の質問にお答えください。')
+          }
+        } else if (type === 'ai_thinking') {
+          setAiThinking(e.data.thinking === true)
+        } else if (type === 'listen_start') {
+          beginListening(e.data.silenceRetry === true)
+        } else if (type === 'listen_stop') {
+          stopListening()
         } else if (type === 'session_ended') {
+          // 面談終了。録画を止めて書き出し、メインへ渡してから閉じる。
+          // 先に閉じると録画が丸ごと失われる
+          stopListening()
           setWidgetPhase('done')
-          setDoneMessage('ウィンドウを閉じています...')
-          setTimeout(() => window.close(), 1200)
+          setDoneMessage('録画を保存しています...')
+          void (async () => {
+            await stopAndSendRecording()
+            setDoneMessage('ウィンドウを閉じています...')
+            setTimeout(() => window.close(), 800)
+          })()
         }
       }
     }
@@ -262,43 +314,85 @@ function WidgetContent() {
     }
   }
 
+  /* ── 事後質問の聞き取り ───────────────────────────────────── */
+  // 聞き取りはこの小窓で行う。メイン画面は裏側にあり、裏側のタブでは
+  // ブラウザが音声認識を止めてしまうため（実装は src/lib/speech-listener.ts）。
+  function stopListening() {
+    listenerRef.current?.stop()
+    listenerRef.current = null
+    setIsListening(false)
+    setLiveText('')
+  }
+
+  function beginListening(silenceRetry: boolean) {
+    stopListening()
+    setListenNotice('')
+    const listener = startSpeechListener({
+      onLiveText: setLiveText,
+      onListeningChange: setIsListening,
+      onFinal: (text) => {
+        listenerRef.current = null
+        setLiveText('')
+        channelRef.current?.postMessage({ type: 'answer_text', text })
+      },
+      onSilence: () => {
+        listenerRef.current = null
+        setLiveText('')
+        channelRef.current?.postMessage({ type: 'answer_silence', retry: silenceRetry })
+      },
+      onGiveUp: (partial) => {
+        listenerRef.current = null
+        setLiveText('')
+        // 聞き取れていた分は捨てず、そのまま送れるよう入力欄へ移す
+        if (partial) setAnswerInput((prev) => (prev.trim() ? prev : partial))
+        setListenNotice('音声がうまく認識できませんでした。下の欄に入力して送信してください。')
+      },
+    })
+    listenerRef.current = listener
+    if (!listener) {
+      setIsListening(false)
+      setListenNotice('この環境では音声認識を使えません。下の欄に入力して送信してください。')
+    }
+  }
+
+  /** 入力欄から回答を送る（音声が使えないとき・言い直したいとき） */
+  function sendTypedAnswer() {
+    const text = answerInput.trim()
+    if (!text) return
+    stopListening()
+    setListenNotice('')
+    // 入力欄はまだ空にしない。メインが受け取れたかどうか（answer_ack）を見てから
+    // 消す。先に消すと、次の質問へ進んだ直後などに送った言葉が黙って消える
+    channelRef.current?.postMessage({ type: 'answer_text', text })
+  }
+
   /* ── 録画停止 → blob をメインページへ送信 ─────────────────── */
   function stopAndSendRecording(): Promise<void> {
     return new Promise((resolve) => {
       // 合成描画ループを停止
       cancelAnimationFrame(animFrameRef.current)
+      // 中身が空でも必ず送る。送らないと、録画の到着を待っているメイン側が
+      // 何も受け取れないまま待ち時間切れ（20秒）まで終了画面で止まる
+      const send = (blob: Blob) => {
+        channelRef.current?.postMessage({ type: 'screen_recording_blob', blob })
+        screenStreamRef.current?.getTracks().forEach((t) => t.stop())
+        resolve()
+      }
       const recorder = screenMediaRecorderRef.current
       if (!recorder || recorder.state === 'inactive') {
         // すでに停止済み（画面共有が先に終了した場合など）でも chunks があれば送信
-        const blob = new Blob(screenChunksRef.current, { type: recorder?.mimeType || 'video/webm' })
-        if (blob.size > 0) channelRef.current?.postMessage({ type: 'screen_recording_blob', blob })
-        screenStreamRef.current?.getTracks().forEach((t) => t.stop())
-        resolve()
+        send(new Blob(screenChunksRef.current, { type: recorder?.mimeType || 'video/webm' }))
         return
       }
       recorder.onstop = () => {
-        const blob = new Blob(screenChunksRef.current, { type: recorder.mimeType || 'video/webm' })
-        if (blob.size > 0) {
-          channelRef.current?.postMessage({ type: 'screen_recording_blob', blob })
-        }
-        screenStreamRef.current?.getTracks().forEach((t) => t.stop())
-        resolve()
+        send(new Blob(screenChunksRef.current, { type: recorder.mimeType || 'video/webm' }))
       }
       recorder.stop()
     })
   }
 
-  /* ── インタビューページへフォーカスを戻す ─────────────────── */
-  function focusInterviewPage() {
-    if (window.opener && !window.opener.closed) {
-      window.opener.focus(); return
-    }
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const pipOpener = (window.parent as any)?.opener
-      if (pipOpener && !pipOpener.closed) pipOpener.focus()
-    } catch { /* cross-origin guard */ }
-  }
+  // 以前はタスク完了時にメイン画面へフォーカスを戻していたが、事後質問もこの小窓で
+  // 行うようになったため不要になった（メイン画面は裏側のまま、聞き取りはここで行う）。
 
   const isLastTask = currentTaskIndex + 1 >= tasks.length
   const pendingOutcomeRef = useRef<'completed' | 'gave_up'>('completed')
@@ -335,17 +429,21 @@ function WidgetContent() {
       setWarnNoRecord(true)
       return
     }
-    await finalize(outcome, seq)
+    finalize(outcome, seq)
   }
 
-  async function finalize(outcome: 'completed' | 'gave_up', seq?: number) {
+  /**
+   * 最後のタスクの結果を確定する。
+   *
+   * ここでは録画を止めない。止めて小窓を閉じてしまうと、このあとの事後質問が
+   * 映像も音声もまったく記録されなくなる（実際にそうなっていた）。録画を止めるのは
+   * 面談そのものが終わったとき（メインから session_ended が届いたとき）だけ。
+   * 事後質問へ切り替えるのもメイン側の合図（post_interview_start）に従う。
+   */
+  function finalize(outcome: 'completed' | 'gave_up', seq?: number) {
     setWarnNoRecord(false)
     const usedHint = usedHintIdxRef.current.has(currentTaskIndex)
-    focusInterviewPage()            // ① フォーカス（ユーザージェスチャー文脈）
-    await stopAndSendRecording()    // ② 録画停止 & blob 送信
     channelRef.current?.postMessage({ type: 'task_outcome', outcome, seq, usedHint })
-    setDoneMessage('インタビューページに戻ります...')
-    setWidgetPhase('done')
   }
 
   /* ── 前提タスクの立て直し ──────────────────────────────── */
@@ -358,19 +456,14 @@ function WidgetContent() {
   }
 
   // 到達できなかった → 後続は未実施として記録される。
-  // この先に実施できるタスクが無い場合、メインはタスク完了とみなして小窓を閉じるため、
-  // 閉じられる前に録画を止めて blob を送る（最後のタスクを押したときと同じ順序）。
+  // この先に実施できるタスクが無い場合、メインはタスク完了とみなして事後質問へ進む。
+  // 録画はそのまま続ける（止めるのは面談が終わったときだけ）。
   async function cannotRecoverPrereq() {
     const { resume } = blockedAfter(tasks, currentTaskIndex)
     if (resume >= tasks.length) {
-      // 録画を書き出している間は立て直し画面を閉じない。閉じると同じ位置に通常の
-      // 「達成／できなかった」が戻り、そこで達成を押されると断念の記録が達成に
-      // 上書きされ、遅れて届く prereq_failed も捨てられて未実施が記録されない。
-      focusInterviewPage()
-      await stopAndSendRecording()
+      // この先に実施できるタスクは無い。メインがタスク完了とみなして事後質問へ
+      // 進めるので、ここでは結果だけ送る（録画は面談が終わるまで止めない）
       channelRef.current?.postMessage({ type: 'prereq_failed' })
-      setDoneMessage('インタビューページに戻ります...')
-      setWidgetPhase('done')
       setRecoveryAtIdx(null)
       return
     }
@@ -390,12 +483,12 @@ function WidgetContent() {
       })
       setAwaitingSeq(null)
     }
-    focusInterviewPage()
-    await stopAndSendRecording()
+    // 録画の停止と書き出しはメインからの session_ended で行う。ここで止めると、
+    // 終了処理の途中で録画が二重に書き出され、メイン側の待ち合わせと噛み合わない
+    stopListening()
     channelRef.current?.postMessage({ type: 'end_session' })
-    setDoneMessage('セッションを終了します...')
+    setDoneMessage('セッションを終了しています...')
     setWidgetPhase('done')
-    setTimeout(() => window.close(), 800)
   }
 
   // 事前手続き（録画開始 →（サービスURLがあれば）サービスを開く）が完了したか。
@@ -485,6 +578,128 @@ function WidgetContent() {
             <CheckCircle2 className="w-5 h-5 text-emerald-600" strokeWidth={1.75} />
           </div>
           <p className="text-sm text-gray-600">{doneMessage}</p>
+        </div>
+      </div>
+    )
+  }
+
+  /* ── 事後質問画面 ─────────────────────────────────────────── */
+  // タスクが全部終わったあと、質問もこの小窓の中で行う。
+  // 読み上げ中はメイン画面から届く revealedText（タイプライター表示）を出し、
+  // 読み終えたら質問文の全文に切り替える。
+  if (widgetPhase === 'interview') {
+    const shownQuestion = ttsSpeaking ? revealedText : question
+    return (
+      <div className="bg-white text-gray-900">
+        <div className="flex items-center justify-between px-3 py-2 border-b border-gray-200">
+          <span className="text-xs font-semibold text-gray-900 tracking-tight">UserVoice</span>
+          <span className="text-gray-500 text-xs">最後にいくつか質問します</span>
+        </div>
+
+        {/* カメラ（タスク中と同じ位置に置き、見え方を変えない） */}
+        <div className="relative bg-gray-900 aspect-video">
+          <video
+            ref={webcamVideoRef}
+            autoPlay
+            muted
+            playsInline
+            aria-label="あなたのカメラ映像"
+            className={`w-full h-full object-cover scale-x-[-1] ${cameraError ? 'hidden' : ''}`}
+          />
+          {isListening && (
+            <div className="absolute bottom-2 left-2 flex items-center gap-1.5 bg-gray-950/70 text-white px-2 py-1 rounded-md">
+              <span className="w-1.5 h-1.5 rounded-full bg-red-400 animate-pulse" />
+              <span className="text-[10px]">聞き取り中</span>
+            </div>
+          )}
+          {ttsSpeaking && (
+            <div className="absolute bottom-2 left-2 flex items-center gap-1.5 bg-gray-950/70 text-white px-2 py-1 rounded-md">
+              <Volume2 className="w-3 h-3" strokeWidth={2} />
+              <span className="text-[10px]">AI が話しています</span>
+            </div>
+          )}
+        </div>
+
+        <div className="px-3 py-3 space-y-2.5">
+          {/* 質問文 */}
+          <div className="bg-gray-50 border border-gray-200 rounded-lg p-2.5 max-h-40 overflow-y-auto">
+            <p className="text-xs text-gray-900 leading-relaxed whitespace-pre-line">
+              {shownQuestion || '質問を準備しています…'}
+            </p>
+          </div>
+
+          {aiThinking && (
+            <p className="text-[11px] text-gray-500">回答を聞いています…</p>
+          )}
+
+          {/* 評価質問はボタンで回答する */}
+          {!aiThinking && !ttsSpeaking && questionType === 'rating' && (
+            <div className="border border-gray-200 rounded-lg p-2.5">
+              <RatingQuestion
+                compact
+                question=""
+                onSubmit={(v) => channelRef.current?.postMessage({ type: 'rating_answer', value: v, label: `${v} / 5` })}
+              />
+            </div>
+          )}
+          {!aiThinking && !ttsSpeaking && questionType === 'nps' && (
+            <div className="border border-gray-200 rounded-lg p-2.5">
+              <NpsQuestion
+                compact
+                question=""
+                onSubmit={(v) => channelRef.current?.postMessage({ type: 'rating_answer', value: v, label: `${v} / 10` })}
+              />
+            </div>
+          )}
+
+          {/* 自由回答: 聞き取り中の文字と、テキストでの入力欄 */}
+          {questionType === 'open' && (
+            <>
+              {liveText && (
+                <p className="text-xs text-gray-700 leading-relaxed bg-blue-50 border border-blue-100 rounded-lg p-2.5">
+                  {liveText}
+                </p>
+              )}
+              {listenNotice && (
+                <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2 py-1.5 leading-snug">
+                  {listenNotice}
+                </p>
+              )}
+              <div className="flex gap-1.5">
+                <input
+                  value={answerInput}
+                  onChange={(e) => setAnswerInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    // 日本語入力の変換確定 Enter で送信しない
+                    if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
+                      e.preventDefault()
+                      sendTypedAnswer()
+                    }
+                  }}
+                  placeholder="うまく聞き取れないときは入力できます"
+                  className="flex-1 min-w-0 border border-gray-300 rounded-md px-2 py-1.5 text-xs focus:outline-none focus:border-gray-500"
+                />
+                <button
+                  onClick={sendTypedAnswer}
+                  disabled={!answerInput.trim()}
+                  className="flex-shrink-0 bg-gray-900 hover:bg-gray-800 disabled:bg-gray-300 text-white rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors"
+                >
+                  送信
+                </button>
+              </div>
+            </>
+          )}
+
+          {/* タスク画面と同じく、常に押せる脱出口を最下部に置く。事後質問は評価ボタン
+              だけの回で聞き取りも沈黙タイマーも動かないことがあり、ここに終了手段が
+              無いと参加者が詰む */}
+          <button
+            onClick={endSession}
+            className="w-full inline-flex items-center justify-center gap-1.5 border border-gray-300 hover:border-gray-400 text-gray-600 hover:text-gray-900 py-2 rounded-lg text-xs transition-colors"
+          >
+            <X className="w-3.5 h-3.5" strokeWidth={2} />
+            セッションを終了
+          </button>
         </div>
       </div>
     )
