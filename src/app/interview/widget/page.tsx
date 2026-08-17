@@ -68,6 +68,9 @@ function WidgetContent() {
   const [micStream, setMicStream]              = useState<MediaStream | null>(null)
   // メイン画面が読み上げ中か（tts_state で届く）。読み上げ中は沈黙検知を止める
   const [ttsSpeaking, setTtsSpeaking]          = useState(false)
+  // 読み上げに合わせて少しずつ表示する文字列（タイプライター表示）。
+  // メイン側の speak() が唯一の情報源（tts_reveal で届く）
+  const [revealedText, setRevealedText]        = useState('')
   // タスク1の前に読む思考発話の案内。メイン側から guidance_text で届くまでは
   // プレースホルダーを出す（案内のテキストはメイン側の speak() が唯一の情報源）
   const [guidanceText, setGuidanceText]        = useState('')
@@ -105,6 +108,8 @@ function WidgetContent() {
           setRecoveryAtIdx((cur) => (cur === next ? cur : null))
         } else if (type === 'tts_state') {
           setTtsSpeaking(e.data.speaking === true)
+        } else if (type === 'tts_reveal' && typeof e.data.text === 'string') {
+          setRevealedText(e.data.text)
         } else if (type === 'guidance_text' && typeof e.data.text === 'string') {
           setGuidanceText(e.data.text)
         } else if (type === 'prereq_recovery' && typeof e.data.index === 'number') {
@@ -422,16 +427,18 @@ function WidgetContent() {
     channelRef.current?.postMessage({ type: 'task_ready' })
   }, [readyForTask, showGuidance])
 
-  // 詰まった参加者への声かけ。着手（タスク1が実際に見えてから＝taskVisible）してから
-  // hintDelaySec 後に出す。案内の表示中はカウントしない。
+  // 詰まった参加者への声かけ。着手（タスクが実際に見えてから＝taskVisible）してから
+  // hintDelaySec 後に出す。案内の表示中・読み上げ中（タスク文の朗読含む）はカウントしない
+  // （説明を聞いている時間を「詰まっている」時間に含めないため。ttsSpeaking が false に
+  // 戻った時点でこの effect が再実行され、そこから計測が始まる）。
   // タスクが変わるとタイマーを張り直すので、前のタスクの経過は持ち越さない。
   // ※フック規則のため、必ず早期 return より前に置くこと。
   useEffect(() => {
-    if (!hintDelaySec || !taskVisible) return
+    if (!hintDelaySec || !taskVisible || ttsSpeaking) return
     const idx = currentTaskIndex
     const timer = setTimeout(() => setStuckAtIdx(idx), hintDelaySec * 1000)
     return () => clearTimeout(timer)
-  }, [hintDelaySec, taskVisible, currentTaskIndex])
+  }, [hintDelaySec, taskVisible, currentTaskIndex, ttsSpeaking])
 
   const stuckOnTask = stuckAtIdx === currentTaskIndex
   const hintShown = hintShownAtIdx === currentTaskIndex
@@ -548,7 +555,7 @@ function WidgetContent() {
           <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 space-y-2.5">
             <p className="text-[10px] text-gray-500 uppercase tracking-wide font-medium">はじめに</p>
             <p className="text-sm text-gray-900 leading-relaxed">
-              {guidanceText || '案内を読み上げています…'}
+              {ttsSpeaking && revealedText ? revealedText : (guidanceText || '案内を読み上げています…')}
             </p>
             <button
               type="button"
@@ -576,7 +583,9 @@ function WidgetContent() {
                     もう一度聞く
                   </button>
                 </div>
-                <p className="text-sm text-gray-900 leading-relaxed">{currentTask.text}</p>
+                <p className="text-sm text-gray-900 leading-relaxed">
+                  {ttsSpeaking && revealedText ? revealedText : currentTask.text}
+                </p>
               </div>
               {/* 思考発話の促し（沈黙が続いたときだけ・自動で消える） */}
               {thinkAloudNudge && <ThinkAloudNudge compact />}

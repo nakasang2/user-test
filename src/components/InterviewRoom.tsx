@@ -193,7 +193,12 @@ export default function InterviewRoom({
   // そこから現在のフェーズを見るには ref が要る（state だけだと陳腐化する）
   const phaseRef = useRef<Phase>('guide')
   useEffect(() => { phaseRef.current = phase }, [phase])
+  // 現在表示すべき質問文の静的な値（深掘り中は currentQ.text と異なる深掘り質問文になる）
   const [displayedQuestion, setDisplayedQuestion] = useState('')
+  // 読み上げ中の音声に合わせて少しずつ表示する文字列（タイプライター表示）。
+  // speak() 呼び出し中だけ意味を持ち、読み上げが終わったら各表示側は displayedQuestion /
+  // タスク文など、元の静的なテキストにフォールバックする
+  const [revealedSpeechText, setRevealedSpeechText] = useState('')
   const [isFollowUp, setIsFollowUp] = useState(false)
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0)
   const [transcript, setTranscript] = useState<TranscriptEntry[]>([])
@@ -273,7 +278,10 @@ export default function InterviewRoom({
     }
     currentTaskIndexRef.current = idx
     setCurrentTaskIndex(idx)
-    // 次タスクの計測開始（前タスクの終了時刻＝次タスクの開始時刻）
+    // 暫定の計測開始点（前タスクの終了時刻＝次タスクの開始時刻）。タスク文の読み上げが
+    // 終わるより前に参加者が操作してしまった場合の保険として、まずここで設定しておく。
+    // 通常は taskStartTick の効果でspeakTaskが呼ばれ、その onEnd がこの値をより正確な
+    // 「読み上げ完了時点」に上書きする（説明を聞いている時間を含めないため）
     taskStartedAtRef.current = elapsedSec(startTimeRef.current)
     firstTaskStartedRef.current = true
     resetStuckTimer()
@@ -305,22 +313,29 @@ export default function InterviewRoom({
   function markFirstTaskStart() {
     if (firstTaskStartedRef.current) return
     firstTaskStartedRef.current = true
+    // 暫定の計測開始点。タスク1の読み上げが終わるより前に参加者が操作してしまった
+    // 場合の保険として、まずここで設定しておく（通常は speakTask の onEnd が
+    // 読み上げ完了時点により正確に上書きする。説明を聞いている時間を含めないため）
     taskStartedAtRef.current = elapsedSec(startTimeRef.current)
-    setTaskStartTick((n) => n + 1)  // 声かけタイマーの起点
+    setTaskStartTick((n) => n + 1)
   }
   // 「タスクに着手した瞬間」を effect に伝えるためのカウンタ。
   // ref の更新では再レンダーが起きずタイマーを張り直せないため、state で持つ。
   const [taskStartTick, setTaskStartTick] = useState(0)
+  // タスク文の読み上げが終わり、実際に計測・声かけタイマーを開始してよくなった合図。
+  // taskStartTick（読み上げの開始トリガー）とは別に持つ
+  // （読み上げ中の時間を所要時間・声かけの遅延に含めないため）。
+  const [taskReadyTick, setTaskReadyTick] = useState(0)
 
-  // 声かけタイマー。着手（taskStartTick）から hintDelaySec 後に一度だけ立てる。
+  // 声かけタイマー。着手（taskReadyTick＝読み上げ完了後）から hintDelaySec 後に一度だけ立てる。
   // hintDelaySec 未設定なら何もしない（既存調査の進行を変えない）。
   useEffect(() => {
     if (!hintDelaySec || hintDelaySec <= 0) return
-    if (taskStartTick === 0) return   // まだ着手していない
+    if (taskReadyTick === 0) return   // まだ読み上げが終わっていない
     if (phase !== 'task') return      // タスク中以外では出さない
     const timer = setTimeout(() => setStuckOnTask(true), hintDelaySec * 1000)
     return () => clearTimeout(timer)
-  }, [hintDelaySec, taskStartTick, phase])
+  }, [hintDelaySec, taskReadyTick, phase])
 
   const [stimulusCountdown, setStimulusCountdown] = useState(0)
   const [stimulusError, setStimulusError] = useState(false)
@@ -399,10 +414,16 @@ export default function InterviewRoom({
     //   Interviewer の発言として二重に入れると、AI の回答抽出がタスク文を
     //   質問として扱いうる。
     // failNotice: 再生に失敗したときの案内（読み上げ対象によって文言を変える）
-    opts?: { log?: boolean; failNotice?: string },
+    // displayText: 画面にタイプライター表示する対象（省略時は text 全体）。
+    //   タスクの読み上げは「{説明}タスクN。{本文}」のように前置きを足すが、
+    //   画面に出すのは本文だけなので、text の末尾に displayText が一致する
+    //   前提で、前置き分だけ表示の開始を遅らせる
+    opts?: { log?: boolean; failNotice?: string; displayText?: string },
   ) => {
     if (typeof window === 'undefined') return
     const failNotice = opts?.failNotice ?? '音声の再生に失敗しました。画面の質問テキストをご覧ください。'
+    const displayText = opts?.displayText ?? text
+    const displayPrefixLen = Math.max(0, text.length - displayText.length)
 
     // 再生中の音声をキャンセル
     if (currentAudioRef.current) {
@@ -412,11 +433,13 @@ export default function InterviewRoom({
     const version = ++speakVersionRef.current
 
     setIsSpeaking(true)
+    setRevealedSpeechText('')
     // 小窓にも「いま読み上げている」を伝える。小窓は沈黙検知を持っているが、
     // マイクの echoCancellation で自分の読み上げ音声は除去されるため、
     // 伝えないと読み上げ中も沈黙として数えて促しを割り込ませてしまう
     //（促しの speak が読み上げをキャンセルし、タスクの後半が聞けなくなる）。
     widgetChannelRef.current?.postMessage({ type: 'tts_state', speaking: true })
+    widgetChannelRef.current?.postMessage({ type: 'tts_reveal', text: '' })
     const endSpeaking = () => {
       setIsSpeaking(false)
       widgetChannelRef.current?.postMessage({ type: 'tts_state', speaking: false })
@@ -459,6 +482,19 @@ export default function InterviewRoom({
         const url = URL.createObjectURL(blob)
         const audio = new Audio(url)
         currentAudioRef.current = audio
+        // 再生位置に応じて少しずつ表示する（正確な単語区切りはAPIから取れないため、
+        // 経過時間の比率をそのまま文字数の比率に近似する簡易版）
+        audio.ontimeupdate = () => {
+          if (version !== speakVersionRef.current) return
+          const ratio = audio.duration > 0 && isFinite(audio.duration)
+            ? Math.min(1, audio.currentTime / audio.duration)
+            : 1
+          const fullRevealed = Math.floor(text.length * ratio)
+          const shown = Math.max(0, Math.min(displayText.length, fullRevealed - displayPrefixLen))
+          const next = displayText.slice(0, shown)
+          setRevealedSpeechText(next)
+          widgetChannelRef.current?.postMessage({ type: 'tts_reveal', text: next })
+        }
         audio.onended = () => {
           URL.revokeObjectURL(url)
           currentAudioRef.current = null
@@ -517,17 +553,18 @@ export default function InterviewRoom({
   // 参加者は別タブでサービスを操作しているので、読むたびに小窓へ視線を戻すことになり、
   // その動作自体がテストのノイズになる。テキスト表示は残したまま音声を足す
   // （音声だけにすると記憶に頼らせることになる）。
-  const speakTask = useCallback((idx: number) => {
+  const speakTask = useCallback((idx: number, onEnd?: () => void) => {
     const t = tasks?.[idx]
     if (!t) return
     // 調査作成時の「説明（任意）」は、serviceモードでは「はじめに」の案内（speakGuidance）で
     // 読み上げ済みなのでここでは重複させない。案内ステップの無い経路（prototype等）だけ、
     // 従来どおりタスク1の直前に含める
     const prefix = idx === 0 && usabilityMode !== 'service' && description?.trim() ? `${description.trim()}` : ''
-    speak(`${prefix}タスク${idx + 1}。${t.text}`, undefined, {
+    speak(`${prefix}タスク${idx + 1}。${t.text}`, onEnd, {
       // 文字起こしには残さない（結果記録側にタスク文言があるため二重になる）
       log: false,
       failNotice: '音声を再生できませんでした。画面のタスク文をご覧ください。',
+      displayText: t.text,
     })
   }, [tasks, speak, description, usabilityMode])
 
@@ -555,7 +592,13 @@ export default function InterviewRoom({
     if (phase !== 'task') return      // タスク中以外では読まない
     if (spokenTickRef.current === taskStartTick) return
     spokenTickRef.current = taskStartTick
-    speakTask(currentTaskIndexRef.current)
+    speakTask(currentTaskIndexRef.current, () => {
+      // 読み上げ完了後（失敗時はここに来た時点）に、gotoTask/markFirstTaskStart が
+      // 暫定で入れた開始点をより正確な値に上書きし、声かけタイマーを開始する
+      // （説明を聞いている時間を所要時間・声かけの遅延に含めないため）
+      taskStartedAtRef.current = elapsedSec(startTimeRef.current)
+      setTaskReadyTick((n) => n + 1)
+    })
   }, [taskStartTick, phase, interviewType, speakTask])
 
   // 沈黙検知はメイン画面で操作している場合だけ動かす（prototype モードと、
@@ -2131,7 +2174,7 @@ export default function InterviewRoom({
                       タスク {currentTaskIndex + 1} / {tasks.length}
                     </p>
                     <p className="text-sm text-gray-900 font-medium leading-relaxed">
-                      {tasks[currentTaskIndex]?.text}
+                      {isSpeaking && revealedSpeechText ? revealedSpeechText : tasks[currentTaskIndex]?.text}
                     </p>
                     {/* 読み上げの聞き直し。自動再生が止められた場合の再試行にもなる */}
                     <button
@@ -2520,7 +2563,7 @@ export default function InterviewRoom({
                 <div className="h-full bg-gray-900 rounded-full transition-all duration-500" style={{ width: `${progress}%` }} />
               </div>
               <p className={`text-sm font-medium leading-relaxed ${isFollowUp ? 'text-amber-700' : 'text-gray-900'}`}>
-                {displayedQuestion || currentQ?.text}
+                {isSpeaking && revealedSpeechText ? revealedSpeechText : (displayedQuestion || currentQ?.text)}
               </p>
               {aiThinking && (
                 <div className="mt-3 flex items-center gap-2 text-xs text-amber-700">
