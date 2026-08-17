@@ -15,10 +15,12 @@
  *    今は各リスナーが自分のインスタンスだけを見る（`recognition !== current` で判定）。
  *
  * 2. **再試行の上限は「連続した失敗」だけを数える**。
- *    ブラウザは `continuous = true` でも長い発話の途中で認識を区切って終了する。
- *    これを失敗として数えると、長く話す人ほど早く上限に達し、発話の最中に
- *    「中断しました」が出る。一定時間動けていた終了・結果が返った終了は失敗に
- *    数えず、待たずに再開する（待つとその間の発話が失われる）。
+ *    ブラウザは `continuous = true` でも、長い発話の途中でも、無音が続いたときでも、
+ *    物音を拾っただけのときでも認識を区切って終了する。これらを失敗として数えると、
+ *    長く話す人ほど・黙っている人ほど早く上限に達し、何も悪いことをしていない
+ *    参加者に「中断しました」が出る（実際にそうなっていた）。
+ *    失敗と呼べるのは「そもそも起動できていない」か「本物のエラーで落ちた」場合だけ。
+ *    参加者が黙っていられる時間は、失敗回数ではなく沈黙タイマーが見張る。
  *
  * 3. **エラーの種類で「もう直らない」と即断しない**。
  *    一過性のブロックと恒久的な拒否は、短い再試行が全部空振りしたかどうかで
@@ -81,8 +83,6 @@ export function startSpeechListener(opts: SpeechListenerOptions): SpeechListener
   const silenceMs = opts.silenceMs ?? 60000
   /** 連続して「動けないまま終わった」回数の上限 */
   const MAX_RESTART_ATTEMPTS = 5
-  /** この時間以上動いていた認識は「正常に動いていた」と見なす */
-  const HEALTHY_RUN_MS = 3000
 
   let finalText = ''
   /** 結果を1つ通知し終えたか（onFinal / onSilence / onGiveUp は合わせて1回だけ） */
@@ -245,23 +245,26 @@ export function startSpeechListener(opts: SpeechListenerOptions): SpeechListener
           finish(() => opts.onFinal(finalText.trim()))
           return
         }
-        // 発話の終わりと判定されたのに確定結果が無かった（物音だけ拾った等）。
-        // ここで止まると参加者は話しても進めない状態で固まるので聞き取りを続ける
-        restartAttempts++
-        if (restartAttempts > MAX_RESTART_ATTEMPTS) {
-          finish(() => opts.onGiveUp(finalText.trim(), giveUpReason()))
-          return
-        }
-        armSilenceTimer()
-        scheduleRestart(0)
+        // 発話の終わりと判定されたのに確定結果が無かった。物音・息づかい・環境音でも
+        // 起きる、ごく普通の出来事なので**失敗として数えない**。数えると、黙って
+        // 座っているだけで上限に達し、何もしていない参加者にエラーが出てしまう。
+        //
+        // 沈黙タイマーもここでは張り直さない。張り直すと、物音を拾うたびに 60 秒が
+        // 先送りされ、本来出るはずの「もう少し聞かせていただけますか？」に永久に
+        // 到達しなくなる（黙っているほど詰む）。
+        scheduleRestart(300)
         return
       }
 
-      // ブラウザは長い発話の途中でも認識を区切って終了する。しばらく動けていたなら
-      // 異常ではないので連続失敗に数えず、待たずに再開する。エラーで終わった場合は
-      // 何秒動いていても正常には数えない（数えないと予算が減らず永久に再開し続ける）
+      // 実際に動き出せていて、エラーで終わっていないなら異常ではない。
+      // 無音による終了（no-speech）もここに含まれる。参加者が黙っていられる時間は
+      // 沈黙タイマーが見張っているので、ここで失敗として数えてはいけない。
+      //
+      // 以前は「3秒以上動いたか」で判定していたが、これは脆かった。無音の終了が
+      // 早いだけで失敗が積み上がり、話していない参加者にエラーを出していた。
+      // 失敗と呼べるのは「そもそも起動できていない」か「本物のエラーで落ちた」場合だけ。
       const ranMs = startedAt ? Date.now() - startedAt : 0
-      const healthy = ranMs >= HEALTHY_RUN_MS && !errored
+      const healthy = startedAt > 0 && !errored
       if (healthy) restartAttempts = 0
       else restartAttempts++
 
@@ -269,7 +272,8 @@ export function startSpeechListener(opts: SpeechListenerOptions): SpeechListener
         finish(() => opts.onGiveUp(finalText.trim(), giveUpReason()))
         return
       }
-      scheduleRestart(healthy ? 0 : 500)
+      // すぐ終わってしまう場合に備えて最低限の間隔は空ける（CPU を回し続けない）
+      scheduleRestart(healthy ? (ranMs < 500 ? 300 : 0) : 500)
     }
 
     return recognition
