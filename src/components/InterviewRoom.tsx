@@ -715,9 +715,7 @@ export default function InterviewRoom({
     const text = textInput.trim()
     if (!text || !onAnswerCallbackRef.current) return
 
-    if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current)
-    recognitionStoppingRef.current = true
-    speechRef.current?.stop()
+    endCurrentListening()
     setLiveText('')
     setIsListening(false)
 
@@ -760,6 +758,20 @@ export default function InterviewRoom({
     }
   }
 
+  /**
+   * 進行中の聞き取りを完全に終わらせる（次の質問へ進む・面談を終える等）。
+   *
+   * 世代を進めてから止めるのが要点。停止しただけでは、ブラウザが遅れて配信する
+   * 末尾の確定結果や onend が「今の世代」として処理され、終わったはずの聞き取りが
+   * 沈黙タイマーごと復活してしまう（完了画面や評価質問の最中に読み上げが始まる）。
+   */
+  function endCurrentListening() {
+    if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current)
+    listenVersionRef.current++
+    recognitionStoppingRef.current = true
+    stopCurrentRecognition()
+  }
+
   // ── Feature 1: 沈黙タイムアウト付き音声認識 ──────────
   function listenForAnswer(onAnswer: (answer: string) => void, silenceRetry = false) {
     // テキスト入力フォールバック用にコールバックを保存
@@ -792,8 +804,6 @@ export default function InterviewRoom({
     const MAX_RESTART_ATTEMPTS = 5
     /** この時間以上動いていた認識インスタンスは「正常に動いていた」と見なす */
     const HEALTHY_RUN_MS = 3000
-    /** 現在のインスタンスが実際に開始した時刻。0 は「まだ開始できていない」 */
-    let instanceStartedAt = 0
     let stoppingFromSpeechEnd = false
     /** この聞き取りで回答を送信済みか（「送るものが無い」と区別するために持つ） */
     let answerSubmitted = false
@@ -841,7 +851,6 @@ export default function InterviewRoom({
         if (myVersion !== listenVersionRef.current) return // 別の listenForAnswer に上書きされた
         if (recognitionStoppingRef.current) return
         try {
-          instanceStartedAt = 0 // 起動できなければ 0 のままになり、次の判定で「異常」と分かる
           stopCurrentRecognition() // 念のため：前のインスタンスを残さない
           speechRef.current = createRecognition()
           speechRef.current.start()
@@ -869,6 +878,13 @@ export default function InterviewRoom({
         recognitionStoppingRef.current = true
         speechRef.current?.stop()
         setLiveText('')
+        // 既に聞き取れている分があるなら、それを回答として確定する。
+        // 捨てて「もう少し聞かせて」と促すと、話した内容がまるごと消える
+        // （聞き取り直しの listenForAnswer は finalText を空から始めるため）
+        if (submitFinalAnswer()) {
+          setIsListening(false)
+          return
+        }
         if (!silenceRetry) {
           // 1回目のタイムアウト：促す
           speak('もう少し聞かせていただけますか？', () => {
@@ -896,16 +912,21 @@ export default function InterviewRoom({
       recognition.continuous = true
       recognition.interimResults = true
 
+      // 以下2つはこのインスタンス固有の状態。listenForAnswer 側に置くと、
+      // 前のインスタンスの値が次の判定に混ざる
+      /** 実際に開始した時刻。0 は「まだ開始できていない」 */
+      let startedAt = 0
+      /** no-speech / aborted 以外のエラーが起きたか（＝正常な終了ではない） */
+      let errored = false
+
       recognition.onstart = () => {
-        instanceStartedAt = Date.now()
+        startedAt = Date.now()
       }
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       recognition.onresult = (event: any) => {
-        // 何か話し始めたらタイマーを張り直す（解除ではなく延長）
-        armSilenceTimer()
-        // 実際に聞き取れている＝認識は正常に動いている。連続失敗のカウントを戻す
-        restartAttempts = 0
+        // 結果の取り込みは常に行う。stop() のあとに末尾の確定結果が届くことがあり、
+        // ここで捨てると参加者の言い終わりが文字起こしから欠ける
         let interim = ''
         for (let i = event.resultIndex; i < event.results.length; i++) {
           if (event.results[i].isFinal) {
@@ -914,6 +935,16 @@ export default function InterviewRoom({
             interim = event.results[i][0].transcript
           }
         }
+        // ただし、この聞き取りが既に終わっている場合は画面表示も安全網の張り直しも
+        // しない。終了後に届いた末尾の結果で 60 秒タイマーが復活すると、完了画面や
+        // 次の評価質問の最中に「もう少し聞かせていただけますか？」が読み上げられる
+        if (myVersion !== listenVersionRef.current) return
+        if (answerSubmitted || recognitionStoppingRef.current) return
+        if (!onAnswerCallbackRef.current) return
+        // 何か話し始めたらタイマーを張り直す（解除ではなく延長）
+        armSilenceTimer()
+        // 実際に聞き取れている＝認識は正常に動いている。連続失敗のカウントを戻す
+        restartAttempts = 0
         setLiveText(finalText + interim)
       }
 
@@ -941,6 +972,7 @@ export default function InterviewRoom({
         // 本当に権限が無い場合は数回の短い再試行が空振りしたあと同じ案内に行き着く。
         // 再開処理をここに書かないのは、error のあとは onend も必ず発火するため
         // （ここで start() すると二重起動になる）
+        errored = true
         console.warn('[UserVoice] 音声認識エラー', e?.error)
       }
 
@@ -982,9 +1014,12 @@ export default function InterviewRoom({
 
         // ブラウザは長い発話の途中でも認識を区切って終了する。しばらく動けていたなら
         // 異常ではないので連続失敗に数えず、待たずに再開する（待つとその間の発話が
-        // まるごと失われる）。動けないまま終わったときだけ回数を数え、猶予を置く
-        const ranMs = instanceStartedAt ? Date.now() - instanceStartedAt : 0
-        const healthy = ranMs >= HEALTHY_RUN_MS
+        // まるごと失われる）。動けないまま終わったときだけ回数を数え、猶予を置く。
+        // エラーで終わった場合は、何秒動いていても「正常」に数えない。数えてしまうと、
+        // 数秒後に毎回 network エラーで落ちるような状態で予算が永久に減らず、
+        // 案内も出ないまま再開を延々繰り返して参加者が置き去りになる
+        const ranMs = startedAt ? Date.now() - startedAt : 0
+        const healthy = ranMs >= HEALTHY_RUN_MS && !errored
         if (healthy) restartAttempts = 0
         else restartAttempts++
 
@@ -1000,7 +1035,6 @@ export default function InterviewRoom({
       return recognition
     }
 
-    instanceStartedAt = 0
     speechRef.current = createRecognition()
     speechRef.current.start()
     setIsListening(true)
@@ -1674,9 +1708,7 @@ export default function InterviewRoom({
 
   // ── 手動で次へ ────────────────────────────────────────
   function manualNext() {
-    if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current)
-    recognitionStoppingRef.current = true
-    speechRef.current?.stop()    // 音声認識停止
+    endCurrentListening()        // 音声認識停止（遅れて届くイベントも無効化）
     speakVersionRef.current++    // 再生中の TTS をキャンセル
     currentAudioRef.current?.pause()
     currentAudioRef.current = null
@@ -1732,9 +1764,7 @@ export default function InterviewRoom({
     try { pipWindowRef.current?.close() } catch { /* ignore */ }
     pipWindowRef.current = null
     setPhase('ending')
-    if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current)
-    recognitionStoppingRef.current = true
-    speechRef.current?.stop()
+    endCurrentListening()
     speak('ご回答いただきありがとうございました。本日のインタビューはこれで終了です。貴重なお時間をありがとうございました。', async () => {
       await submitResults()
       setPhase('done')
