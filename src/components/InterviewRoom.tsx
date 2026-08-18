@@ -1643,6 +1643,9 @@ export default function InterviewRoom({
           contentType: 'video/webm',
           handleUploadUrl: `/api/sessions/${sessionId}/recording`,
           clientPayload: participantToken ?? '',
+          // 一括で送ると大きい録画が 413（Payload Too Large）で弾かれる。
+          // 分割して送れば上限に当たらず、失敗した部分だけ再送もされる
+          multipart: true,
         })
       } catch (e) {
         console.error('録画のアップロードに失敗しました（ローカル保存は可能）:', e)
@@ -1714,6 +1717,19 @@ export default function InterviewRoom({
       stopScreenTracksAndRecorder()
       screenStreamRef.current = stream
 
+      // 画面共有では getDisplayMedia の解像度・フレームレート指定が無視されることが
+      // 多く、Retina だと実解像度・60fps のまま録れてファイルが数倍に膨らむ
+      // （実際に 413 でアップロードが弾かれた）。取得後にもう一度絞り込む
+      try {
+        await stream.getVideoTracks()[0].applyConstraints({
+          frameRate: 15,
+          width: { max: 1920 },
+          height: { max: 1080 },
+        })
+      } catch {
+        // 効かない環境もある。その場合は下のビットレート上限で抑える
+      }
+
       // 画面＋マイク音声を1本のストリームにまとめて録画する。
       // 顔(PiP)は合成しない — 「画面全体」共有では、cameraIsPip で右下に表示している
       // 自分のカメラ映像自体が画面キャプチャに写り込む。ここでさらに合成すると、
@@ -1726,7 +1742,12 @@ export default function InterviewRoom({
       const mimeType = ['video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm'].find(
         (t) => MediaRecorder.isTypeSupported(t)
       ) ?? ''
-      const recorder = new MediaRecorder(recordStream, mimeType ? { mimeType } : {})
+      // ビットレートの上限。解像度の絞り込みが効かない環境でも、ここでファイルサイズを
+      // 抑えられる（操作の様子を確認する用途では十分な画質）
+      const recorder = new MediaRecorder(recordStream, {
+        ...(mimeType ? { mimeType } : {}),
+        videoBitsPerSecond: 2_000_000,
+      })
       recorder.ondataavailable = (e) => { if (e.data.size > 0) screenRecordedChunksRef.current.push(e.data) }
       recorder.start(1000)
       screenMediaRecorderRef.current = recorder
