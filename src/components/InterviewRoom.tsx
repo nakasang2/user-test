@@ -207,7 +207,6 @@ export default function InterviewRoom({
   const [transcript, setTranscript] = useState<TranscriptEntry[]>([])
   const [isRecording, setIsRecording] = useState(false)
   const [isSpeaking, setIsSpeaking] = useState(false)
-  const [liveText, setLiveText] = useState('')
   const [cameraError, setCameraError] = useState(false)
   // 一時的な通知（TTS 失敗・通信エラーなど。被験者に状況を伝える）
   const [notice, setNotice] = useState<string | null>(null)
@@ -220,6 +219,8 @@ export default function InterviewRoom({
   const [isListening, setIsListening] = useState(false)
   // 参加者が話し出したことを検知したか（「話し終えました」を出す目安）
   const [speechHeard, setSpeechHeard] = useState(false)
+  // 録音を送って文字起こしの返事を待っている
+  const [transcribing, setTranscribing] = useState(false)
   const [recordingDownloadUrl, setRecordingDownloadUrl] = useState<string | null>(null)
   // 回答送信の状態（完了画面の表示・beforeunload ガード・再送に使う）
   const [submitState, setSubmitState] = useState<'idle' | 'saving' | 'saved' | 'failed'>('idle')
@@ -721,7 +722,6 @@ export default function InterviewRoom({
     if (!text || !onAnswerCallbackRef.current) return
 
     endCurrentListening()
-    setLiveText('')
     setIsListening(false)
 
     const entry: TranscriptEntry = {
@@ -751,6 +751,7 @@ export default function InterviewRoom({
     listenerRef.current?.stop()
     listenerRef.current = null
     setSpeechHeard(false)
+    setTranscribing(false)
     setIsListening(false)
   }
 
@@ -786,21 +787,21 @@ export default function InterviewRoom({
       onSpeechDetected: () => setSpeechHeard(true),
       onTranscribing: () => {
         setSpeechHeard(false)
-        setLiveText('聞き取っています…')
+        setTranscribing(true)
       },
       onFinal: (text) => {
         listenerRef.current = null
-        setLiveText('')
+        setTranscribing(false)
         acceptSpokenAnswer(text)
       },
       onSilence: () => {
         listenerRef.current = null
-        setLiveText('')
+        setTranscribing(false)
         handleSilenceTimeout(onAnswer, silenceRetry)
       },
       onGiveUp: (reason) => {
         listenerRef.current = null
-        setLiveText('')
+        setTranscribing(false)
         handleListeningGaveUp(reason)
       },
     })
@@ -1550,7 +1551,6 @@ export default function InterviewRoom({
     // 閉じている）だけなので今は無害だが、送らないままだと将来インタビュー中に
     // 小窓を使う変更で ttsSpeaking が true のまま固まり、沈黙検知が復活しない
     widgetChannelRef.current?.postMessage({ type: 'tts_state', speaking: false })
-    setLiveText('')
     moveToNextPlannedQuestion()
   }
 
@@ -2653,44 +2653,53 @@ export default function InterviewRoom({
               <p className={`text-sm font-medium leading-relaxed ${isFollowUp ? 'text-amber-700' : 'text-gray-900'}`}>
                 {isSpeaking ? revealedSpeechText : (displayedQuestion || currentQ?.text)}
               </p>
-              {aiThinking && (
-                <div className="mt-3 flex items-center gap-2 text-xs text-amber-700">
-                  <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-bounce" />
-                  <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-bounce" style={{ animationDelay: '150ms' }} />
-                  <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-bounce" style={{ animationDelay: '300ms' }} />
-                  <span>AI が次の質問を考えています</span>
-                </div>
-              )}
+              {/* いま何が起きているかを必ず1つだけ示す。
+                  「聞き取っています…」と「話し終えました」が同時に出るような、
+                  状態が混ざった見え方を作らないため、ここで排他に分岐させる */}
+              <div className="mt-3 min-h-[1.25rem]">
+                {isSpeaking ? (
+                  <div className="flex items-center gap-2 text-xs text-gray-500">
+                    <Volume2 className="w-3.5 h-3.5" strokeWidth={2} />
+                    <span>AI が話しています</span>
+                  </div>
+                ) : aiThinking ? (
+                  <div className="flex items-center gap-2 text-xs text-amber-700">
+                    <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-bounce" />
+                    <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-bounce" style={{ animationDelay: '150ms' }} />
+                    <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-bounce" style={{ animationDelay: '300ms' }} />
+                    <span>次の質問を考えています…</span>
+                  </div>
+                ) : transcribing ? (
+                  <div className="flex items-center gap-2 text-xs text-gray-500">
+                    <span className="w-1.5 h-1.5 rounded-full bg-gray-400 animate-pulse" />
+                    <span>聞き取っています…</span>
+                  </div>
+                ) : isListening ? (
+                  <div className="flex items-center gap-2 text-xs text-emerald-700 font-medium">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                    <span>{speechHeard ? 'お話しください' : 'どうぞお話しください'}</span>
+                  </div>
+                ) : null}
+              </div>
             </div>
           )}
 
           {/* 感情モニター（グラフ）は参加者に見せない。理由は映像オーバーレイ側のコメント参照 */}
 
-          {liveText && (
-            <div className="p-3 border-b border-gray-200 bg-emerald-50/50 flex-shrink-0">
-              <div className="text-[10px] text-emerald-700 mb-1 font-medium uppercase tracking-wide">聞き取り</div>
-              <p className="text-sm text-gray-900">{liveText}</p>
-            </div>
-          )}
-
           {phase === 'interview' && !isSpeaking && !aiThinking && liveQuestionType === 'open' && (
             <div className="p-3 border-b border-gray-200 space-y-2 flex-shrink-0 bg-white">
-              {isListening && (
-                <>
-                  <div className="flex items-center gap-2 text-[10px] text-emerald-700 font-medium">
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                    {speechHeard ? 'お話しどうぞ' : 'どうぞお話しください'}
-                  </div>
-                  {/* 録音方式では「話し終えた」をブラウザが教えてくれない。静かになれば
-                      自動で締めるが、参加者が自分で終えられる手段も必ず出しておく */}
-                  <button
-                    onClick={() => listenerRef.current?.finishNow()}
-                    className="w-full inline-flex items-center justify-center gap-1 bg-gray-900 hover:bg-gray-800 text-white py-1.5 rounded-md text-xs font-medium transition-colors"
-                  >
-                    <Check className="w-3 h-3" strokeWidth={2} />
-                    話し終えました
-                  </button>
-                </>
+              {/* 「話し終えました」は、声を検知してからだけ出す。
+                  話す前から出ていると、まだ何も答えていない段階で押してしまえる。
+                  主役は「黙れば自動で進む」ことなので、見た目も控えめな枠線にして、
+                  黒い主ボタン（次へ）と競合させない */}
+              {isListening && speechHeard && !transcribing && (
+                <button
+                  onClick={() => listenerRef.current?.finishNow()}
+                  className="w-full inline-flex items-center justify-center gap-1 border border-gray-300 hover:border-gray-500 text-gray-600 hover:text-gray-900 py-1.5 rounded-md text-xs transition-colors"
+                >
+                  <Check className="w-3 h-3" strokeWidth={2} />
+                  話し終えました
+                </button>
               )}
               <div className="flex gap-2">
                 <input
