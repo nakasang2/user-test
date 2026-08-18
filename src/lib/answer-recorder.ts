@@ -64,7 +64,7 @@ export function startAnswerRecorder(opts: AnswerRecorderOptions): AnswerRecorder
   let recorder: MediaRecorder | null = null
   const chunks: Blob[] = []
   let audioContext: AudioContext | null = null
-  let rafId = 0
+  let levelTimer: ReturnType<typeof setInterval> | null = null
   let watchTimer: ReturnType<typeof setInterval> | null = null
 
   function cleanup() {
@@ -72,7 +72,10 @@ export function startAnswerRecorder(opts: AnswerRecorderOptions): AnswerRecorder
       clearInterval(watchTimer)
       watchTimer = null
     }
-    cancelAnimationFrame(rafId)
+    if (levelTimer) {
+      clearInterval(levelTimer)
+      levelTimer = null
+    }
     try {
       audioContext?.close()
     } catch {
@@ -85,6 +88,9 @@ export function startAnswerRecorder(opts: AnswerRecorderOptions): AnswerRecorder
     if (finished) return
     finished = true
     cleanup()
+    // 録音は必ず止める。止め忘れると、無音で打ち切るたびに止まらない
+    // MediaRecorder が増え、マイクを掴んだままメモリを食い続ける
+    void stopRecorder()
     opts.onRecordingChange(false)
     notify()
   }
@@ -174,7 +180,10 @@ export function startAnswerRecorder(opts: AnswerRecorderOptions): AnswerRecorder
     source.connect(analyser)
     const buf = new Float32Array(analyser.fftSize)
 
-    const tick = () => {
+    // requestAnimationFrame は使わない。**裏に回ったタブでは実行されない**ため、
+    // 参加者が別のタブを見ている間は発話をまったく検知できなくなる（実際にそれで
+    // 回答が1問も取れない状態になった）。setInterval なら間隔は粗くなるが動き続ける。
+    levelTimer = setInterval(() => {
       if (finished || stopped) return
       analyser.getFloatTimeDomainData(buf)
       let sum = 0
@@ -187,9 +196,7 @@ export function startAnswerRecorder(opts: AnswerRecorderOptions): AnswerRecorder
           opts.onSpeechDetected()
         }
       }
-      rafId = requestAnimationFrame(tick)
-    }
-    tick()
+    }, 100)
   } catch {
     // 音量を見られない環境では自動の締めができない。
     // 「話し終えました」ボタンと沈黙タイムアウトだけで進める
@@ -203,8 +210,9 @@ export function startAnswerRecorder(opts: AnswerRecorderOptions): AnswerRecorder
       if (lastLoudAt && now - lastLoudAt >= trailingSilenceMs) void concludeWithTranscription()
       return
     }
-    // 一度も話し出さないまま時間切れ
-    if (now - startedAt >= silenceMs) finish(() => opts.onSilence())
+    // 一度も話し出さないまま時間切れ。小さな声で音量判定に届かなかっただけの
+    // 可能性があるので、録れている音声があれば捨てずに文字起こしを試す
+    if (now - startedAt >= silenceMs) void concludeWithTranscription()
   }, 250)
 
   return {

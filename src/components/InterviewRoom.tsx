@@ -140,15 +140,11 @@ export default function InterviewRoom({
   const streamRef = useRef<MediaStream | null>(null)
   // 動いている聞き取り（src/lib/answer-recorder.ts）。同時に1つだけ持つ
   const listenerRef = useRef<AnswerRecorder | null>(null)
-  // 小窓が開いているか。開いている間は聞き取りを小窓に任せる（メイン画面は裏側に
-  // 回っており、裏側のタブではブラウザが音声認識を止めてしまうため）
+  // 小窓が開いているか。開いている間は、全タスク完了後に参加者が「質問へ進む」を
+  // 押してこの画面が前面に戻るのを待つ（裏のまま質問を読み上げても気づけないため）
   const widgetOpenRef = useRef(false)
   // 今の回答を聞き始めた時刻（文字起こしの開始位置に使う）
   const answerStartedAtRef = useRef(0)
-  // 小窓からの録画到着を待っている終了処理を起こすための解決関数
-  const widgetBlobResolveRef = useRef<(() => void) | null>(null)
-  // 小窓が閉じられていないかの見張り（閉じられたら聞き取りをこちらへ引き取る）
-  const widgetWatchRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const startTimeRef = useRef<number>(nowMs())
   const transcriptRef = useRef<TranscriptEntry[]>([])
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
@@ -231,7 +227,6 @@ export default function InterviewRoom({
   const onAnswerCallbackRef = useRef<((answer: string) => void) | null>(null)
 
   // usability / prototype 用：画面共有
-  const screenVideoRef = useRef<HTMLVideoElement>(null)
   const screenStreamRef = useRef<MediaStream | null>(null)
   const [screenSharing, setScreenSharing] = useState(false)
   const [serviceOpened, setServiceOpened] = useState(false)   // service モード: 小窓でサービスを開いたか（メイン画面プログレス表示用）
@@ -365,8 +360,7 @@ export default function InterviewRoom({
   const qImageFinishRef = useRef<(() => void) | null>(null)
   const screenMediaRecorderRef = useRef<MediaRecorder | null>(null)
   const screenRecordedChunksRef = useRef<Blob[]>([])
-  const screenDrawRafRef = useRef<number>(0)        // 合成描画ループの RAF
-  const screenBlobRef = useRef<Blob | null>(null)   // サービスモードで小窓から届く合成 Blob を保持
+  const screenBlobRef = useRef<Blob | null>(null)   // 予備の合成 Blob（現在は未使用。録画はこの画面が持つ）
   const [screenRecordingDownloadUrl, setScreenRecordingDownloadUrl] = useState<string | null>(null)
 
   // フローティングウィジェット (service モード)
@@ -374,6 +368,8 @@ export default function InterviewRoom({
   const pipWindowRef = useRef<Window | null>(null)   // Document PiP または popup の window 参照
   const startedRef = useRef(false)  // startInterview の二重起動防止
   const taskPhaseStartedRef = useRef(false)  // beginUsabilityTask の二重起動防止
+  // 画面共有の開始時に経過時間の基準を取ったか（録画と時刻を揃えるため）
+  const recordingClockStartedRef = useRef(false)
   const endedRef = useRef(false)    // endInterview の二重実行防止（結果の二重送信を防ぐ）
 
   // 音声認識サポート確認（マウント時）
@@ -658,7 +654,6 @@ export default function InterviewRoom({
       // 再開し続ける
       listenerRef.current?.stop()
       listenerRef.current = null
-      if (widgetWatchRef.current) clearInterval(widgetWatchRef.current)
       stopDetection()
       if (screenMediaRecorderRef.current?.state !== 'inactive') {
         screenMediaRecorderRef.current?.stop()
@@ -670,7 +665,6 @@ export default function InterviewRoom({
       widgetChannelRef.current?.close()
       widgetChannelRef.current = null
       if (noticeTimerRef.current) clearTimeout(noticeTimerRef.current)
-      cancelAnimationFrame(screenDrawRafRef.current)
       if (stimulusIntervalRef.current) clearInterval(stimulusIntervalRef.current)
       if (stimulusTimeoutRef.current) clearTimeout(stimulusTimeoutRef.current)
       // 質問ごとの画像のタイマー（アンマウント後に setState して警告を出さない）
@@ -757,21 +751,10 @@ export default function InterviewRoom({
     listenerRef.current?.stop()
     listenerRef.current = null
     setSpeechHeard(false)
-    if (widgetWatchRef.current) {
-      clearInterval(widgetWatchRef.current)
-      widgetWatchRef.current = null
-    }
-    if (widgetOpenRef.current) widgetChannelRef.current?.postMessage({ type: 'listen_stop' })
     setIsListening(false)
   }
 
-  /** 事後質問の内容を小窓へ渡す（service モードでは参加者が見ているのは小窓side） */
-  function broadcastQuestion(text: string, type: 'open' | 'rating' | 'nps') {
-    if (!widgetOpenRef.current) return
-    widgetChannelRef.current?.postMessage({ type: 'interview_question', text, questionType: type })
-  }
-
-  /** 小窓のウィンドウを閉じる（録画を受け取り終わってから呼ぶこと） */
+  /** 小窓のウィンドウを閉じる（録画はこの画面が持っているので、いつ閉じてもよい） */
   function closeWidgetWindow() {
     widgetOpenRef.current = false
     try { pipWindowRef.current?.close() } catch { /* ignore */ }
@@ -779,64 +762,16 @@ export default function InterviewRoom({
   }
 
   /**
-   * 小窓が録画を書き出して送ってくるのを待つ。
-   *
-   * 待たずにウィンドウを閉じると、録画が丸ごと失われる。ただし小窓が既に閉じている・
-   * 応答しない場合に面談が終われなくなるのは困るので、上限を設けて必ず先へ進む。
-   */
-  function waitForWidgetRecording(): Promise<void> {
-    if (!widgetOpenRef.current) return Promise.resolve()
-    // 参加者が小窓を手で閉じていた場合、待っても誰も答えない
-    if (pipWindowRef.current?.closed) return Promise.resolve()
-    // 既に録画を受け取っている（小窓が先に書き出していた）なら待たない
-    if (screenBlobRef.current) return Promise.resolve()
-    return new Promise<void>((resolve) => {
-      let settled = false
-      const done = () => {
-        if (settled) return
-        settled = true
-        resolve()
-      }
-      widgetBlobResolveRef.current = done
-      setTimeout(() => {
-        if (!settled) console.warn('[UserVoice] 小窓からの録画が届きませんでした（待ち時間切れ）')
-        done()
-      }, 20000)
-    })
-  }
-
-  /**
    * 参加者の回答を聞き取る。
    *
-   * service モードのユーザビリティテストでは、参加者が見ているのは常に手前にある
-   * 小窓で、このメイン画面は裏側にある。ブラウザは裏側のタブの音声認識を止めるため、
-   * ここで聞き取ろうとしても黙って止まる（しかも「中断しました」の案内も入力欄も
-   * 裏側にあるので参加者からは何も見えない）。そのため小窓が開いている間は、
-   * 聞き取りそのものを小窓に任せ、結果だけを受け取る。
+   * 実体は録音してサーバー（Whisper）で文字起こしする方式（src/lib/answer-recorder.ts）。
+   * ブラウザ内蔵の音声認識は Brave 等で動かないため使っていない。
    */
   function listenForAnswer(onAnswer: (answer: string) => void, silenceRetry = false) {
     // テキスト入力フォールバック用にコールバックを保存
     onAnswerCallbackRef.current = onAnswer
     endCurrentListening()
     if (!silenceRetry) answerStartedAtRef.current = elapsedSec(startTimeRef.current)
-
-    if (delegateListeningToWidget()) {
-      widgetChannelRef.current?.postMessage({ type: 'listen_start', silenceRetry })
-      setIsListening(true)
-      // 小窓が閉じられたら、こちらで聞き取りを引き取る。見張っていないと、
-      // 参加者が小窓を閉じた瞬間に「誰も聞いていない」状態のまま止まる
-      // （沈黙タイマーも小窓側にあるため、時間切れすら起きない）
-      if (widgetWatchRef.current) clearInterval(widgetWatchRef.current)
-      widgetWatchRef.current = setInterval(() => {
-        if (!pipWindowRef.current?.closed) return
-        widgetOpenRef.current = false
-        if (widgetWatchRef.current) clearInterval(widgetWatchRef.current)
-        widgetWatchRef.current = null
-        const pending = onAnswerCallbackRef.current
-        if (pending) listenForAnswer(pending, silenceRetry)
-      }, 1500)
-      return
-    }
 
     const stream = streamRef.current
     if (!stream) {
@@ -874,11 +809,6 @@ export default function InterviewRoom({
       setIsListening(false)
       showNotice('マイクを使えませんでした。下の入力欄からお答えください。')
     }
-  }
-
-  /** 小窓に聞き取りを任せるか（service モードで小窓が開いている間） */
-  function delegateListeningToWidget() {
-    return interviewType === 'usability' && usabilityMode === 'service' && widgetOpenRef.current
   }
 
   /**
@@ -1019,7 +949,6 @@ export default function InterviewRoom({
     }
     setAiThinking(true)
     setPhase('thinking')
-    if (widgetOpenRef.current) widgetChannelRef.current?.postMessage({ type: 'ai_thinking', thinking: true })
     try {
       const res = await fetch('/api/interviewer', {
         method: 'POST',
@@ -1041,7 +970,6 @@ export default function InterviewRoom({
       })
       setAiThinking(false)
       setPhase('interview')
-      if (widgetOpenRef.current) widgetChannelRef.current?.postMessage({ type: 'ai_thinking', thinking: false })
       // HTTP エラー（レート制限 429 など）を「深掘り不要」と取り違えない。
       // 本文は {error} なので action が undefined になり、黙って次へ進んでしまう。
       // 進行自体は止めない（参加者を詰ませない）が、握りつぶさず記録に残す。
@@ -1058,7 +986,6 @@ export default function InterviewRoom({
         appendConversation(`\nAI: ${decision.question}`)
         setIsFollowUp(true)
         setDisplayedQuestion(decision.question)
-        broadcastQuestion(decision.question, 'open')
         speak(decision.question, () => listenForAnswer(decideNext))
       } else {
         moveToNextPlannedQuestion()
@@ -1066,7 +993,6 @@ export default function InterviewRoom({
     } catch {
       setAiThinking(false)
       setPhase('interview')
-      if (widgetOpenRef.current) widgetChannelRef.current?.postMessage({ type: 'ai_thinking', thinking: false })
       showNotice('通信エラーのため、次の質問に進みます。')
       // HTTP エラーと同じく、深掘りできなかったことを記録に残す
       noteFollowUpFailure('通信エラー')
@@ -1206,7 +1132,6 @@ export default function InterviewRoom({
     setCurrentQuestionIndex(index)
     setIsFollowUp(false)
     setDisplayedQuestion(q.text)
-    broadcastQuestion(q.text, q.naturalCapture ? 'open' : q.type)
     // 1問分のバッファは差し替える（この質問への回答を切り出す単位）が、
     // 面談全体の履歴には追記する（AI に渡す文脈を途切れさせない）
     conversationBufferRef.current = `AI: ${q.text}`
@@ -1301,9 +1226,9 @@ export default function InterviewRoom({
         pipWindow.document.body.style.cssText = 'margin:0;padding:0;overflow:hidden;background:#ffffff;height:100%;'
         const iframe = pipWindow.document.createElement('iframe')
         iframe.src = url
-        // 小窓は「PiP ウィンドウの中の iframe」という入れ子構造。マイク・カメラは
-        // 明示的に許可しないと、入れ子の中で使えないことがある。事後質問の聞き取りは
-        // この中で行うため、ここが塞がると参加者は声で答えられなくなる
+        // 小窓は「PiP ウィンドウの中の iframe」という入れ子構造。カメラ・マイクは
+        // 明示的に許可しないと、入れ子の中で使えないことがある（顔の表示と
+        // 思考発話の沈黙検知に使う）
         iframe.allow = 'camera; microphone; display-capture; autoplay'
         iframe.style.cssText = 'width:100%;height:100%;border:none;display:block;'
         pipWindow.document.body.appendChild(iframe)
@@ -1391,6 +1316,11 @@ export default function InterviewRoom({
       const next = idx + 1
       // 小窓への同期は gotoTask 内で行う（一覧からのジャンプでも必ず送るため）
       gotoTask(next)
+    } else if (widgetOpenRef.current) {
+      // 小窓が開いている間は、参加者が「質問へ進む」を押してこの画面が前面に
+      // 戻るのを待つ。ここで勝手に始めると、裏に回ったままの画面で質問が読まれ、
+      // 参加者は気づかないまま無音の時間だけが過ぎる
+      return
     } else {
       completeTasksAndStartInterview()
     }
@@ -1451,16 +1381,14 @@ export default function InterviewRoom({
 
   // ── タスク完了 → 事後インタビュー開始 ─────────────────
   function completeTasksAndStartInterview() {
-    // 小窓はここでは閉じない。
+    // タスクは終わったので小窓を閉じ、この画面に戻して事後質問を行う。
     //
-    // 理由は2つある。(1) 画面録画は小窓が持っているので、閉じると事後質問のやり取りが
-    // 映像も音声もまったく記録されなくなる（実際にそうなっていた）。(2) 参加者が見て
-    // いるのは常に手前にある小窓で、このメイン画面は裏側にある。裏側のタブでは
-    // ブラウザが音声認識を止めるため、メイン画面で聞き取ろうとしても黙って止まる。
-    // そこで事後質問も小窓の中で行い、全部終わってからメイン画面に戻して保存する。
-    if (widgetOpenRef.current) {
-      widgetChannelRef.current?.postMessage({ type: 'post_interview_start' })
-    }
+    // 小窓を閉じても録画は続く（録画の持ち主はこの画面）。ただし、参加者が見て
+    // いるのはサービスのタブなので、この画面は裏に回ったままになる。裏のままだと
+    // 質問が読み上げられていることに気づけないので、小窓側の「質問へ進む」ボタン
+    // （＝参加者の操作）でこの画面を前面に戻してから、ここへ来る作りにしてある。
+    widgetChannelRef.current?.postMessage({ type: 'session_ended' })
+    closeWidgetWindow()
     if (questions.length === 0) {
       endInterview()
       return
@@ -1480,7 +1408,8 @@ export default function InterviewRoom({
     // 経過時間の基準を「開始ボタンを押した瞬間」に揃える。
     // マウント時のままだとガイド画面の滞在時間が所要時間に混入し、
     // 文字起こしのタイムスタンプも録画の再生位置とずれる。
-    startTimeRef.current = nowMs()
+    // 画面共有の時点で基準を取っていれば、そちらを尊重する（録画と時刻を揃えるため）
+    if (!recordingClockStartedRef.current) startTimeRef.current = nowMs()
     taskStartedAtRef.current = 0
     setIsRecording(true)
     startMediaRecorder()
@@ -1541,8 +1470,9 @@ export default function InterviewRoom({
       channel.onmessage = (e) => {
         if (e.data.type === 'task_outcome') recordTaskOutcome(e.data.outcome === 'gave_up' ? 'gave_up' : 'completed', typeof e.data.seq === 'number' ? e.data.seq : undefined, e.data.usedHint === true)
         else if (e.data.type === 'task_complete') completeTasksAndStartInterview() // 後方互換
+        // 小窓の「質問へ進む」を押した＝この画面が前面に戻った。ここから事後質問へ
+        else if (e.data.type === 'return_to_main') completeTasksAndStartInterview()
         else if (e.data.type === 'end_session') endInterview()
-        else if (e.data.type === 'recording_started') setScreenSharing(true)
         else if (e.data.type === 'service_opened') setServiceOpened(true)
         else if (e.data.type === 'task_ready') markFirstTaskStart() // 小窓でタスクが見えた＝着手できる時点
         // 小窓の録画・サイトアクセスが揃った（タスク1のみ）。まず思考発話の案内を読む。
@@ -1565,33 +1495,6 @@ export default function InterviewRoom({
         // 小窓でヒントを開いた。小窓を閉じて開き直しても記録が消えないよう、メイン側で保持する
         else if (e.data.type === 'hint_used' && typeof e.data.index === 'number') {
           usedHintOrdersRef.current.add(e.data.index + 1)
-        }
-        else if (e.data.type === 'screen_recording_blob') {
-          const blob: Blob = e.data.blob
-          if (blob.size > 0) {
-            screenBlobRef.current = blob
-            setScreenRecordingDownloadUrl(URL.createObjectURL(blob))
-          }
-          // 録画の到着を待っている終了処理があれば起こす
-          widgetBlobResolveRef.current?.()
-          widgetBlobResolveRef.current = null
-        }
-        // 小窓で聞き取った回答。メイン画面は裏側にいて自分では聞き取れないため、
-        // service モードではここが回答の入口になる
-        else if (e.data.type === 'answer_text' && typeof e.data.text === 'string') {
-          const accepted = acceptSpokenAnswer(e.data.text)
-          // 受け取れなかった（既に次へ進んでいた等）ことを必ず返す。返さないと、
-          // 小窓は送れたつもりで入力欄を空にし、参加者の言葉が黙って消える
-          widgetChannelRef.current?.postMessage({ type: 'answer_ack', accepted, text: e.data.text })
-        }
-        // 小窓側で聞き取りが続けられなくなった／無音のまま時間切れになった
-        else if (e.data.type === 'answer_silence') {
-          const callback = onAnswerCallbackRef.current
-          if (callback) handleSilenceTimeout(callback, e.data.retry === true)
-        }
-        // 小窓の評価ボタン（5段階評価 / NPS）で回答した
-        else if (e.data.type === 'rating_answer' && typeof e.data.value === 'number') {
-          submitRating(e.data.value, String(e.data.label ?? e.data.value))
         }
       }
       // ① ウィジェット（PiP or ポップアップ）を「最初に」開く
@@ -1689,15 +1592,12 @@ export default function InterviewRoom({
     }
     recordOpenAnswerIfAny()  // 回答途中で終了した場合も取りこぼさない
     saveResults()            // 測定結果の最終フラッシュ（送信失敗していた分の再送を兼ねる）
-    // 小窓へ終了を伝える。小窓はここで録画を止めて blob を送ってくるので、
-    // 受け取るまでウィンドウを閉じない（閉じると録画が丸ごと失われる）
-    const recordingArrived = waitForWidgetRecording()
+    // 録画はこの画面が持っているので、小窓の書き出しを待つ必要はない
     widgetChannelRef.current?.postMessage({ type: 'session_ended' })
+    closeWidgetWindow()
     setPhase('ending')
     endCurrentListening()
     speak('ご回答いただきありがとうございました。本日のインタビューはこれで終了です。貴重なお時間をありがとうございました。', async () => {
-      await recordingArrived
-      closeWidgetWindow()
       await submitResults()
       setPhase('done')
     })
@@ -1784,71 +1684,76 @@ export default function InterviewRoom({
     }
   }
 
+  /** 動いている画面録画と共有を止める（取り直しの前に必ず呼ぶ） */
+  function stopScreenTracksAndRecorder() {
+    const recorder = screenMediaRecorderRef.current
+    screenMediaRecorderRef.current = null
+    if (recorder && recorder.state !== 'inactive') {
+      recorder.ondataavailable = null
+      try { recorder.stop() } catch { /* 既に停止している */ }
+    }
+    screenStreamRef.current?.getTracks().forEach((t) => t.stop())
+    screenStreamRef.current = null
+  }
+
   // ── 画面共有開始 ──────────────────────────────────────
   async function startScreenShare() {
     try {
       // 「画面全体」を既定に寄せる（どのタブを操作しても対象に含め、選び間違いを防ぐ）
-      const stream = await navigator.mediaDevices.getDisplayMedia({ video: { displaySurface: 'monitor' }, audio: false })
+      // 解像度・フレームレートの上限は取得時の制約で指定する。以前はキャンバスに
+      // 毎フレーム描き直して上限を掛けていたが、その描画は requestAnimationFrame で
+      // 回しており、**裏に回ったタブでは実行されない**。service モードでは参加者が
+      // サービスのタブへ移るためこの画面は裏に回り、録画が静止画のまま固まっていた。
+      // 画面ストリームを直接録画すれば、タブが裏でも記録され続ける。
+      const stream = await navigator.mediaDevices.getDisplayMedia({
+        video: { displaySurface: 'monitor', frameRate: 25, width: { max: 1920 }, height: { max: 1080 } },
+        audio: false,
+      })
+      // 取り直しの前に、前回の録画が残っていれば必ず止める。止めないと2本の録画が
+      // 同じ配列に混ざり、再生できないファイルになる
+      stopScreenTracksAndRecorder()
       screenStreamRef.current = stream
-      // For 'service' mode: show in video element
-      if (usabilityMode === 'service' && screenVideoRef.current) {
-        screenVideoRef.current.srcObject = stream
-      }
 
-      // マイク音声も載せて「画面＋音声」を1ファイルに合成する。
+      // 画面＋マイク音声を1本のストリームにまとめて録画する。
       // 顔(PiP)は合成しない — 「画面全体」共有では、cameraIsPip で右下に表示している
       // 自分のカメラ映像自体が画面キャプチャに写り込む。ここでさらに合成すると、
-      // 同じ位置に同じ顔が二重に写る（小窓版で実際に起きた不具合と同じ構造。DECISIONS 参照）。
-      const screenVid = document.createElement('video')
-      screenVid.srcObject = stream
-      screenVid.muted = true
-      await new Promise<void>((resolve) => {
-        screenVid.onloadedmetadata = () => screenVid.play().then(resolve).catch(() => resolve())
-      })
-
-      // キャンバス経由にすることで解像度上限（1920×1080）と一定フレームレートを保つ
-      // （高DPI画面でファイルが肥大化するのを防ぐ）
-      const W = Math.min(screenVid.videoWidth || 1280, 1920)
-      const H = Math.min(screenVid.videoHeight || 720, 1080)
-      const canvas = document.createElement('canvas')
-      canvas.width = W
-      canvas.height = H
-      const ctx = canvas.getContext('2d')!
-
-      const draw = () => {
-        ctx.drawImage(screenVid, 0, 0, W, H)
-        screenDrawRafRef.current = requestAnimationFrame(draw)
-      }
-      draw()
-
-      const canvasStream = canvas.captureStream(25)
-      // マイク音声（顔ストリームの音声トラック）を合成に追加
+      // 同じ位置に同じ顔が二重に写る（小窓版で実際に起きた不具合。DECISIONS 参照）。
+      const recordStream = new MediaStream(stream.getVideoTracks())
       const micTrack = streamRef.current?.getAudioTracks?.()[0]
-      if (micTrack) canvasStream.addTrack(micTrack)
+      if (micTrack) recordStream.addTrack(micTrack)
 
       screenRecordedChunksRef.current = []
       const mimeType = ['video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm'].find(
         (t) => MediaRecorder.isTypeSupported(t)
       ) ?? ''
-      const recorder = new MediaRecorder(canvasStream, mimeType ? { mimeType } : {})
+      const recorder = new MediaRecorder(recordStream, mimeType ? { mimeType } : {})
       recorder.ondataavailable = (e) => { if (e.data.size > 0) screenRecordedChunksRef.current.push(e.data) }
       recorder.start(1000)
       screenMediaRecorderRef.current = recorder
       setScreenSharing(true)
+      setScreenShareError(null)
+      // service モードでは、この画面共有が「開始する」より前に行われる。
+      // 経過時間の基準を録画の開始に合わせておかないと、文字起こしやタスク結果の
+      // 再生位置が、録画の頭に付いた分だけ後ろにずれる（過去に同種のズレで
+      // 感情グラフと録画が合わなくなったことがある）
+      if (interviewType === 'usability' && usabilityMode === 'service' && !startedRef.current) {
+        startTimeRef.current = nowMs()
+        recordingClockStartedRef.current = true
+      }
+      // 参加者がブラウザの「共有を停止」を押した場合。録画も必ず止める
+      // （止めないと、取り直したときに2本分のチャンクが混ざる）
       stream.getVideoTracks()[0].onended = () => {
         setScreenSharing(false)
-        cancelAnimationFrame(screenDrawRafRef.current)
-        screenStreamRef.current = null
+        setScreenShareError('画面の共有が停止されました。録画を続けるにはもう一度許可してください。')
       }
     } catch {
-      setScreenShareError('画面共有を開始できませんでした')
+      setScreenShareError('画面の共有が許可されませんでした。もう一度お試しください。')
     }
   }
 
   // ── 画面録画停止 → Blob を返す ────────────────────────
   function stopScreenRecorder(): Promise<Blob> {
     return new Promise((resolve) => {
-      cancelAnimationFrame(screenDrawRafRef.current)
       const recorder = screenMediaRecorderRef.current
       if (!recorder || recorder.state === 'inactive') {
         resolve(new Blob([], { type: 'video/webm' }))
@@ -2111,16 +2016,17 @@ export default function InterviewRoom({
                       ) : (
                         <>
                           <li className="flex gap-2.5"><span className="text-gray-400 flex-shrink-0 font-medium">2.</span>
-                            <span>準備ができたら「タスクを開始する」を押すと<span className="text-gray-900 font-medium">タスク用の小窓</span>が表示されます（どのタブを操作していても<span className="text-gray-900 font-medium">常に最前面</span>）</span>
+                            <span>まず <span className="inline-flex items-center gap-1 text-red-600 font-medium"><Monitor className="w-3 h-3 inline" strokeWidth={2} />画面録画を許可する</span> を押し、ダイアログで<strong className="text-gray-900">「画面全体」</strong>を選んで共有してください</span>
                           </li>
                           <li className="flex gap-2.5"><span className="text-gray-400 flex-shrink-0 font-medium">3.</span>
-                            <span>画面の<span className="inline-flex items-center gap-1 text-gray-900 font-medium"><Globe className="w-3 h-3 inline" strokeWidth={2} />サービスを開く（新しいタブ）</span>を押して、テスト対象のサービスを開いてください</span>
+                            <span>続けて「次へ」を押すと<span className="text-gray-900 font-medium">タスク用の小窓</span>が表示されます（どのタブを操作していても<span className="text-gray-900 font-medium">常に最前面</span>）</span>
                           </li>
                           <li className="flex gap-2.5"><span className="text-gray-400 flex-shrink-0 font-medium">4.</span>
-                            <span>小窓の <span className="inline-flex items-center gap-1 text-red-600 font-medium"><Monitor className="w-3 h-3 inline" strokeWidth={2} />画面録画を開始する</span> を<strong className="text-gray-900">必ず押し</strong>、ダイアログで<strong className="text-gray-900">「画面全体」</strong>を選んで共有してから操作を始めてください</span>
+                            <span>小窓の<span className="inline-flex items-center gap-1 text-gray-900 font-medium"><Globe className="w-3 h-3 inline" strokeWidth={2} />サービスを開く（新しいタブ）</span>を押して、テスト対象のサービスを開いてください</span>
                           </li>
                           <li className="flex gap-2.5"><span className="text-gray-400 flex-shrink-0 font-medium">5.</span>タスクに沿ってサービスを操作しながら、気づいたこと・感じたことを声に出してください（シンクアラウド）。静かなときはこちらから「何を考えていますか？」とお声がけします</li>
                           <li className="flex gap-2.5"><span className="text-gray-400 flex-shrink-0 font-medium">6.</span>操作が終わったら小窓の「達成して質問へ」（できなければ「できなかった」）を押してください</li>
+                          <li className="flex gap-2.5"><span className="text-gray-400 flex-shrink-0 font-medium">7.</span>全部終わると小窓は閉じ、この画面に戻って最後の質問にお答えいただきます</li>
                         </>
                       )}
                     </ul>
@@ -2150,15 +2056,48 @@ export default function InterviewRoom({
                     <p>・表情・音声・操作内容が録画・分析されます</p>
                   </div>
                 </div>
-                <button
-                  onClick={startInterview}
-                  disabled={!cameraReady || emotionStatus === 'loading'}
-                  className="inline-flex items-center gap-1.5 bg-gray-900 hover:bg-gray-800 text-white disabled:opacity-50 disabled:cursor-wait px-6 py-2.5 rounded-md font-medium text-sm transition-colors"
-                >
-                  {!cameraReady || emotionStatus === 'loading'
-                    ? '準備中...'
-                    : (<>{interviewType === 'interview' ? 'インタビューを開始する' : '次へ'}<ArrowRight className="w-4 h-4" strokeWidth={2} /></>)}
-                </button>
+                {/* service モードは画面録画の許可を「開始する」より前に、別のクリックで取る。
+                    getDisplayMedia も小窓(PiP)も利用者の操作を必要とし、1回のクリックでは
+                    両方を満たせないため（過去に何度も踏んだ制約）。録画の持ち主をこの画面に
+                    することで、タスク後に小窓を閉じても録画が途切れない */}
+                {interviewType === 'usability' && usabilityMode === 'service' && !screenSharing ? (
+                  <button
+                    onClick={() => { void startScreenShare() }}
+                    disabled={!cameraReady || emotionStatus === 'loading'}
+                    className="inline-flex items-center gap-1.5 bg-gray-900 hover:bg-gray-800 text-white disabled:opacity-50 disabled:cursor-wait px-6 py-2.5 rounded-md font-medium text-sm transition-colors"
+                  >
+                    {!cameraReady || emotionStatus === 'loading'
+                      ? '準備中...'
+                      : (<><Monitor className="w-4 h-4" strokeWidth={2} />画面録画を許可する</>)}
+                  </button>
+                ) : (
+                  <button
+                    onClick={startInterview}
+                    disabled={!cameraReady || emotionStatus === 'loading'}
+                    className="inline-flex items-center gap-1.5 bg-gray-900 hover:bg-gray-800 text-white disabled:opacity-50 disabled:cursor-wait px-6 py-2.5 rounded-md font-medium text-sm transition-colors"
+                  >
+                    {!cameraReady || emotionStatus === 'loading'
+                      ? '準備中...'
+                      : (<>{interviewType === 'interview' ? 'インタビューを開始する' : '次へ'}<ArrowRight className="w-4 h-4" strokeWidth={2} /></>)}
+                  </button>
+                )}
+                {interviewType === 'usability' && usabilityMode === 'service' && screenSharing && (
+                  <p className="text-xs text-emerald-700 mt-2">画面録画の準備ができました</p>
+                )}
+                {/* 共有を拒否・キャンセルすると screenSharing が false のままになる。
+                    案内も逃げ道も出さないと「押しても何も起きない」行き止まりになるため、
+                    理由を出したうえで録画なしでも進めるようにしておく */}
+                {interviewType === 'usability' && usabilityMode === 'service' && !screenSharing && screenShareError && (
+                  <div className="mt-3 space-y-1.5">
+                    <p className="text-xs text-amber-700">{screenShareError}</p>
+                    <button
+                      onClick={startInterview}
+                      className="text-xs text-gray-500 hover:text-gray-900 underline underline-offset-2"
+                    >
+                      画面録画なしで進む（操作の映像は残りません）
+                    </button>
+                  </div>
+                )}
                 {(!cameraReady || emotionStatus === 'loading') && (
                   <p className="text-xs text-gray-500 mt-2 animate-pulse">カメラと解析モデルを初期化中</p>
                 )}
@@ -2421,7 +2360,7 @@ export default function InterviewRoom({
                         <p className="text-xs text-gray-500 leading-relaxed">タスクと操作ボタンは、常に最前面に表示される右下の小窓にまとまっています。この画面での操作は不要です。</p>
                       </div>
                       {/* 進捗ステップ（小窓での手続きを可視化）: ①録画 → ②サイトアクセス → ③テスト開始。
-                          小窓からの recording_started / service_opened を受けて現在地を進める。 */}
+                          小窓からの service_opened を受けて現在地を進める。 */}
                       {(() => {
                         const steps = [
                           { label: '録画', done: screenSharing },

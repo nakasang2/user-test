@@ -2,16 +2,13 @@
 
 import { useEffect, useState, useRef, useMemo, Suspense } from 'react'
 import { useSearchParams } from 'next/navigation'
-import { Monitor, Check, X, AlertTriangle, CheckCircle2, Globe, Volume2, Mic } from 'lucide-react'
+import { Check, X, AlertTriangle, CheckCircle2, Globe, Volume2, ArrowRight } from 'lucide-react'
 import SeqScale from '@/components/SeqScale'
 import StuckHelp from '@/components/StuckHelp'
 import TaskRecovery, { TaskRecoveryActions } from '@/components/TaskRecovery'
 import ThinkAloudNudge from '@/components/ThinkAloudNudge'
 import { blockedAfter, needsRecovery } from '@/lib/task-flow'
 import { useSilenceNudge } from '@/hooks/useSilenceNudge'
-import RatingQuestion from '@/components/RatingQuestion'
-import NpsQuestion from '@/components/NpsQuestion'
-import { startAnswerRecorder, type AnswerRecorder } from '@/lib/answer-recorder'
 
 interface Task {
   text: string
@@ -25,11 +22,14 @@ interface Task {
   isPrerequisite?: boolean | null
 }
 
-// 'interview' = タスクが全部終わったあとの事後質問。
-// メイン画面ではなく小窓で行う。理由は2つで、(1) 画面録画は小窓が持っているため
-// 小窓を閉じると事後質問がまったく記録されない、(2) 参加者が見ているのは常に手前に
-// ある小窓で、裏側になったメイン画面ではブラウザが音声認識を止めてしまう。
-type WidgetPhase = 'task' | 'interview' | 'done'
+// タスクが全部終わったら、この小窓は閉じてメイン画面に戻る。
+// 画面録画はメイン画面が持っているので、閉じても録画は途切れない。
+//
+// 'to-interview' = 全タスク完了。参加者が「質問へ進む」を押すのを待つ。
+// 自動で閉じないのは、参加者が見ているのはサービスのタブで、メイン画面は裏に
+// 回ったままだから。ボタンのクリック（＝利用者の操作）を起点にしないと、
+// ブラウザはメイン画面を前面に戻してくれない。
+type WidgetPhase = 'task' | 'to-interview' | 'done'
 
 function WidgetContent() {
   const searchParams = useSearchParams()
@@ -48,9 +48,7 @@ function WidgetContent() {
   const [currentTaskIndex, setCurrentTaskIndex] = useState(initialIdx)
   const [widgetPhase, setWidgetPhase]           = useState<WidgetPhase>('task')
   const [doneMessage, setDoneMessage]           = useState('')
-  const [isScreenRecording, setIsScreenRecording] = useState(false)
   const [serviceOpened, setServiceOpened]       = useState(false)
-  const [warnNoRecord, setWarnNoRecord]         = useState(false)
   // SEQ 入力待ちの結果（達成/断念を押した直後、評価を受け取るまで保持）
   const [awaitingSeq, setAwaitingSeq]           = useState<'completed' | 'gave_up' | null>(null)
   const [cameraError, setCameraError]           = useState(false)
@@ -84,23 +82,6 @@ function WidgetContent() {
   // 案内の「スタート」を押したか。押すまではタスク1の文言・結果ボタンを出さない
   // （案内を読み終える前にタスクが見えてしまう不具合の修正）
   const [guidanceDismissed, setGuidanceDismissed] = useState(false)
-  // ── 事後質問（widgetPhase === 'interview'）の状態 ──
-  const [question, setQuestion]                 = useState('')
-  const [questionType, setQuestionType]         = useState<'open' | 'rating' | 'nps'>('open')
-  const [liveText, setLiveText]                 = useState('')
-  const [isListening, setIsListening]           = useState(false)
-  const [aiThinking, setAiThinking]             = useState(false)
-  const [answerInput, setAnswerInput]           = useState('')
-  const [listenNotice, setListenNotice]         = useState('')
-  // 聞き取りを諦めた原因（ブラウザのエラー種別）。原因の切り分けに使う
-  const [listenReason, setListenReason]         = useState('')
-  // 最後に受け取った listen_start の再試行フラグ（「もう一度話す」で使う）
-  const listenRetryRef                          = useRef(false)
-  const listenerRef                             = useRef<AnswerRecorder | null>(null)
-  // 文字起こし中（送信して返事を待っている）
-  const [transcribing, setTranscribing]         = useState(false)
-  // 参加者が話し出したことを検知したか（「話し終えました」を出す目安）
-  const [speechHeard, setSpeechHeard]           = useState(false)
   // ヒントを見たタスク番号（0始まり）。結果送信時に添えて集計で自力達成と分ける
   const usedHintIdxRef                          = useRef<Set<number>>(new Set())
 
@@ -109,10 +90,6 @@ function WidgetContent() {
   const faceApiRef             = useRef<any>(null)
   const webcamVideoRef         = useRef<HTMLVideoElement>(null)
   const webcamStreamRef        = useRef<MediaStream | null>(null)
-  const screenMediaRecorderRef = useRef<MediaRecorder | null>(null)
-  const screenChunksRef        = useRef<Blob[]>([])
-  const screenStreamRef        = useRef<MediaStream | null>(null)
-  const animFrameRef           = useRef<number>(0)
 
   /* ── 初期化 ─────────────────────────────────────────────── */
   useEffect(() => {
@@ -140,47 +117,11 @@ function WidgetContent() {
           // メイン画面側で前提タスクの断念が記録された（フォールバック操作時）。
           // 小窓でも同じ立て直し画面を出し、操作の起点が割れないようにする
           setRecoveryAtIdx(e.data.index)
-        } else if (type === 'post_interview_start') {
-          // タスクは全部終わった。ここから事後質問を小窓の中で行う。
-          // 録画はまだ止めない（事後質問のやり取りも記録に残す）
-          stopListening()
-          setWidgetPhase('interview')
-          setQuestion('')
-          setLiveText('')
-          setAnswerInput('')
-          setListenNotice('')
-        } else if (type === 'interview_question') {
-          setQuestion(typeof e.data.text === 'string' ? e.data.text : '')
-          const qt = e.data.questionType
-          setQuestionType(qt === 'rating' || qt === 'nps' ? qt : 'open')
-          setLiveText('')
-          setAnswerInput('')
-          setListenNotice('')
-          setListenReason('')
-        } else if (type === 'answer_ack') {
-          if (e.data.accepted === true) {
-            // 受け取られた分だけ入力欄から消す（そのあと打ち足した分は残す）
-            setAnswerInput((prev) => (prev.trim() === String(e.data.text ?? '').trim() ? '' : prev))
-          } else {
-            setListenNotice('前の質問に進んでいたため送れませんでした。次の質問にお答えください。')
-          }
-        } else if (type === 'ai_thinking') {
-          setAiThinking(e.data.thinking === true)
-        } else if (type === 'listen_start') {
-          beginListening(e.data.silenceRetry === true)
-        } else if (type === 'listen_stop') {
-          stopListening()
         } else if (type === 'session_ended') {
-          // 面談終了。録画を止めて書き出し、メインへ渡してから閉じる。
-          // 先に閉じると録画が丸ごと失われる
-          stopListening()
+          // 面談が終わった。録画はメイン画面が持っているので、ここは閉じるだけ
           setWidgetPhase('done')
-          setDoneMessage('録画を保存しています...')
-          void (async () => {
-            await stopAndSendRecording()
-            setDoneMessage('ウィンドウを閉じています...')
-            setTimeout(() => window.close(), 800)
-          })()
+          setDoneMessage('ウィンドウを閉じています...')
+          setTimeout(() => window.close(), 800)
         }
       }
     }
@@ -192,11 +133,6 @@ function WidgetContent() {
       channelRef.current?.close()
       channelRef.current = null
       webcamStreamRef.current?.getTracks().forEach((t) => t.stop())
-      screenStreamRef.current?.getTracks().forEach((t) => t.stop())
-      cancelAnimationFrame(animFrameRef.current)
-      if (screenMediaRecorderRef.current?.state !== 'inactive') {
-        screenMediaRecorderRef.current?.stop()
-      }
     }
   }, [sessionId, tasksRaw])
 
@@ -258,172 +194,6 @@ function WidgetContent() {
     return () => clearInterval(interval)
   }, [cameraError])
 
-  /* ── 画面録画開始（Canvas合成: スクリーン + ウェブカメラPiP） ── */
-  async function startScreenRecording() {
-    try {
-      // displaySurface:'monitor' で「画面全体」をダイアログの既定に寄せる。
-      // どのタブを操作してもサービスが確実に録画対象に含まれ、参加者がタブを選び間違えない。
-      const screenStream = await navigator.mediaDevices.getDisplayMedia({ video: { displaySurface: 'monitor' }, audio: false })
-      screenStreamRef.current = screenStream
-      screenChunksRef.current = []
-
-      // スクリーン用 offscreen video を作成・再生
-      const screenVid = document.createElement('video')
-      screenVid.srcObject = screenStream
-      screenVid.muted = true
-      await new Promise<void>((resolve) => {
-        screenVid.onloadedmetadata = () => {
-          screenVid.play().then(resolve).catch(resolve)
-        }
-      })
-
-      // Canvas サイズはスクリーン解像度（上限 1920×1080）
-      const W = Math.min(screenVid.videoWidth  || 1280, 1920)
-      const H = Math.min(screenVid.videoHeight || 720,  1080)
-      const canvas = document.createElement('canvas')
-      canvas.width  = W
-      canvas.height = H
-      const ctx = canvas.getContext('2d')!
-
-      // ウェブカメラ PiP の合成はしない。「画面全体」共有では、常に最前面の小窓自体が
-      // カメラ映像を映したまま画面キャプチャに写り込む。ここでさらに合成すると、
-      // 同じ顔が小窓とワイプの2箇所に写る（実際に起きた不具合。DECISIONS 参照）。
-      // 描画ループは画面のみだが、キャンバス経由にすることで解像度上限（1920×1080）と
-      // 一定フレームレートを保つ（高DPI画面でファイルが肥大化するのを防ぐ）。
-      function draw() {
-        ctx.drawImage(screenVid, 0, 0, W, H)
-        animFrameRef.current = requestAnimationFrame(draw)
-      }
-      draw()
-
-      // Canvas ストリームを録画
-      const canvasStream = canvas.captureStream(25)
-      // マイク音声（ウェブカメラ取得時の音声トラック）を合成に追加
-      const micTrack = webcamStreamRef.current?.getAudioTracks?.()[0]
-      if (micTrack) canvasStream.addTrack(micTrack)
-      const mimeType = ['video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm']
-        .find((t) => MediaRecorder.isTypeSupported(t)) ?? ''
-      const recorder = new MediaRecorder(canvasStream, mimeType ? { mimeType } : {})
-      recorder.ondataavailable = (e) => { if (e.data.size > 0) screenChunksRef.current.push(e.data) }
-      recorder.start(1000)
-      screenMediaRecorderRef.current = recorder
-      setIsScreenRecording(true)
-
-      // メインページへ録画開始を通知
-      channelRef.current?.postMessage({ type: 'recording_started' })
-
-      // 画面共有が終了されたら描画ループも止める
-      screenStream.getVideoTracks()[0].onended = () => {
-        cancelAnimationFrame(animFrameRef.current)
-        setIsScreenRecording(false)
-        screenStreamRef.current = null
-      }
-    } catch {
-      // キャンセルされた場合は何もしない
-    }
-  }
-
-  /* ── 事後質問の聞き取り ───────────────────────────────────── */
-  // 聞き取りはこの小窓で行う（実装は src/lib/answer-recorder.ts）。
-  // メイン画面は裏側にあり、裏側のタブでは録音・マイクの扱いが制限されうるうえ、
-  // 案内も入力欄も参加者から見えないため。
-  function stopListening() {
-    listenerRef.current?.stop()
-    listenerRef.current = null
-    setIsListening(false)
-    setSpeechHeard(false)
-    setTranscribing(false)
-    setLiveText('')
-  }
-
-  function beginListening(silenceRetry: boolean) {
-    stopListening()
-    listenRetryRef.current = silenceRetry
-    setListenNotice('')
-    setListenReason('')
-    const stream = webcamStreamRef.current
-    if (!stream) {
-      setListenNotice('マイクを使えませんでした。下の欄に入力して送信してください。')
-      setListenReason('no-mic')
-      return
-    }
-    const recorder = startAnswerRecorder({
-      stream,
-      onRecordingChange: setIsListening,
-      onSpeechDetected: () => setSpeechHeard(true),
-      onTranscribing: () => setTranscribing(true),
-      onFinal: (text) => {
-        listenerRef.current = null
-        setTranscribing(false)
-        setSpeechHeard(false)
-        channelRef.current?.postMessage({ type: 'answer_text', text })
-      },
-      onSilence: () => {
-        listenerRef.current = null
-        setTranscribing(false)
-        setSpeechHeard(false)
-        channelRef.current?.postMessage({ type: 'answer_silence', retry: silenceRetry })
-      },
-      onGiveUp: (reason) => {
-        listenerRef.current = null
-        setTranscribing(false)
-        setSpeechHeard(false)
-        setListenNotice('音声をうまく取り込めませんでした。')
-        setListenReason(reason)
-      },
-    })
-    listenerRef.current = recorder
-    if (!recorder) {
-      setIsListening(false)
-      setListenNotice('マイクを使えませんでした。下の欄に入力して送信してください。')
-      setListenReason('recorder-unavailable')
-    }
-  }
-
-  /** 入力欄から回答を送る（音声が使えないとき・言い直したいとき） */
-  function sendTypedAnswer() {
-    const text = answerInput.trim()
-    if (!text) return
-    stopListening()
-    setListenNotice('')
-    setListenReason('')
-    // 入力欄はまだ空にしない。メインが受け取れたかどうか（answer_ack）を見てから
-    // 消す。先に消すと、次の質問へ進んだ直後などに送った言葉が黙って消える
-    channelRef.current?.postMessage({ type: 'answer_text', text })
-  }
-
-  /* ── 録画停止 → blob をメインページへ送信 ─────────────────── */
-  function stopAndSendRecording(): Promise<void> {
-    return new Promise((resolve) => {
-      // 合成描画ループを停止
-      cancelAnimationFrame(animFrameRef.current)
-      // 中身が空でも必ず送る。送らないと、録画の到着を待っているメイン側が
-      // 何も受け取れないまま待ち時間切れ（20秒）まで終了画面で止まる
-      const send = (blob: Blob) => {
-        channelRef.current?.postMessage({ type: 'screen_recording_blob', blob })
-        screenStreamRef.current?.getTracks().forEach((t) => t.stop())
-        resolve()
-      }
-      const recorder = screenMediaRecorderRef.current
-      if (!recorder || recorder.state === 'inactive') {
-        // すでに停止済み（画面共有が先に終了した場合など）でも chunks があれば送信
-        send(new Blob(screenChunksRef.current, { type: recorder?.mimeType || 'video/webm' }))
-        return
-      }
-      recorder.onstop = () => {
-        send(new Blob(screenChunksRef.current, { type: recorder.mimeType || 'video/webm' }))
-      }
-      recorder.stop()
-    })
-  }
-
-  // 以前はタスク完了時にメイン画面へフォーカスを戻していたが、事後質問もこの小窓で
-  // 行うようになったため不要になった（メイン画面は裏側のまま、聞き取りはここで行う）。
-
-  const isLastTask = currentTaskIndex + 1 >= tasks.length
-  const pendingOutcomeRef = useRef<'completed' | 'gave_up'>('completed')
-  const pendingSeqRef = useRef<number | undefined>(undefined)
-
   /* ── タスク結果を記録して次へ（達成 / 断念）。最後なら録画を止めて質問へ ── */
   // 達成/断念のボタンを押した直後。SEQ が有効ならまず評価を聞いてから確定する。
   function handleOutcome(outcome: 'completed' | 'gave_up') {
@@ -442,34 +212,14 @@ function WidgetContent() {
       setRecoveryAtIdx(currentTaskIndex)
       return
     }
-    if (!isLastTask) {
-      // 途中のタスク: 結果だけ送って次へ（録画は継続）
-      channelRef.current?.postMessage({ type: 'task_outcome', outcome, seq, usedHint })
+    const lastTask = currentTaskIndex + 1 >= tasks.length
+    channelRef.current?.postMessage({ type: 'task_outcome', outcome, seq, usedHint })
+    if (!lastTask) {
       setCurrentTaskIndex((i) => Math.min(i + 1, tasks.length - 1))
       return
     }
-    // 最後のタスク: 録画必須（未開始なら警告）
-    if (!isScreenRecording && screenChunksRef.current.length === 0) {
-      pendingOutcomeRef.current = outcome
-      pendingSeqRef.current = seq
-      setWarnNoRecord(true)
-      return
-    }
-    finalize(outcome, seq)
-  }
-
-  /**
-   * 最後のタスクの結果を確定する。
-   *
-   * ここでは録画を止めない。止めて小窓を閉じてしまうと、このあとの事後質問が
-   * 映像も音声もまったく記録されなくなる（実際にそうなっていた）。録画を止めるのは
-   * 面談そのものが終わったとき（メインから session_ended が届いたとき）だけ。
-   * 事後質問へ切り替えるのもメイン側の合図（post_interview_start）に従う。
-   */
-  function finalize(outcome: 'completed' | 'gave_up', seq?: number) {
-    setWarnNoRecord(false)
-    const usedHint = usedHintIdxRef.current.has(currentTaskIndex)
-    channelRef.current?.postMessage({ type: 'task_outcome', outcome, seq, usedHint })
+    // 最後のタスク。ここでは閉じず、「質問へ進む」を押してもらう
+    setWidgetPhase('to-interview')
   }
 
   /* ── 前提タスクの立て直し ──────────────────────────────── */
@@ -509,17 +259,16 @@ function WidgetContent() {
       })
       setAwaitingSeq(null)
     }
-    // 録画の停止と書き出しはメインからの session_ended で行う。ここで止めると、
-    // 終了処理の途中で録画が二重に書き出され、メイン側の待ち合わせと噛み合わない
-    stopListening()
+    // 録画はメイン画面が持っているので、ここで止めるものは無い
     channelRef.current?.postMessage({ type: 'end_session' })
     setDoneMessage('セッションを終了しています...')
     setWidgetPhase('done')
   }
 
-  // 事前手続き（録画開始 →（サービスURLがあれば）サービスを開く）が完了したか。
+  // 事前手続き（サービスURLがあれば、サービスを開く）が完了したか。
   // 完了して初めてタスク文言と結果ボタンを表示し、準備中は隠して混乱を防ぐ。
-  const readyForTask = isScreenRecording && (serviceOpened || !stimulusUrl)
+  // 画面録画はメイン画面で開始済みなので、ここでは条件に入れない。
+  const readyForTask = serviceOpened || !stimulusUrl
 
   // タスク1の直前だけ、思考発話の案内→「スタート」を挟む（2問目以降は不要）。
   // 案内を読み終える前にタスク1の文言が見えてしまう不具合の修正のため、
@@ -595,6 +344,43 @@ function WidgetContent() {
     channelRef.current?.postMessage({ type: 'hint_used', index: currentTaskIndex })
   }
 
+  /* ── 全タスク完了 → メイン画面へ戻る ───────────────────────── */
+  if (widgetPhase === 'to-interview') {
+    return (
+      <div className="bg-white text-gray-900 px-5 py-6 text-center">
+        <div className="w-10 h-10 rounded-full bg-emerald-50 border border-emerald-200 flex items-center justify-center mx-auto mb-3">
+          <CheckCircle2 className="w-5 h-5 text-emerald-600" strokeWidth={1.75} />
+        </div>
+        <h1 className="text-sm font-semibold text-gray-900 mb-1.5">お疲れさまでした</h1>
+        <p className="text-xs text-gray-600 leading-relaxed mb-4">
+          操作は以上です。最後にいくつか質問があります。<br />
+          下のボタンを押すと、この小窓が閉じてインタビューの画面に戻ります。
+        </p>
+        <button
+          onClick={() => {
+            // クリックという利用者の操作の中で呼ぶ。ここでないとブラウザは
+            // 別ウィンドウを前面に出してくれない
+            try {
+              if (window.opener && !window.opener.closed) window.opener.focus()
+              else {
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                const pipOpener = (window.parent as any)?.opener
+                if (pipOpener && !pipOpener.closed) pipOpener.focus()
+              }
+            } catch { /* cross-origin guard */ }
+            channelRef.current?.postMessage({ type: 'return_to_main' })
+            setDoneMessage('インタビューの画面に戻ります...')
+            setWidgetPhase('done')
+          }}
+          className="w-full inline-flex items-center justify-center gap-1.5 bg-gray-900 hover:bg-gray-800 text-white py-2.5 rounded-lg text-sm font-semibold transition-colors"
+        >
+          質問へ進む
+          <ArrowRight className="w-4 h-4" strokeWidth={2} />
+        </button>
+      </div>
+    )
+  }
+
   /* ── 完了画面 ─────────────────────────────────────────────── */
   if (widgetPhase === 'done') {
     return (
@@ -609,157 +395,8 @@ function WidgetContent() {
     )
   }
 
-  /* ── 事後質問画面 ─────────────────────────────────────────── */
-  // タスクが全部終わったあと、質問もこの小窓の中で行う。
-  // 読み上げ中はメイン画面から届く revealedText（タイプライター表示）を出し、
-  // 読み終えたら質問文の全文に切り替える。
-  if (widgetPhase === 'interview') {
-    const shownQuestion = ttsSpeaking ? revealedText : question
-    return (
-      <div className="bg-white text-gray-900">
-        <div className="flex items-center justify-between px-3 py-2 border-b border-gray-200">
-          <span className="text-xs font-semibold text-gray-900 tracking-tight">UserVoice</span>
-          <span className="text-gray-500 text-xs">最後にいくつか質問します</span>
-        </div>
-
-        {/* カメラ（タスク中と同じ位置に置き、見え方を変えない） */}
-        <div className="relative bg-gray-900 aspect-video">
-          <video
-            ref={webcamVideoRef}
-            autoPlay
-            muted
-            playsInline
-            aria-label="あなたのカメラ映像"
-            className={`w-full h-full object-cover scale-x-[-1] ${cameraError ? 'hidden' : ''}`}
-          />
-          {isListening && (
-            <div className="absolute bottom-2 left-2 flex items-center gap-1.5 bg-gray-950/70 text-white px-2 py-1 rounded-md">
-              <span className="w-1.5 h-1.5 rounded-full bg-red-400 animate-pulse" />
-              <span className="text-[10px]">{speechHeard ? 'お話しどうぞ' : 'どうぞお話しください'}</span>
-            </div>
-          )}
-          {ttsSpeaking && (
-            <div className="absolute bottom-2 left-2 flex items-center gap-1.5 bg-gray-950/70 text-white px-2 py-1 rounded-md">
-              <Volume2 className="w-3 h-3" strokeWidth={2} />
-              <span className="text-[10px]">AI が話しています</span>
-            </div>
-          )}
-        </div>
-
-        <div className="px-3 py-3 space-y-2.5">
-          {/* 質問文 */}
-          <div className="bg-gray-50 border border-gray-200 rounded-lg p-2.5 max-h-40 overflow-y-auto">
-            <p className="text-xs text-gray-900 leading-relaxed whitespace-pre-line">
-              {shownQuestion || '質問を準備しています…'}
-            </p>
-          </div>
-
-          {aiThinking && (
-            <p className="text-[11px] text-gray-500">回答を聞いています…</p>
-          )}
-
-          {/* 評価質問はボタンで回答する */}
-          {!aiThinking && !ttsSpeaking && questionType === 'rating' && (
-            <div className="border border-gray-200 rounded-lg p-2.5">
-              <RatingQuestion
-                compact
-                question=""
-                onSubmit={(v) => channelRef.current?.postMessage({ type: 'rating_answer', value: v, label: `${v} / 5` })}
-              />
-            </div>
-          )}
-          {!aiThinking && !ttsSpeaking && questionType === 'nps' && (
-            <div className="border border-gray-200 rounded-lg p-2.5">
-              <NpsQuestion
-                compact
-                question=""
-                onSubmit={(v) => channelRef.current?.postMessage({ type: 'rating_answer', value: v, label: `${v} / 10` })}
-              />
-            </div>
-          )}
-
-          {/* 自由回答: 聞き取り中の文字と、テキストでの入力欄 */}
-          {questionType === 'open' && (
-            <>
-              {transcribing && (
-                <p className="text-[11px] text-gray-600 bg-gray-50 border border-gray-200 rounded-md px-2 py-1.5">
-                  聞き取っています…
-                </p>
-              )}
-              {/* 録音方式では「話し終えた」をブラウザが教えてくれない。静かになれば
-                  自動で締めるが、参加者が自分で終えられる手段も必ず出しておく */}
-              {isListening && !transcribing && (
-                <button
-                  onClick={() => listenerRef.current?.finishNow()}
-                  className="w-full inline-flex items-center justify-center gap-1.5 bg-gray-900 hover:bg-gray-800 text-white rounded-lg py-2 text-xs font-medium transition-colors"
-                >
-                  <Check className="w-3.5 h-3.5" strokeWidth={2} />
-                  話し終えました
-                </button>
-              )}
-              {liveText && (
-                <p className="text-xs text-gray-700 leading-relaxed bg-blue-50 border border-blue-100 rounded-lg p-2.5">
-                  {liveText}
-                </p>
-              )}
-              {listenNotice && (
-                <div className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded-md px-2 py-1.5 leading-snug space-y-1.5">
-                  <p>{listenNotice}下の欄に入力して送信することもできます。</p>
-                  {listenReason && (
-                    <p className="text-[10px] text-amber-700/80">（参考情報: {listenReason}）</p>
-                  )}
-                  {/* クリックで start し直すと、ブラウザが要求する「利用者の操作」の
-                      文脈に戻るため、自動再開では通らなかった場合でも通ることがある */}
-                  <button
-                    onClick={() => beginListening(listenRetryRef.current)}
-                    className="w-full inline-flex items-center justify-center gap-1.5 bg-white border border-amber-300 hover:border-amber-500 text-amber-900 rounded-md py-1.5 text-[11px] font-medium transition-colors"
-                  >
-                    <Mic className="w-3 h-3" strokeWidth={2} />
-                    もう一度録音する
-                  </button>
-                </div>
-              )}
-              <div className="flex gap-1.5">
-                <input
-                  value={answerInput}
-                  onChange={(e) => setAnswerInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    // 日本語入力の変換確定 Enter で送信しない
-                    if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
-                      e.preventDefault()
-                      sendTypedAnswer()
-                    }
-                  }}
-                  placeholder="うまく聞き取れないときは入力できます"
-                  className="flex-1 min-w-0 border border-gray-300 rounded-md px-2 py-1.5 text-xs focus:outline-none focus:border-gray-500"
-                />
-                <button
-                  onClick={sendTypedAnswer}
-                  disabled={!answerInput.trim()}
-                  className="flex-shrink-0 bg-gray-900 hover:bg-gray-800 disabled:bg-gray-300 text-white rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors"
-                >
-                  送信
-                </button>
-              </div>
-            </>
-          )}
-
-          {/* タスク画面と同じく、常に押せる脱出口を最下部に置く。事後質問は評価ボタン
-              だけの回で聞き取りも沈黙タイマーも動かないことがあり、ここに終了手段が
-              無いと参加者が詰む */}
-          <button
-            onClick={endSession}
-            className="w-full inline-flex items-center justify-center gap-1.5 border border-gray-300 hover:border-gray-400 text-gray-600 hover:text-gray-900 py-2 rounded-lg text-xs transition-colors"
-          >
-            <X className="w-3.5 h-3.5" strokeWidth={2} />
-            セッションを終了
-          </button>
-        </div>
-      </div>
-    )
-  }
-
   const currentTask = tasks[currentTaskIndex]
+  const isLastTask = currentTaskIndex + 1 >= tasks.length
 
   /* ── タスク画面 ─────────────────────────────────────────────── */
   // 注: Document PiP の iframe 内では 100vh 等の viewport 単位が実際の窓より大きく評価され、
@@ -795,12 +432,6 @@ function WidgetContent() {
             >
               再試行
             </button>
-          </div>
-        )}
-        {isScreenRecording && (
-          <div className="absolute top-2 right-2 flex items-center gap-1.5 bg-white/95 border border-red-200 px-2 py-1 rounded-md shadow-sm">
-            <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
-            <span className="text-[10px] text-red-600 font-semibold tracking-wide">REC</span>
           </div>
         )}
         {/* 顔フレーミング警告（カメラ下端にオーバーレイ）。見切れ・未検出のときだけ出す */}
@@ -902,7 +533,7 @@ function WidgetContent() {
           <div className="bg-gray-50 border border-gray-200 rounded-lg p-3">
             <p className="text-[10px] text-gray-500 mb-1.5 uppercase tracking-wide font-medium">準備</p>
             <p className="text-sm text-gray-600 leading-relaxed">
-              下のボタンで準備を進めてください{stimulusUrl ? '（画面録画 → サービスを開く）' : '（画面録画）'}。準備ができると、ここにタスクが表示されます。
+              下の「サービスを開く」を押してください。開くと、ここにタスクが表示されます。
             </p>
           </div>
         )}
@@ -916,26 +547,9 @@ function WidgetContent() {
           特に「うまくいかないときは『できなかった』で次へ」と案内しながら、その
           「できなかった」自体が見えなくなるのは、救済のつもりが詰みを作ることになる。 */}
       <div className="px-3 pb-3 pt-2 space-y-2 sticky bottom-0 bg-white border-t border-gray-100">
-        {/* 録画開始ボタン。開始後は何も表示しない（タスク文の領域を広く取るため。
-            録画中であること自体はブラウザ側の共有インジケータで分かる） */}
-        {!isScreenRecording && (
-          <div className="space-y-1">
-            <button
-              onClick={startScreenRecording}
-              className="w-full inline-flex items-center justify-center gap-2 bg-red-50 hover:bg-red-100 border-2 border-red-500 hover:border-red-600 text-red-700 py-2.5 rounded-lg text-sm font-semibold transition-colors animate-pulse hover:animate-none"
-            >
-              <Monitor className="w-4 h-4" strokeWidth={2} />
-              画面録画を開始する
-              <span className="bg-red-600 text-white text-[10px] font-bold px-1.5 py-0.5 rounded leading-none">必須</span>
-            </button>
-            <p className="text-[10px] text-gray-500 text-center leading-snug">
-              表示されるダイアログで<span className="font-semibold text-gray-700">「画面全体」</span>を選んで共有してください
-            </p>
-          </div>
-        )}
-
-        {/* サービスを開く: 録画開始後・未オープン時のみ主 CTA として表示。押したら状態を進める */}
-        {isScreenRecording && stimulusUrl && !serviceOpened && (
+        {/* サービスを開く: 未オープン時のみ主 CTA として表示。押したら状態を進める。
+            画面録画はメイン画面で開始済みなので、ここが最初の操作になる */}
+        {stimulusUrl && !serviceOpened && (
           <div className="space-y-1">
             <a
               href={stimulusUrl}
@@ -959,31 +573,6 @@ function WidgetContent() {
             取るためタスクヘッダー側（もう一度聞くの隣）に移した */}
         {taskVisible && (
           <>
-            {/* 録画未開始の警告（録画が途中で止まった等の保険） */}
-            {warnNoRecord && (
-              <div className="bg-amber-50 border border-amber-300 rounded-lg p-3 text-xs text-amber-900 space-y-2">
-                <p className="flex items-center gap-1.5 font-semibold">
-                  <AlertTriangle className="w-3.5 h-3.5" strokeWidth={2} />
-                  画面録画が開始されていません
-                </p>
-                <p className="text-amber-800/80">録画なしでタスクを完了しますか？</p>
-                <div className="flex gap-2">
-                  <button
-                    onClick={() => setWarnNoRecord(false)}
-                    className="flex-1 bg-amber-600 hover:bg-amber-700 text-white py-1.5 rounded-md text-xs font-medium transition-colors"
-                  >
-                    録画してから完了
-                  </button>
-                  <button
-                    onClick={() => finalize(pendingOutcomeRef.current, pendingSeqRef.current)}
-                    className="flex-1 bg-white border border-amber-300 hover:border-amber-500 text-amber-800 py-1.5 rounded-md text-xs transition-colors"
-                  >
-                    このまま完了
-                  </button>
-                </div>
-              </div>
-            )}
-
             <p className="text-[10px] text-gray-500 text-center leading-snug pt-1">
               {recoveryPending ? '上の手順で準備できたら押してください' : '操作が終わったら押してください'}
             </p>
