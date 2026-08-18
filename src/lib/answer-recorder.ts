@@ -46,7 +46,18 @@ export type AnswerRecorderOptions = {
 }
 
 /** 発話とみなす音量のしきい値（RMS）。小さすぎると環境音を拾う */
-const SPEECH_RMS_THRESHOLD = 0.015
+const SPEECH_RMS_THRESHOLD = 0.02
+/** 音量の確認間隔 */
+const LEVEL_SAMPLE_MS = 100
+/**
+ * 「話し始めた」と認める、しきい値を超えた時間の合計。
+ *
+ * 一瞬でも超えたら発話とみなしていたため、咳払いや物音だけで録音が締められ、
+ * ほぼ無音の音声が Whisper に渡って**実在しない文が返る**事故が起きた。
+ * 咳・ドアの音・キーボードは概ね 0.3 秒以内に収まるので、それより長く
+ * 音が続いていることを条件にする。
+ */
+const SPEECH_MIN_LOUD_MS = 600
 
 export function startAnswerRecorder(opts: AnswerRecorderOptions): AnswerRecorder | null {
   const audioTrack = opts.stream.getAudioTracks()[0]
@@ -59,6 +70,8 @@ export function startAnswerRecorder(opts: AnswerRecorderOptions): AnswerRecorder
   let stopped = false
   let speechDetected = false
   let lastLoudAt = 0
+  /** しきい値を超えていた時間の合計（咳払いと発話を区別するために数える） */
+  let loudMs = 0
   const startedAt = Date.now()
 
   let recorder: MediaRecorder | null = null
@@ -191,12 +204,18 @@ export function startAnswerRecorder(opts: AnswerRecorderOptions): AnswerRecorder
       const rms = Math.sqrt(sum / buf.length)
       if (rms >= SPEECH_RMS_THRESHOLD) {
         lastLoudAt = Date.now()
-        if (!speechDetected) {
+        loudMs += LEVEL_SAMPLE_MS
+        // 十分な長さ音が続いて初めて「話し始めた」と認める
+        if (!speechDetected && loudMs >= SPEECH_MIN_LOUD_MS) {
           speechDetected = true
           opts.onSpeechDetected()
         }
+      } else if (!speechDetected) {
+        // まだ発話と認めていない段階での単発の物音は、間が空いたら数え直す
+        // （咳払いが2回あっただけで合計が閾値に届くのを防ぐ）
+        if (lastLoudAt && Date.now() - lastLoudAt > 1000) loudMs = 0
       }
-    }, 100)
+    }, LEVEL_SAMPLE_MS)
   } catch {
     // 音量を見られない環境では自動の締めができない。
     // 「話し終えました」ボタンと沈黙タイムアウトだけで進める
@@ -218,11 +237,9 @@ export function startAnswerRecorder(opts: AnswerRecorderOptions): AnswerRecorder
   return {
     finishNow: () => {
       if (finished || stopped) return
-      if (!speechDetected) {
-        // 何も話していないのに押された場合も、録音を捨てずに文字起こしを試す
-        // （小さな声で話していて音量判定に届かなかった可能性がある）
-        speechDetected = true
-      }
+      // 参加者が明示的に押したときは、音量判定に届いていなくても送る
+      // （小さな声で話していた可能性がある）。幻聴はサーバー側で落とす
+      speechDetected = true
       void concludeWithTranscription()
     },
     stop: () => {
