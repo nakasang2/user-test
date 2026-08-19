@@ -54,6 +54,15 @@ interface Question {
   naturalCapture?: boolean
 }
 
+/**
+ * 1つの設定質問で、聞き返しに応じて言い直す回数の上限。
+ *
+ * 言い直しは深掘りの回数に数えない（聞き返しで貴重な深掘り枠を使い切らせない）が、
+ * まったく数えないと、聞き返しが続く限り同じ質問に留まり続けて面談が終わらない。
+ * 参加者は社外の人で、自分で抜ける手段を前提にできないため上限を設ける。
+ */
+const MAX_CLARIFY_PER_QUESTION = 2
+
 interface Props {
   sessionId: string
   participantToken?: string
@@ -173,6 +182,21 @@ export default function InterviewRoom({
     fullConversationRef.current += line
   }
 
+  /**
+   * 直前の「参加者: 〜」を、この質問の回答テキストから外す。
+   *
+   * 聞き返し（「どういう意味ですか？」）は回答ではないので、そのまま連結すると
+   * 「どういう意味ですか？ / 週3回くらいです」のような回答が保存され、
+   * 数値抽出や分析にもそのまま渡ってしまう。AI に渡す全体履歴
+   * （fullConversationRef）からは消さないので、文脈は失われない。
+   */
+  function dropLastParticipantLineFromAnswer() {
+    const buf = conversationBufferRef.current
+    const idx = buf.lastIndexOf('\n参加者: ')
+    if (idx === -1) return
+    conversationBufferRef.current = buf.slice(0, idx)
+  }
+
   // 実感情検出フック
   const { status: emotionStatus, lastEmotion, faceStatus, startDetection, stopDetection, getSnapshots } = useEmotionDetection(5000)
   const [cameraReady, setCameraReady] = useState(false)
@@ -221,6 +245,11 @@ export default function InterviewRoom({
   const [speechHeard, setSpeechHeard] = useState(false)
   // 録音を送って文字起こしの返事を待っている
   const [transcribing, setTranscribing] = useState(false)
+  // ターンの合図音を鳴らすための AudioContext（使い回す）
+  const cueCtxRef = useRef<AudioContext | null>(null)
+  // この設定質問で言い直した回数。上限が無いと、聞き返しが続く限り同じ質問に
+  // 留まり続けて面談が終わらない（参加者は自分で抜ける手段を持たない）
+  const clarifyCountRef = useRef(0)
   const [recordingDownloadUrl, setRecordingDownloadUrl] = useState<string | null>(null)
   // 回答送信の状態（完了画面の表示・beforeunload ガード・再送に使う）
   const [submitState, setSubmitState] = useState<'idle' | 'saving' | 'saved' | 'failed'>('idle')
@@ -655,6 +684,8 @@ export default function InterviewRoom({
       // 再開し続ける
       listenerRef.current?.stop()
       listenerRef.current = null
+      void cueCtxRef.current?.close().catch(() => {}) // 既に閉じている場合は無視
+      cueCtxRef.current = null
       stopDetection()
       if (screenMediaRecorderRef.current?.state !== 'inactive') {
         screenMediaRecorderRef.current?.stop()
@@ -742,6 +773,39 @@ export default function InterviewRoom({
   }
 
   /**
+   * ターンが参加者に移ったことを知らせる短い音。
+   *
+   * 画面表示だけだと、参加者が手元や別の画面を見ているときに切り替わりを
+   * 見落とす。音源ファイルは持たず WebAudio で鳴らす（読み込み待ちが無く、
+   * 鳴らせなくても進行に影響しない）。
+   */
+  function playTurnCue() {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const Ctx = window.AudioContext || (window as any).webkitAudioContext
+      if (!Ctx) return
+      if (!cueCtxRef.current) cueCtxRef.current = new Ctx()
+      const ctx = cueCtxRef.current
+      // 開始ボタンより後なので通常は running だが、念のため
+      void ctx.resume?.().catch(() => {})
+      const osc = ctx.createOscillator()
+      const gain = ctx.createGain()
+      osc.type = 'sine'
+      osc.frequency.value = 880
+      // 耳障りにならないよう小さく、素早く減衰させる（録音に長く乗らないように）
+      gain.gain.setValueAtTime(0.0001, ctx.currentTime)
+      gain.gain.exponentialRampToValueAtTime(0.12, ctx.currentTime + 0.01)
+      gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.18)
+      osc.connect(gain)
+      gain.connect(ctx.destination)
+      osc.start()
+      osc.stop(ctx.currentTime + 0.2)
+    } catch {
+      // 鳴らせなくても進行には影響しない
+    }
+  }
+
+  /**
    * 進行中の聞き取りを完全に終わらせる（次の質問へ進む・面談を終える等）。
    *
    * 聞き取りの実装は src/lib/answer-recorder.ts に集約してある。ここは
@@ -781,6 +845,11 @@ export default function InterviewRoom({
       showNotice('マイクを使えませんでした。下の入力欄からお答えください。')
       return
     }
+    // ターンが移ったことを音でも知らせる（画面を見ていない場合の取りこぼし対策）。
+    // **録音を始める前に鳴らす**。録音中に鳴らすと、この音がマイクに回り込んで
+    // 「物音の予算」を先に食い、直後の咳払いと合わさって発話と誤検知される
+    // （何も話していないのに回答が記録される、以前と同じ事故の経路になる）
+    playTurnCue()
     const recorder = startAnswerRecorder({
       stream,
       onRecordingChange: setIsListening,
@@ -939,12 +1008,14 @@ export default function InterviewRoom({
     // この質問で許される深掘りの回数。0 なら AI に判断させる必要がない。
     // 呼ばないことで待ち時間も AI の費用も発生しない。
     const maxFollowUps = current ? effectiveFollowUpDepth(current) : 0
-    if (maxFollowUps <= 0) {
-      moveToNextPlannedQuestion()
-      return
-    }
-    // 上限に達していれば、AI に聞くまでもなく次へ進む
-    if (followUpCountRef.current >= maxFollowUps) {
+    const canFollowUp = maxFollowUps > 0 && followUpCountRef.current < maxFollowUps
+    const allowClarify = clarifyCountRef.current < MAX_CLARIFY_PER_QUESTION
+    // 深掘りできず、言い直しの余地も無いなら AI に聞くまでもなく次へ進む。
+    // 逆に言うと、深掘り上限に達していても・深掘り無効の質問でも、
+    // 聞き返し（「どういう意味ですか？」）には応じられるようにここを通す。
+    // 通さないと、いちばん聞き返しが起きやすい上限到達後に、聞き返しの発話が
+    // そのまま回答として記録されて次へ進んでしまう
+    if (!canFollowUp && !allowClarify) {
       moveToNextPlannedQuestion()
       return
     }
@@ -967,6 +1038,7 @@ export default function InterviewRoom({
             .slice(currentQuestionIndexRef.current + 1)
             .map((q) => q.text),
           maxFollowUps,
+          allowClarify,
         }),
       })
       setAiThinking(false)
@@ -980,6 +1052,22 @@ export default function InterviewRoom({
         return
       }
       const decision = await res.json()
+      // 聞き返し（「その質問はこういう意味ですか？」）への言い直し。
+      // **深掘りの回数には数えない**。数えると、質問の意味を確かめただけで貴重な
+      // 深掘り枠を1回使い切り、まだ答えていないのに次の質問へ進んでしまう。
+      // 「これまでに聞いた深掘り」にも積まない（重複判定を汚さないため）。
+      if (decision.action === 'clarify' && decision.question) {
+        clarifyCountRef.current += 1
+        // 聞き返しの発話は「その質問への回答」ではない。回答テキストの連結からは
+        // 外す（AI に渡す全体履歴には残すので、文脈は失わない）
+        dropLastParticipantLineFromAnswer()
+        appendConversation(`\nAI: ${decision.question}`)
+        // isFollowUp は変えない。深掘り中に聞き返されたのに表示だけ元に戻すと、
+        // 内部状態（深掘り回数は消費済み）と画面が食い違う
+        setDisplayedQuestion(decision.question)
+        speak(decision.question, () => listenForAnswer(decideNext))
+        return
+      }
       if (decision.action === 'follow_up' && decision.question) {
         followUpCountRef.current += 1
         // 聞いた深掘りを覚えておき、以降の判断に渡す（同じことを言い換えて聞かないため）
@@ -1161,6 +1249,7 @@ export default function InterviewRoom({
     recordOpenAnswerIfAny() // バッファをリセットする前に確定させる
     const next = currentQuestionIndexRef.current + 1
     followUpCountRef.current = 0
+    clarifyCountRef.current = 0
     // 1問分のバッファだけリセットする。fullConversationRef は面談全体の文脈として残す
     conversationBufferRef.current = ''
     if (next >= questions.length) { endInterview(); return }
@@ -1445,7 +1534,10 @@ export default function InterviewRoom({
 
     // 通常インタビュー
     setPhase('intro')
-    const greeting = `こんにちは${participantName ? `、${participantName}さん` : ''}。本日はインタビューにご参加いただきありがとうございます。「${interviewTitle}」についてお聞きします。`
+    // 名前は読み上げに含めない。漢字の姓名は音読み／訓読みを取り違えるため、
+    // 本人の名前を間違って呼ぶ事故が起きた（画面には名前を出しているので、
+    // 読み上げないことで分かりにくくなることはない）
+    const greeting = `こんにちは。本日はインタビューにご参加いただきありがとうございます。「${interviewTitle}」についてお聞きします。`
     // 調査作成時の「説明（任意）」を、あれば読み上げに含める
     const intro = description?.trim() ? `${greeting}${description.trim()}` : greeting
     speak(intro, () => {
@@ -1990,17 +2082,69 @@ export default function InterviewRoom({
             顔の見切れ警告だけは参加者が直せるので残している（上部）。
           */}
 
-          {/* AI ステータスバッジ（左下オーバーレイ） */}
-          {isSpeaking && (
+          {/* AI ステータスバッジ（左下）。質問フェーズでは下の「ターン表示」に
+              一本化するので、タスク中だけ出す（同じことを2か所で言わない） */}
+          {phase === 'task' && isSpeaking && (
             <div className="absolute bottom-4 left-4 inline-flex items-center gap-1.5 bg-gray-900 text-white text-xs px-3 py-1.5 rounded-full shadow-lg">
               <Sparkles className="w-3 h-3 animate-pulse" strokeWidth={2} />
               AI が話しています
             </div>
           )}
-          {aiThinking && (
-            <div className="absolute bottom-4 left-4 inline-flex items-center gap-1.5 bg-amber-500 text-white text-xs px-3 py-1.5 rounded-full shadow-lg">
-              <Sparkles className="w-3 h-3 animate-pulse" strokeWidth={2} />
-              AI が考えています
+
+          {/* ── ターン表示 ──────────────────────────────────────
+              「AI が聞く番」と「参加者が話す番」の境目を、画面の上部中央に大きく出す。
+              一見ふつうの会話に見えて実際は交互のターン制なので、明示しないと
+              いつ話し始めてよいのか分からない（PoC で最初に出た指摘）。
+              状態は排他で、必ず1つだけ出す。 */}
+          {(phase === 'interview' || phase === 'thinking' || phase === 'intro') && (
+            <div
+              className={`absolute left-1/2 -translate-x-1/2 z-20 w-[min(92%,30rem)] px-2 ${
+                // 質問画像が出ている間は上端を避ける。印象テストは見た目の第一印象を
+                // 測るので、評価対象の画像にバナーを重ねてはいけない
+                questionImageVisible ? 'bottom-4' : 'top-4'
+              }`}
+            >
+              {isSpeaking ? (
+                <div className="flex items-center gap-3 bg-gray-900/95 text-white px-4 py-3 rounded-xl shadow-lg">
+                  <Sparkles className="w-5 h-5 flex-shrink-0 animate-pulse" strokeWidth={2} />
+                  <div className="leading-tight">
+                    <p className="text-sm font-semibold">AI が質問しています</p>
+                    <p className="text-[11px] text-white/70">お聞きください</p>
+                  </div>
+                </div>
+              ) : aiThinking ? (
+                <div className="flex items-center gap-3 bg-amber-500/95 text-white px-4 py-3 rounded-xl shadow-lg">
+                  <span className="flex gap-1 flex-shrink-0">
+                    <span className="w-1.5 h-1.5 rounded-full bg-white animate-bounce" />
+                    <span className="w-1.5 h-1.5 rounded-full bg-white animate-bounce" style={{ animationDelay: '150ms' }} />
+                    <span className="w-1.5 h-1.5 rounded-full bg-white animate-bounce" style={{ animationDelay: '300ms' }} />
+                  </span>
+                  <div className="leading-tight">
+                    {/* 深掘りは「参加者の発言を読んでから」考えるので時間がかかる。
+                        何を待っているのかを書かないと、ただ止まって見える */}
+                    <p className="text-sm font-semibold">いまのお話を読み取っています</p>
+                    <p className="text-[11px] text-white/80">次の質問を考えています。少しお待ちください</p>
+                  </div>
+                </div>
+              ) : transcribing ? (
+                <div className="flex items-center gap-3 bg-gray-700/95 text-white px-4 py-3 rounded-xl shadow-lg">
+                  <span className="w-2 h-2 rounded-full bg-white/80 animate-pulse flex-shrink-0" />
+                  <div className="leading-tight">
+                    <p className="text-sm font-semibold">聞き取っています…</p>
+                    <p className="text-[11px] text-white/70">そのままお待ちください</p>
+                  </div>
+                </div>
+              ) : isListening ? (
+                <div className="flex items-center gap-3 bg-emerald-600/95 text-white px-4 py-3 rounded-xl shadow-lg ring-2 ring-emerald-300/60">
+                  <Mic className="w-5 h-5 flex-shrink-0" strokeWidth={2} />
+                  <div className="leading-tight">
+                    <p className="text-sm font-semibold">あなたの番です</p>
+                    <p className="text-[11px] text-white/80">
+                      {speechHeard ? '話し終えたら、少し黙ると次に進みます' : 'どうぞお話しください'}
+                    </p>
+                  </div>
+                </div>
+              ) : null}
             </div>
           )}
 
@@ -2020,7 +2164,13 @@ export default function InterviewRoom({
                     : interviewType === 'usability' ? 'ユーザビリティテスト'
                     : 'インタビュー'}
                 </span>
-                <h1 className="text-xl font-semibold tracking-tight mb-4 text-gray-900">{interviewTitle}</h1>
+                <h1 className="text-xl font-semibold tracking-tight mb-1 text-gray-900">{interviewTitle}</h1>
+                {/* 読み上げでは名前を呼ばない（漢字の読みを取り違えるため）。
+                    代わりにここに出して、本人のセッションであることを確認できるようにする */}
+                {participantName && (
+                  <p className="text-xs text-gray-500 mb-4">{participantName} さんとしてご参加いただきます</p>
+                )}
+                {!participantName && <div className="mb-4" />}
                 <div className="bg-gray-50 border border-gray-200 rounded-lg p-5 text-left mb-5 space-y-3">
                   <p className="text-xs text-gray-500 font-medium uppercase tracking-wide">
                     {interviewType === 'interview' ? 'インタビューの流れ' : 'テストの流れ'}
@@ -2653,34 +2803,6 @@ export default function InterviewRoom({
               <p className={`text-sm font-medium leading-relaxed ${isFollowUp ? 'text-amber-700' : 'text-gray-900'}`}>
                 {isSpeaking ? revealedSpeechText : (displayedQuestion || currentQ?.text)}
               </p>
-              {/* いま何が起きているかを必ず1つだけ示す。
-                  「聞き取っています…」と「話し終えました」が同時に出るような、
-                  状態が混ざった見え方を作らないため、ここで排他に分岐させる */}
-              <div className="mt-3 min-h-[1.25rem]">
-                {isSpeaking ? (
-                  <div className="flex items-center gap-2 text-xs text-gray-500">
-                    <Volume2 className="w-3.5 h-3.5" strokeWidth={2} />
-                    <span>AI が話しています</span>
-                  </div>
-                ) : aiThinking ? (
-                  <div className="flex items-center gap-2 text-xs text-amber-700">
-                    <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-bounce" />
-                    <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-bounce" style={{ animationDelay: '150ms' }} />
-                    <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-bounce" style={{ animationDelay: '300ms' }} />
-                    <span>次の質問を考えています…</span>
-                  </div>
-                ) : transcribing ? (
-                  <div className="flex items-center gap-2 text-xs text-gray-500">
-                    <span className="w-1.5 h-1.5 rounded-full bg-gray-400 animate-pulse" />
-                    <span>聞き取っています…</span>
-                  </div>
-                ) : isListening ? (
-                  <div className="flex items-center gap-2 text-xs text-emerald-700 font-medium">
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                    <span>{speechHeard ? 'お話しください' : 'どうぞお話しください'}</span>
-                  </div>
-                ) : null}
-              </div>
             </div>
           )}
 

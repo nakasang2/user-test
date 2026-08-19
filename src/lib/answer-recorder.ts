@@ -29,7 +29,7 @@ export type AnswerRecorderOptions = {
   stream: MediaStream
   /** 話し始めるのを待つ上限。これを過ぎたら onSilence */
   silenceMs?: number
-  /** 話し始めたあと、この時間だけ静かなら話し終えたとみなす */
+  /** 話し始めたあと、この時間だけ静かなら話し終えたとみなす（既定 4 秒） */
   trailingSilenceMs?: number
   /** 録音中かどうかが変わった */
   onRecordingChange: (recording: boolean) => void
@@ -64,7 +64,10 @@ export function startAnswerRecorder(opts: AnswerRecorderOptions): AnswerRecorder
   if (!audioTrack) return null
 
   const silenceMs = opts.silenceMs ?? 60000
-  const trailingSilenceMs = opts.trailingSilenceMs ?? 2500
+  // 2.5 秒では、考えながら話す人の「間」で回答が締め切られてしまい、会話を
+  // 紡いでいる最中に次の質問へ進む事故が起きた。早く進めたい人は
+  // 「話し終えました」を押せば即座に確定できるので、既定は長めに取る
+  const trailingSilenceMs = opts.trailingSilenceMs ?? 4000
 
   let finished = false
   let stopped = false
