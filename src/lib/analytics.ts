@@ -20,6 +20,7 @@ export type AnalyticsEvent =
   | 'interview_created'
   | 'invite_copied'
   | 'recording_transcribed'
+  | 'recording_uploaded_manually'
   | 'report_shared'
 
 type AnalyticsProps = Record<string, string | number | boolean | null | undefined>

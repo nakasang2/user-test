@@ -8,7 +8,8 @@ import FloatingAgentChat from '@/components/FloatingAgentChat'
 import StatusBadge from '@/components/StatusBadge'
 import SessionMetrics, { type TaskResultData, type AnswerData } from '@/components/SessionMetrics'
 import HighlightPanel, { type HighlightData } from '@/components/HighlightPanel'
-import { Video, Download, X, Folder, Copy, Check, Trash2 } from 'lucide-react'
+import { Video, Download, X, Folder, Copy, Check, Trash2, UploadCloud } from 'lucide-react'
+import { upload } from '@vercel/blob/client'
 import { track } from '@/lib/analytics'
 import { outcomeLabel } from '@/lib/task-flow'
 import { canEdit } from '@/lib/permissions'
@@ -77,6 +78,10 @@ export default function SessionDetail(props: { params: Promise<{ id: string }> }
   const [signedVideoUrl, setSignedVideoUrl] = useState<string | null>(null)
   const [videoLoadError, setVideoLoadError] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  // 参加者から受け取った録画をサーバーへ保存する用（上のローカル再生とは別物）
+  const uploadInputRef = useRef<HTMLInputElement>(null)
+  const [uploadingRecording, setUploadingRecording] = useState(false)
+  const [uploadError, setUploadError] = useState<string | null>(null)
   const localVideoUrlRef = useRef<string | null>(null)
   const [highlights, setHighlights] = useState<HighlightData[]>([])
   const [copiedUrl, setCopiedUrl] = useState(false)
@@ -240,15 +245,67 @@ export default function SessionDetail(props: { params: Promise<{ id: string }> }
   }, [id])
 
   // 録画は非公開 Blob のため、認可済みエンドポイント経由で短命の署名付き URL を取得する
+  // recordingUrl が無い場合も、終了済みのセッションなら一度問い合わせる。
+  // アップロード完了の通知が届かないと「Blob にファイルはあるが DB は空」に
+  // なるため、サーバー側がその取りこぼしを拾い直す（GET 側で復旧している）。
+  // 未実施・進行中のセッションでは呼ばない（毎回 Blob を探しに行かせないため）
   useEffect(() => {
-    if (!session?.recordingUrl) return
+    if (!session) return
+    if (!session.recordingUrl && session.status !== 'done') return
     let cancelled = false
     fetch(`/api/sessions/${id}/recording`)
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => { if (!cancelled && data?.url) setSignedVideoUrl(data.url) })
       .catch(() => {})
     return () => { cancelled = true }
-  }, [id, session?.recordingUrl])
+  }, [id, session, session?.recordingUrl, session?.status])
+
+  /**
+   * 参加者から受け取った録画ファイルをサーバーへ保存する。
+   *
+   * 参加者側のアップロードが失敗したセッション（通信断・容量オーバー等）では、
+   * 参加者が完了画面からダウンロードしたファイルを共有してもらうことがある。
+   * それをここで登録すると、通常の録画と同じように再生・文字起こしできる。
+   */
+  async function uploadRecordingToServer(file: File) {
+    setUploadError(null)
+    // 受け付ける形式を先に弾く。保存できてしまうと「再生も文字起こしもできない
+    // 録画が登録された」状態になり、かえって分かりにくい
+    const isWebm = file.type.includes('webm') || file.name.toLowerCase().endsWith('.webm')
+    if (!isWebm) {
+      setUploadError('webm 形式の録画を選んでください（参加者が完了画面からダウンロードしたファイルです）')
+      return
+    }
+    setUploadingRecording(true)
+    try {
+      // 形式は webm に限定する。参加者が完了画面から落とすファイルは webm で、
+      // 文字起こし（lib/whisper.ts）も webm 前提のため、他形式を受けると
+      // 「保存はできたが文字起こしできない」状態を作ってしまう
+      const result = await upload(`recordings/${id}-manual.webm`, file, {
+        access: 'private',
+        contentType: 'video/webm',
+        handleUploadUrl: `/api/sessions/${id}/recording/manual`,
+        // 大きいファイルを一括で送ると 413 で弾かれる（参加者側と同じ理由）
+        multipart: true,
+      })
+      // 保存の確定を Webhook だけに頼らない（届かないとファイルはあるのに
+      // 録画が無いことになる。参加者側で実際に起きた）
+      const res = await fetch(`/api/sessions/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ recordingUrl: result.url }),
+      })
+      if (!res.ok) throw new Error(`確定に失敗しました (${res.status})`)
+      // 署名付き URL の取得は recordingUrl の変化を見ている effect が拾う
+      setSession((prev) => (prev ? { ...prev, recordingUrl: result.url } : prev))
+      track('recording_uploaded_manually', { sessionId: id })
+    } catch (e) {
+      console.error('録画のアップロードに失敗しました:', e)
+      setUploadError(e instanceof Error ? e.message : 'アップロードに失敗しました')
+    } finally {
+      setUploadingRecording(false)
+    }
+  }
 
   async function shareSession() {
     // 被験者の発言が無期限に公開され続けないよう、期限を選ばせる（既定 30 日）
@@ -660,13 +717,50 @@ export default function SessionDetail(props: { params: Promise<{ id: string }> }
                   onChange={handleLocalFile}
                   className="hidden"
                 />
-                <button
-                  onClick={() => fileInputRef.current?.click()}
-                  className="bg-gray-900 hover:bg-gray-800 text-white px-5 py-2 rounded-md text-sm font-medium transition-colors inline-flex items-center gap-2"
-                >
-                  <Folder className="w-3.5 h-3.5" strokeWidth={2} />
-                  録画ファイルを選択
-                </button>
+                <div className="flex flex-wrap items-center justify-center gap-2">
+                  <button
+                    onClick={() => fileInputRef.current?.click()}
+                    className="bg-gray-900 hover:bg-gray-800 text-white px-5 py-2 rounded-md text-sm font-medium transition-colors inline-flex items-center gap-2"
+                  >
+                    <Folder className="w-3.5 h-3.5" strokeWidth={2} />
+                    録画ファイルを選択
+                  </button>
+                  {/* 参加者から受け取ったファイルを保存する導線。
+                      上の「選択」はこのブラウザで再生するだけで、他のメンバーには
+                      見えない。共有したいならこちらで保存する必要がある */}
+                  {canEdit(session.viewerRole ?? 'viewer') && (
+                    <>
+                      <input
+                        ref={uploadInputRef}
+                        type="file"
+                        accept="video/webm,audio/webm,.webm"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0]
+                          e.target.value = '' // 同じファイルを選び直せるようにする
+                          if (file) void uploadRecordingToServer(file)
+                        }}
+                        className="hidden"
+                      />
+                      <button
+                        onClick={() => uploadInputRef.current?.click()}
+                        disabled={uploadingRecording}
+                        title="参加者から受け取った録画を保存します。保存すると、このセッションの録画として再生・文字起こしできます"
+                        className="border border-gray-300 hover:border-gray-500 disabled:opacity-50 text-gray-700 hover:text-gray-900 px-5 py-2 rounded-md text-sm transition-colors inline-flex items-center gap-2"
+                      >
+                        <UploadCloud className="w-3.5 h-3.5" strokeWidth={2} />
+                        {uploadingRecording ? 'アップロード中…' : 'サーバーに保存する'}
+                      </button>
+                    </>
+                  )}
+                </div>
+                {uploadingRecording && (
+                  <p className="text-xs text-gray-500 mt-3">
+                    アップロード中です。このページを閉じないでください（大きいファイルは数分かかります）
+                  </p>
+                )}
+                {uploadError && (
+                  <p className="text-xs text-red-600 mt-3">{uploadError}</p>
+                )}
               </div>
             )}
 
