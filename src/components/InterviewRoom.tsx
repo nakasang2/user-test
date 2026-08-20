@@ -1638,7 +1638,7 @@ export default function InterviewRoom({
       : (faceBlob.size > 0 ? faceBlob : null)
     if (uploadBlob) {
       try {
-        await upload(`recordings/${sessionId}.webm`, uploadBlob, {
+        const result = await upload(`recordings/${sessionId}.webm`, uploadBlob, {
           access: 'private',
           contentType: 'video/webm',
           handleUploadUrl: `/api/sessions/${sessionId}/recording`,
@@ -1647,6 +1647,22 @@ export default function InterviewRoom({
           // 分割して送れば上限に当たらず、失敗した部分だけ再送もされる
           multipart: true,
         })
+        // アップロードした URL を自分から確定させる。
+        //
+        // 保存は本来 onUploadCompleted（Vercel からの Webhook）で行われるが、
+        // その通知が届かないと**ファイルはあるのに録画が無いことになる**。しかも
+        // ここまで成功しているので誰にも気づかれない（PoC で一部のセッションの
+        // 録画が失われた原因）。どちらが先でも同じ結果になるので両方から確定させる。
+        try {
+          await fetch(`/api/sessions/${sessionId}/recording`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url: result.url, participantToken: participantToken ?? '' }),
+          })
+        } catch (e) {
+          // Webhook 側が成功していれば問題ない。ログだけ残す
+          console.warn('録画URLの確定に失敗しました（Webhook 側での保存に期待します）:', e)
+        }
       } catch (e) {
         console.error('録画のアップロードに失敗しました（ローカル保存は可能）:', e)
         showNotice('録画のサーバー保存に失敗しました。完了画面からダウンロードして共有してください。')

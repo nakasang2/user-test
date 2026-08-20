@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse, after } from 'next/server'
 import { handleUpload, type HandleUploadBody } from '@vercel/blob/client'
+import { list } from '@vercel/blob'
 import { prisma } from '@/lib/db'
 import { requireAuth, requireParticipantToken, handleApiError } from '@/lib/api-auth'
 import { createSignedBlobUrl } from '@/lib/blob'
@@ -24,9 +25,72 @@ export async function GET(
       select: { recordingUrl: true },
     })
     if (!session) return NextResponse.json({ error: 'Not found' }, { status: 404 })
-    if (!session.recordingUrl) return NextResponse.json({ error: 'No recording' }, { status: 404 })
-    const url = await createSignedBlobUrl(session.recordingUrl)
+
+    // recordingUrl が無い場合でも、Blob 側には録画が残っていることがある。
+    // アップロード完了の通知（onUploadCompleted は Vercel からの Webhook で届く）が
+    // 失敗すると、ファイルはあるのに DB だけ空という状態になり、調査者からは
+    // 「録画されなかった」ようにしか見えない。ここで拾い直す。
+    let recordingUrl = session.recordingUrl
+    if (!recordingUrl) {
+      try {
+        const found = await list({ prefix: `recordings/${id}`, limit: 100 })
+        // 同じセッションで撮り直した場合に備え、いちばん新しいものを採用する
+        const newest = found.blobs
+          .slice()
+          .sort((a, b) => new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime())[0]
+        if (newest) {
+          recordingUrl = newest.url
+          await prisma.session.update({ where: { id }, data: { recordingUrl } })
+          console.info(`[UserVoice] 録画を復旧しました（通知の取りこぼし）: session=${id}`)
+        }
+      } catch (e) {
+        console.error('録画の復旧に失敗しました:', e)
+      }
+    }
+    if (!recordingUrl) return NextResponse.json({ error: 'No recording' }, { status: 404 })
+    const url = await createSignedBlobUrl(recordingUrl)
     return NextResponse.json({ url })
+  } catch (err) {
+    return handleApiError(err)
+  }
+}
+
+/**
+ * PUT — アップロードした録画の URL を、被験者本人が確定させる。
+ *
+ * 従来は `onUploadCompleted`（Vercel からの Webhook）だけに頼っていたため、
+ * その通知が届かないとファイルはあるのに DB は空、という状態になり、
+ * しかも誰にも気づかれなかった（PoC で一部のセッションの録画が失われた）。
+ * クライアントは `upload()` の戻り値で URL を知っているので、こちらからも
+ * 確定させる。どちらが先に成功しても同じ結果になる（冪等）。
+ */
+export async function PUT(
+  request: NextRequest,
+  props: { params: Promise<{ id: string }> },
+) {
+  try {
+    const { id } = await props.params
+    if (!(await rateLimit(`recording-put:${id}:${getClientIp(request)}`, 20, 60))) {
+      return NextResponse.json({ error: 'Too many requests' }, { status: 429 })
+    }
+    const body = (await request.json()) as { url?: string; participantToken?: string }
+    await requireParticipantToken(id, body.participantToken ?? null)
+
+    const url = typeof body.url === 'string' ? body.url : ''
+    // 他所の URL を書き込まれないよう、このセッションの録画パスであることを確かめる
+    if (!url || !new URL(url).pathname.replace(/^\/+/, '').startsWith(`recordings/${id}`)) {
+      return NextResponse.json({ error: 'invalid url' }, { status: 400 })
+    }
+
+    const updated = await prisma.session.update({
+      where: { id },
+      data: { recordingUrl: url },
+      select: { recordingUrl: true, interview: { select: { type: true } } },
+    })
+    // 録画からの再文字起こし（ユーザビリティ）はここでは走らせない。
+    // onUploadCompleted 側と二重に実行してしまうため。Webhook が届かなかった
+    // 場合は、調査者がセッション詳細の「文字起こしをやり直す」から実行できる。
+    return NextResponse.json({ ok: true, recordingUrl: updated.recordingUrl })
   } catch (err) {
     return handleApiError(err)
   }
