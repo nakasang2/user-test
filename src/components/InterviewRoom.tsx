@@ -1654,13 +1654,16 @@ export default function InterviewRoom({
         // ここまで成功しているので誰にも気づかれない（PoC で一部のセッションの
         // 録画が失われた原因）。どちらが先でも同じ結果になるので両方から確定させる。
         try {
-          await fetch(`/api/sessions/${sessionId}/recording`, {
+          const res = await fetch(`/api/sessions/${sessionId}/recording`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ url: result.url, participantToken: participantToken ?? '' }),
           })
+          // 静かに失敗するのをやめるための変更なので、ここも握りつぶさない。
+          // Webhook 側が成功していれば実害は無いが、両方落ちていると録画が
+          // 失われるため、必ず記録に残す
+          if (!res.ok) console.warn(`録画URLの確定に失敗しました (HTTP ${res.status})`)
         } catch (e) {
-          // Webhook 側が成功していれば問題ない。ログだけ残す
           console.warn('録画URLの確定に失敗しました（Webhook 側での保存に期待します）:', e)
         }
       } catch (e) {

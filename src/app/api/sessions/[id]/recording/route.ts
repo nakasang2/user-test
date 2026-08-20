@@ -56,6 +56,33 @@ export async function GET(
 }
 
 /**
+ * 渡された URL が「このセッションの録画として保存された Blob」かどうかを確かめる。
+ *
+ * PUT は被験者トークンで呼べる（通常 recordingUrl の書き込みはダッシュボード認証を
+ * 要求している）。そのため、ここが唯一の歯止めになる。ホスト名を見ないと外部URLを
+ * 書き込めてしまい、実際にアップロードされた顔・音声入りの Blob が削除経路
+ * （セッション削除・被験者からの削除請求）から永久に漏れる。
+ */
+function isOwnRecordingUrl(url: string, sessionId: string): boolean {
+  if (!url) return false
+  let parsed: URL
+  try {
+    parsed = new URL(url)
+  } catch {
+    return false
+  }
+  // このプロジェクトの Blob ストアのホストに限定する
+  if (!parsed.hostname.endsWith('.blob.vercel-storage.com')) return false
+  const pathname = decodeURIComponent(parsed.pathname).replace(/^\/+/, '')
+  const prefix = `recordings/${sessionId}`
+  if (!pathname.startsWith(prefix)) return false
+  // 別セッションの取り違えを防ぐ。addRandomSuffix / -manual が付くため、
+  // 直後は区切り文字（- . /）か終端でなければならない
+  const rest = pathname.slice(prefix.length)
+  return rest === '' || /^[-./]/.test(rest)
+}
+
+/**
  * PUT — アップロードした録画の URL を、被験者本人が確定させる。
  *
  * 従来は `onUploadCompleted`（Vercel からの Webhook）だけに頼っていたため、
@@ -77,8 +104,7 @@ export async function PUT(
     await requireParticipantToken(id, body.participantToken ?? null)
 
     const url = typeof body.url === 'string' ? body.url : ''
-    // 他所の URL を書き込まれないよう、このセッションの録画パスであることを確かめる
-    if (!url || !new URL(url).pathname.replace(/^\/+/, '').startsWith(`recordings/${id}`)) {
+    if (!isOwnRecordingUrl(url, id)) {
       return NextResponse.json({ error: 'invalid url' }, { status: 400 })
     }
 
