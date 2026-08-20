@@ -222,6 +222,15 @@ export default function InterviewRoom({
   // 録音を送って文字起こしの返事を待っている
   const [transcribing, setTranscribing] = useState(false)
   const [recordingDownloadUrl, setRecordingDownloadUrl] = useState<string | null>(null)
+  // 録画のサーバー保存が失敗したとき、完了画面から再試行できるように Blob を保持する。
+  // 「ダウンロードして共有してください」だけだと、一過性の通信不調でも人の手を
+  // 介さないと復旧できない（実際に PoC でその状態になった）
+  const pendingRecordingRef = useRef<Blob | null>(null)
+  const [recordingUploadFailed, setRecordingUploadFailed] = useState(false)
+  // 失敗した録画のダウンロード用 URL。ユーザビリティで合成録画が空の場合は
+  // 既存のダウンロードボタンが出ないため、案内した導線が無い状態になっていた
+  const [failedRecordingDownloadUrl, setFailedRecordingDownloadUrl] = useState<string | null>(null)
+  const [retryingRecording, setRetryingRecording] = useState(false)
   // 回答送信の状態（完了画面の表示・beforeunload ガード・再送に使う）
   const [submitState, setSubmitState] = useState<'idle' | 'saving' | 'saved' | 'failed'>('idle')
   // テキスト入力フォールバック用：listenForAnswer のコールバックを保持
@@ -681,11 +690,14 @@ export default function InterviewRoom({
   // ── 離脱防止ガード: インタビュー開始後、回答が保存し終わるまでは閉じる前に警告 ──
   useEffect(() => {
     const started = phase !== 'guide' && phase !== 'waiting'
-    if (!started || submitState === 'saved') return
+    // 録画の再送信が残っている間も止める。録画はこの時点でメモリ上にしか無く、
+    // タブを閉じられると再送信もダウンロードもできなくなる（回答は保存済みでも
+    // 録画だけが失われる）
+    if (!started || (submitState === 'saved' && !recordingUploadFailed)) return
     const handler = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = '' }
     window.addEventListener('beforeunload', handler)
     return () => window.removeEventListener('beforeunload', handler)
-  }, [phase, submitState])
+  }, [phase, submitState, recordingUploadFailed])
 
   // ── 進行中の文字起こしを逐次サーバー保存（途中離脱でも残す保険。AI 分析はしない）──
   function saveProgress() {
@@ -1637,42 +1649,76 @@ export default function InterviewRoom({
       ? (compositeBlob && compositeBlob.size > 0 ? compositeBlob : (faceBlob.size > 0 ? faceBlob : null))
       : (faceBlob.size > 0 ? faceBlob : null)
     if (uploadBlob) {
-      try {
-        const result = await upload(`recordings/${sessionId}.webm`, uploadBlob, {
-          access: 'private',
-          contentType: 'video/webm',
-          handleUploadUrl: `/api/sessions/${sessionId}/recording`,
-          clientPayload: participantToken ?? '',
-          // 一括で送ると大きい録画が 413（Payload Too Large）で弾かれる。
-          // 分割して送れば上限に当たらず、失敗した部分だけ再送もされる
-          multipart: true,
-        })
-        // アップロードした URL を自分から確定させる。
-        //
-        // 保存は本来 onUploadCompleted（Vercel からの Webhook）で行われるが、
-        // その通知が届かないと**ファイルはあるのに録画が無いことになる**。しかも
-        // ここまで成功しているので誰にも気づかれない（PoC で一部のセッションの
-        // 録画が失われた原因）。どちらが先でも同じ結果になるので両方から確定させる。
-        try {
-          const res = await fetch(`/api/sessions/${sessionId}/recording`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ url: result.url, participantToken: participantToken ?? '' }),
-          })
-          // 静かに失敗するのをやめるための変更なので、ここも握りつぶさない。
-          // Webhook 側が成功していれば実害は無いが、両方落ちていると録画が
-          // 失われるため、必ず記録に残す
-          if (!res.ok) console.warn(`録画URLの確定に失敗しました (HTTP ${res.status})`)
-        } catch (e) {
-          console.warn('録画URLの確定に失敗しました（Webhook 側での保存に期待します）:', e)
-        }
-      } catch (e) {
-        console.error('録画のアップロードに失敗しました（ローカル保存は可能）:', e)
-        showNotice('録画のサーバー保存に失敗しました。完了画面からダウンロードして共有してください。')
+      pendingRecordingRef.current = uploadBlob
+      // ここで即座に自動リトライはしない。@vercel/blob は内部で指数バックオフの
+      // 再試行を既定10回行っており、一過性の不調はそこで吸収済み。再試行しても
+      // 直らない種類（サイズ超過・トークン不正）は同じ条件で必ず同じ失敗になる。
+      // 外側で待つと、その分だけ回答本体の送信（persistResults）が後ろへずれ、
+      // 参加者を「保存中」のまま待たせることになる
+      const ok = await uploadRecording(uploadBlob)
+      if (!ok) {
+        // 失敗しても回答は下の persistResults で保存される。録画だけは完了画面から
+        // 再送信できるようにし、参加者の端末からダウンロードもできるようにする
+        setRecordingUploadFailed(true)
+        setFailedRecordingDownloadUrl(URL.createObjectURL(uploadBlob))
+        showNotice('録画をサーバーに保存できませんでした。完了画面から再送信をお願いします。')
       }
     }
 
     await persistResults()
+  }
+
+  /**
+   * 録画をサーバーへ保存する。成功したら true。
+   *
+   * URL の確定は Webhook（onUploadCompleted）とここの両方から行う。Webhook だけに
+   * 頼ると、届かなかったときに「Blob にファイルはあるのに録画が無い」状態になり、
+   * しかも誰にも気づかれない（PoC で録画が失われた原因）。
+   */
+  async function uploadRecording(blob: Blob): Promise<boolean> {
+    try {
+      const result = await upload(`recordings/${sessionId}.webm`, blob, {
+        access: 'private',
+        contentType: 'video/webm',
+        handleUploadUrl: `/api/sessions/${sessionId}/recording`,
+        clientPayload: participantToken ?? '',
+        // 一括で送ると大きい録画が 413（Payload Too Large）で弾かれる。
+        // 分割して送れば上限に当たらず、失敗した部分だけ再送もされる
+        multipart: true,
+      })
+      try {
+        const res = await fetch(`/api/sessions/${sessionId}/recording`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url: result.url, participantToken: participantToken ?? '' }),
+        })
+        if (!res.ok) console.warn(`録画URLの確定に失敗しました (HTTP ${res.status})`)
+      } catch (e) {
+        console.warn('録画URLの確定に失敗しました（Webhook 側での保存に期待します）:', e)
+      }
+      return true
+    } catch (e) {
+      console.error('録画のアップロードに失敗しました（ローカル保存は可能）:', e)
+      return false
+    }
+  }
+
+  /** 完了画面からの再試行 */
+  async function retryRecordingUpload() {
+    const blob = pendingRecordingRef.current
+    if (!blob || retryingRecording) return
+    setRetryingRecording(true)
+    const ok = await uploadRecording(blob)
+    setRetryingRecording(false)
+    if (ok) {
+      setRecordingUploadFailed(false)
+      // ここで persistResults() は呼ばない。録画の保存完了を機にサーバー側で
+      // Whisper の再文字起こしが走るため、あとからクライアント側の古い文字起こしを
+      // 書き戻すと、精度の高い結果を巻き戻してしまう
+      showNotice('録画を保存しました。ご協力ありがとうございました。')
+    } else {
+      showNotice('まだ保存できませんでした。通信環境をご確認のうえ、もう一度お試しください。')
+    }
   }
 
   // ── 文字起こし・感情をサーバーへ保存（失敗時に再送可能）──
@@ -2564,6 +2610,35 @@ export default function InterviewRoom({
                     >
                       回答を再送信する
                     </button>
+                  </div>
+                )}
+
+                {/* 録画の保存に失敗した場合の再試行。一過性の通信不調で失敗したとき、
+                    ダウンロードして人の手で渡すより先に、まずここで復旧させる */}
+                {recordingUploadFailed && (
+                  <div className="mb-4 flex flex-col items-center gap-2">
+                    <p className="text-amber-700 text-xs">
+                      録画をサーバーに保存できませんでした。通信環境をご確認のうえ、再試行をお願いします。
+                    </p>
+                    <button
+                      onClick={() => void retryRecordingUpload()}
+                      disabled={retryingRecording}
+                      className="inline-flex items-center gap-1.5 bg-gray-900 hover:bg-gray-800 disabled:opacity-50 text-white px-4 py-2 rounded-md text-sm font-medium transition-colors"
+                    >
+                      {retryingRecording ? '送信中…' : '録画を再送信する'}
+                    </button>
+                    {/* ダウンロード導線はこのパネル自身に持たせる。下の既存ボタンは
+                        ユーザビリティで合成録画が空のときに出ないため、案内だけあって
+                        手段が無い状態になっていた */}
+                    {failedRecordingDownloadUrl && (
+                      <a
+                        href={failedRecordingDownloadUrl}
+                        download={`recording-${sessionId.slice(0, 8)}.webm`}
+                        className="text-[11px] text-gray-600 hover:text-gray-900 underline underline-offset-2"
+                      >
+                        うまくいかない場合は、ダウンロードして担当者へお渡しください
+                      </a>
+                    )}
                   </div>
                 )}
 
