@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse, after } from 'next/server'
 import { handleUpload, type HandleUploadBody } from '@vercel/blob/client'
 import { list } from '@vercel/blob'
+import { deleteOwnedBlob } from '@/lib/blob-cleanup'
 import { prisma } from '@/lib/db'
 import { requireAuth, requireParticipantToken, handleApiError } from '@/lib/api-auth'
 import { createSignedBlobUrl } from '@/lib/blob'
@@ -52,6 +53,22 @@ export async function GET(
     return NextResponse.json({ url })
   } catch (err) {
     return handleApiError(err)
+  }
+}
+
+/**
+ * 録画を差し替えたときに、参照を失う古い Blob を削除する。
+ *
+ * 削除経路（`delete-interview.ts` / `participants/[id]`）は `recordingUrl` 1件しか
+ * 見ないため、置き換えたまま放置すると顔・音声を含む Blob が誰からも消せなくなる。
+ * 失敗しても保存自体は成功させる（消せなかったことを保存の失敗にはしない）。
+ */
+async function discardReplacedRecording(before: string | null | undefined, next: string) {
+  if (!before || before === next) return
+  try {
+    await deleteOwnedBlob(before)
+  } catch (e) {
+    console.error('差し替え前の録画の削除に失敗しました:', e)
   }
 }
 
@@ -108,11 +125,19 @@ export async function PUT(
       return NextResponse.json({ error: 'invalid url' }, { status: 400 })
     }
 
+    const before = await prisma.session.findUnique({
+      where: { id },
+      select: { recordingUrl: true },
+    })
     const updated = await prisma.session.update({
       where: { id },
       data: { recordingUrl: url },
       select: { recordingUrl: true, interview: { select: { type: true } } },
     })
+    // 再送信すると `addRandomSuffix` により別名の Blob ができる。古い方は参照を
+    // 失うが、削除経路（セッション削除・被験者の削除請求）は recordingUrl 1件しか
+    // 見ないため、放置すると顔・音声入りの Blob が永久に消せなくなる
+    await discardReplacedRecording(before?.recordingUrl, url)
     // 録画からの再文字起こし（ユーザビリティ）はここでは走らせない。
     // onUploadCompleted 側と二重に実行してしまうため。Webhook が届かなかった
     // 場合は、調査者がセッション詳細の「文字起こしをやり直す」から実行できる。
@@ -155,11 +180,16 @@ export async function POST(
       },
       onUploadCompleted: async ({ blob, tokenPayload }) => {
         const sessionId = tokenPayload ?? id
+        const before = await prisma.session.findUnique({
+          where: { id: sessionId },
+          select: { recordingUrl: true },
+        })
         const updated = await prisma.session.update({
           where: { id: sessionId },
           data: { recordingUrl: blob.url },
           select: { interview: { select: { type: true } } },
         })
+        await discardReplacedRecording(before?.recordingUrl, blob.url)
         // ユーザビリティテストは、タスク中の思考発話がライブでは音量判定のみで
         // 文字化されない（useSilenceNudge）ため、録画の音声から拾い直さないと
         // 不満やつぶやきが分析対象に入らない。録画保存完了を機に自動で行う。
